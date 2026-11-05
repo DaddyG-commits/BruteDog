@@ -2,7 +2,7 @@ import asyncio
 import ssl
 import time
 
-async def test_credential_async(target, password, semaphore, timeout=8):
+async def test_credential_async(target, password, semaphore, timeout=6):
     server = target["server"]
     port = target["port"]
     user = target["user"]
@@ -14,22 +14,23 @@ async def test_credential_async(target, password, semaphore, timeout=8):
 
         start_time = time.time()
         try:
+            # Print live attempt streaming in the background
+            print(f"[SCAN] Testing -> {user} : {password}")
+            
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(server, port, ssl=ssl_context),
                 timeout=timeout
             )
 
-            # Read initial server greeting banner
-            await asyncio.wait_for(reader.readline(), timeout=5)
+            await asyncio.wait_for(reader.readline(), timeout=3)
             
-            # Format standard IMAP login command
             login_tag = b"A001"
             login_cmd = f'{login_tag.decode()} LOGIN "{user}" "{password}"\r\n'.encode()
             
             writer.write(login_cmd)
             await writer.drain()
 
-            response = await asyncio.wait_for(reader.readline(), timeout=5)
+            response = await asyncio.wait_for(reader.readline(), timeout=3)
             
             writer.close()
             await writer.wait_closed()
@@ -38,21 +39,17 @@ async def test_credential_async(target, password, semaphore, timeout=8):
 
             if b"OK" in response:
                 print(f"\n[+] MATCH IDENTIFIED [Elapsed: {elapsed:.2f}s]")
-                print(f"    Host: {server}:{port} | User: {user} | Key: {password}")
+                print(f"    Host: {server}:{port} | User: {user} | Key: {password}\n")
                 return {"status": "SUCCESS", "target": server, "user": user, "password": password}
-            elif b"NO" in response or b"BAD" in response:
-                return None
             else:
                 return None
 
         except asyncio.TimeoutError:
-            # Implement adaptive backoff if server tarpits or throttles
-            await asyncio.sleep(1.5)
             return None
         except Exception:
             return None
 
-async def run_engine(targets, passwords, concurrency_limit=15):
+async def run_engine(targets, passwords, concurrency_limit=25):
     semaphore = asyncio.Semaphore(concurrency_limit)
     tasks = []
 
