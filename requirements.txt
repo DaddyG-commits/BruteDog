@@ -1,2 +1,4 @@
 # Pure standard library implementation utilized for optimal socket control 
-# and maximum cross-platform compatibility (Python 3.10+).
+# maximum cross-platform compatibility (Python 3.10+).
+# aiohttp>=3.8.0
+# colorama>=0.4.6
