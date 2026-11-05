@@ -1,0 +1,2 @@
+# Pure standard library implementation utilized for optimal socket control 
+# and maximum cross-platform compatibility (Python 3.10+).
