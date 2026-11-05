@@ -1,51 +1,78 @@
 import asyncio
 import sys
-from modules.loader import load_targets, load_wordlist
+from modules.loader import load_wordlist
 from modules.engine import run_engine
-from modules.logger import setup_logger
 
-BANNER = r"""
-  _                    ____   ____ _   _ _   _ ___ _   _  ____ 
- | |    ___   __ _  __ / ___| / ___| | | | \ | |_ _| \ | |/ ___|
- | |   / _ \ / _` |/ _ \___ \| |  _| |_| |  \| || ||  \| | |  _ 
- | |__| (_) | (_| | (_) |__) | |_| |  _  | |\  || || |\  | |_| |
- |_____\___/ \__, |\___/____/ \____|_| |_|_| \_|___|_| \_|\____|
-             |___/                                              
-"""
+# ANSI Color Codes for Futuristic Cyber/Neon Terminal Aesthetic
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+MAGENTA = "\033[95m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+BLUE = "\033[94m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+
+BANNER = f"""{CYAN}{BOLD}
+  _        ____   ____ _____ _   _ _____ _   _  ____ 
+ | |      / __ \ / ___|_   _| | | |_   _| \ | |/ ___|
+ | |     / / _` | |  _  | | | |_| | | | |  \| | |  _ 
+ | |___ | | (_| | |_| | | | |  _| | | | | |\  | |_| |
+ |_____| \ \__,_|\____| |_| |_| |_| |_| |_| \_|\____|
+          \\____/                                     
+{RESET}"""
 
 def main():
-    # Initialize the structured logger (logs to console and 'logs/' folder)
-    logger = setup_logger()
-
     print(BANNER)
-    print("=" * 60)
-    print("         SYSTEM TASK MONITOR & LOGGING ENGINE")
-    print("=" * 60)
-
+    print(f"{MAGENTA}{'=' * 53}{RESET}")
+    print(f"{BOLD}{CYAN}          SYSTEM TASK MONITOR & MONITORING ENGINE{RESET}")
+    print(f"{MAGENTA}{'=' * 53}{RESET}")
+    
+    print(f"\n{YELLOW}{'=' * 53}{RESET}")
+    print(f"{BOLD}{YELLOW}         INTERACTIVE RECONNAISSANCE PROMPT{RESET}")
+    print(f"{YELLOW}{'=' * 53}{RESET}")
+    
+    # Prompt interactively for target details
+    server = input(f"{CYAN}[?] Enter Target Host/IP (e.g., imap.example.com): {RESET}").strip()
+    if not server:
+        print(f"{RED}[!] Target host cannot be empty. Exiting.{RESET}")
+        sys.exit(1)
+        
     try:
-        logger.info("Loading configuration targets and wordlists...")
-        targets = load_targets("config/targets.json")
-        passwords = load_wordlist("config/passwords.txt")
-    except Exception as e:
-        logger.error(f"Configuration Error: {e}")
+        port_input = input(f"{CYAN}[?] Enter Target Port [Default: 993]: {RESET}").strip()
+        port = int(port_input) if port_input else 993
+    except ValueError:
+        port = 993
+
+    user = input(f"{CYAN}[?] Enter Target Username/Email: {RESET}").strip()
+    if not user:
+        print(f"{RED}[!] Target username cannot be empty. Exiting.{RESET}")
         sys.exit(1)
 
-    print(f"[*] Loaded Dynamic Targets : {len(targets)} hosts")
-    print(f"[*] Loaded Dictionary Keys : {len(passwords)} entries")
-    print(f"[*] Starting execution pipeline...\n")
-    logger.info(f"Execution started with {len(targets)} targets and {len(passwords)} passwords.")
+    targets = [{"server": server, "port": port, "user": user}]
 
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    print(f"\n{BLUE}[INFO] Loading wordlist dictionary...{RESET}")
+    try:
+        passwords = load_wordlist("config/passwords.txt")
+    except Exception as e:
+        print(f"{RED}[!] Error loading wordlist: {e}{RESET}")
+        sys.exit(1)
 
-    valid_hits, duration = asyncio.run(run_engine(targets, passwords))
+    print(f"{GREEN}[*] Target Configured : {server}:{port} (User: {user}){RESET}")
+    print(f"{GREEN}[*] Loaded Dictionary : {len(passwords)} entries{RESET}")
+    print(f"{BOLD}{MAGENTA}[*] Starting high-speed asynchronous execution pipeline...\n{RESET}")
 
-    print("\n" + "=" * 60)
-    print(f"[*] Execution Complete in {duration:.2f} seconds.")
-    print(f"[*] Total Confirmed Matches: {len(valid_hits)}")
-    print("=" * 60)
+    # Run the engine and display real-time background processing
+    start_time = asyncio.get_event_loop().time()
+    valid_hits, duration = asyncio.run(run_engine(targets, passwords, concurrency_limit=25))
     
-    logger.info(f"Execution completed in {duration:.2f}s. Total matches: {len(valid_hits)}")
+    print(f"\n{MAGENTA}{'=' * 53}{RESET}")
+    print(f"{CYAN}[*] Scan completed in {duration:.2f} seconds.{RESET}")
+    if valid_hits:
+        print(f"{GREEN}{BOLD}[+] Success! Found {len(valid_hits)} valid configuration(s).{RESET}")
+    else:
+        print(f"{YELLOW}[-] Scan finished. No matching credentials identified.{RESET}")
+    print(f"{MAGENTA}{'=' * 53}{RESET}")
 
 if __name__ == "__main__":
     main()
