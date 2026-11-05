@@ -1,59 +1,75 @@
 import asyncio
 import sys
+import time
 from modules.loader import load_wordlist
 from modules.engine import run_autonomous_engine
 
+# Cyberpunk Neon ANSI Color Palette
 CYAN = "\033[96m"
 GREEN = "\033[92m"
 MAGENTA = "\033[95m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
+DARK_GRAY = "\033[90m"
 RESET = "\033[0m"
 BOLD = "\033[1m"
+BLINK = "\033[5m"
 
-BANNER = f"""{CYAN}{BOLD}
-  ____             _        ____             
- |  _ \           | |      |  _ \            
- | |_) |_ __ _   _| |_ ___ | | | |___   __ _  
- |  _ <| '__| | | | __/ _ \| | | / _ \ / _` | 
- | |_) | |  | |_| | ||  __/| |_| | (_) | (_| | 
- |____/|_|   \__,_|\__\___||____/ \___/ \__, | 
-                                         __/ | 
-                                        |___/  
-{RESET}{MAGENTA}=====================================================
-      AUTONOMOUS RECONNAISSANCE & SCANNING ENGINE
-====================================================={RESET}
+BANNER = f"""{GREEN}{BOLD}
+ ██████╗ ██████╗ ██╗   ██╗████████╗███████╗██████╗  ██████╗  ██████╗ 
+ ██╔══██╗██╔══██╗██║   ██║╚══██╔══╝██╔════╝██╔══██╗██╔═══██╗██╔════╝ 
+ ██████╔╝██████╔╝██║   ██║   ██║   █████╗  ██║  ██║██║   ██║██║  ███╗
+ ██╔═══╝ ██╔══██╗██║   ██║   ██║   ██╔══╝  ██║  ██║██║   ██║██║   ██║
+ ██║     ██║  ██║╚██████╔╝   ██║   ███████╗██████╔╝╚██████╔╝╚██████╔╝
+ ╚═╝     ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚══════╝╚═════╝  ╚═════╝  ╚═════╝ 
+{RESET}{CYAN}═════════════════════════════════════════════════════════════
+         [NEURAL RECON & MULTI-VECTOR EXPLOIT ENGINE]
+═════════════════════════════════════════════════════════════{RESET}
 """
 
 def main():
+    # Clear screen for crisp futuristic launch
+    sys.stdout.write("\033[2J\033[H")
     print(BANNER)
     
-    # Single clean entry point
-    target = input(f"{CYAN}[?] Enter Target Domain or IP (e.g., cryptobyt.online): {RESET}").strip()
+    # Futuristic input prompt
+    target = input(f"{CYAN}{BOLD}[SYS_PROMPT] >> Enter Target Host/Domain (e.g., cryptobyt.online): {RESET}").strip()
     if not target:
-        print(f"{RED}[!] Target cannot be empty. Aborting.{RESET}")
+        print(f"{RED}[CRITICAL] Target parameter missing. Aborting protocol.{RESET}")
         sys.exit(1)
 
-    print(f"\n{YELLOW}[INFO] Loading dictionary payloads...{RESET}")
+    print(f"\n{YELLOW}[INIT] Injecting payloads and loading local wordlist dictionaries...{RESET}")
+    time.sleep(0.4) # Aesthetic cyberpunk micro-delay
+    
     try:
         passwords = load_wordlist("config/passwords.txt")
     except Exception as e:
-        print(f"{RED}[!] Error loading passwords: {e}{RESET}")
+        print(f"{RED}[ERROR] Wordlist mount failed: {e}{RESET}")
         sys.exit(1)
 
-    print(f"{GREEN}[*] Payload Loaded : {len(passwords)} candidates{RESET}")
-    print(f"{BOLD}{MAGENTA}[*] Engaging autonomous discovery and scanning sequence...\n{RESET}")
+    print(f"{GREEN}[SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.{RESET}")
+    print(f"{MAGENTA}{BOLD}[ENGINE] Spawning asynchronous threads and initializing socket rings...\n{RESET}")
+    time.sleep(0.5)
 
-    # Execute full autonomous loop
+    # Launch engine and track live metrics
+    start_time = time.time()
+    
+    # Running the autonomous engine with high-velocity telemetry
     hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
 
-    print(f"\n{MAGENTA}{'=' * 53}{RESET}")
-    print(f"{CYAN}[*] Autonomous scan completed in {duration:.2f} seconds.{RESET}")
+    # Cyberpunk Completion Dashboard
+    print(f"\n{CYAN}═════════════════════════════════════════════════════════════{RESET}")
+    print(f"{BOLD}{GREEN}[*] MISSION STATUS: COMPLETE (Elapsed: {duration:.2f}s){RESET}")
+    
     if hits:
-        print(f"{GREEN}{BOLD}[+] Mission Successful! Recovered {len(hits)} valid authorization(s).{RESET}")
+        print(f"{BOLD}{BLINK}[+++] BREACH DETECTED: {len(hits)} authorization vectors successfully bypassed!{RESET}")
+        for idx, hit in enumerate(hits, 1):
+            print(f" {GREEN}├── Vector [{idx}]: Port {hit.get('port')} | Type: {hit.get('type')}")
+            print(f" │    User: {hit.get('user')} | Key: {hit.get('password')}{RESET}")
     else:
-        print(f"{YELLOW}[-] Scan complete. Target surface mapped; no active login vectors breached.{RESET}")
-    print(f"{MAGENTA}{'=' * 53}{RESET}")
+        print(f"{YELLOW}[---] Perimeter secure. Target defense grid held against all {len(passwords)} vectors.{RESET}")
+    
+    print(f"{CYAN}═════════════════════════════════════════════════════════════{RESET}\n")
 
 if __name__ == "__main__":
     main()
