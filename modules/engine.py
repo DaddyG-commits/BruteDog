@@ -145,7 +145,6 @@ async def worker_task(queue, host, semaphore, results, stats):
             await asyncio.sleep(random.uniform(0.05, 0.2)) # Jitter
             
             stats["tested"] += 1
-            start = time.time()
             
             if vector_type == "HTTP":
                 use_ssl = (port == 443)
@@ -279,13 +278,18 @@ async def discover_attack_surface(host):
             })
     return open_vectors
 
-async def run_autonomous_engine(target_host, passwords, usernames=["admin", "cryptobyt", "root", "support"]):
+async def run_autonomous_engine(target_host, passwords, usernames=None):
     try:
         resolved_ip = socket.gethostbyname(target_host)
         print(f"\n\033[96m[*] Target Resolved: {target_host} -> {resolved_ip}\033[0m")
     except socket.gaierror:
         print(f"\n\033[91m[!] Error: Host resolution failed for '{target_host}'.\033[0m")
         return [], 0
+
+    # Dynamically scope usernames to the isolated target domain if none specified
+    if not usernames:
+        domain_prefix = target_host.split('.')[0]
+        usernames = ["admin", domain_prefix, "root", "support", "user"]
 
     start_global = time.time()
 
