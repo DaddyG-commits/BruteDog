@@ -76,7 +76,7 @@ SENSITIVE_PATTERNS = {
         re.IGNORECASE
     ),
     "Private Key Marker": re.compile(
-        r"(----[-BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[^-]+-----END [^-]+-----)",
+        r"(----BEGIN\s+(?:RSA\s+|EC\s+|OPENSSH\s+|PRIVATE\s+)KEY-----[^-]+-----END\s+(?:RSA\s+|EC\s+|OPENSSH\s+|PRIVATE\s+)KEY-----)",
         re.IGNORECASE
     ),
     "Cloud Credential": re.compile(
