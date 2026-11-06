@@ -31,13 +31,22 @@ def main():
     sys.stdout.write("\033[2J\033[H")
     print(BANNER)
     
-    # Futuristic input prompt
-    target = input(f"{CYAN}{BOLD}[SYS_PROMPT] >> Enter Target Host/Domain (e.g., cryptobyt.online): {RESET}").strip()
-    if not target:
+    # Futuristic input prompt with strict target sanitization
+    raw_target = input(f"{CYAN}{BOLD}[SYS_PROMPT] >> Enter Target Host/Domain (e.g., BotLeg.online): {RESET}").strip()
+    if not raw_target:
         print(f"{RED}[CRITICAL] Target parameter missing. Aborting protocol.{RESET}")
         sys.exit(1)
 
-    print(f"\n{YELLOW}[INIT] Injecting payloads and loading local wordlist dictionaries...{RESET}")
+    # Sanitize input to completely prevent domain bleeding or protocol pollution
+    target = raw_target
+    if target.startswith("http://"):
+        target = target[7:]
+    elif target.startswith("https://"):
+        target = target[8:]
+    target = target.split('/')[0].split(':')[0]
+
+    print(f"\n{CYAN}[*] Target cleanly isolated: {target}{RESET}")
+    print(f"{YELLOW}[INIT] Injecting payloads and loading local wordlist dictionaries...{RESET}")
     time.sleep(0.4)
     
     try:
@@ -73,3 +82,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
