@@ -1,580 +1,360 @@
 #!/usr/bin/env python3
-"""
-============================================================
- BRUTEDOG - ADVANCED SOURCE INTELLIGENCE PARSER
- Live endpoint discovery and sensitive-data exposure auditing.
-
- Python 3.10+
-============================================================
-"""
-
 import asyncio
-import http.client
+import socket
 import ssl
-import re
-import json
-import os
 import time
-
-from datetime import datetime, timezone
-from urllib.parse import urlsplit, urljoin, urlunsplit
-
-
+import http.client
+from urllib.parse import urlsplit
 # ============================================================
 # CONFIGURATION
 # ============================================================
-
-MAX_CONCURRENCY = 15
-REQUEST_TIMEOUT = 8
-MAX_RESPONSE_SIZE = 2 * 1024 * 1024
-MAX_JS_FILES = 20
-
-REPORT_DIR = "reports/intelligence"
-
-LEAK_PATHS = [
-    "/",
-    "/.env",
-    "/.env.local",
-    "/.env.production",
-    "/env",
-    "/config.js",
-    "/config.json",
-    "/api/config",
-    "/health",
-    "/debug/vars",
-    "/actuator/env",
-    "/server-status",
-    "/phpinfo.php",
-    "/.git/config",
-    "/.git/HEAD",
-    "/backup.zip",
-    "/backup.tar.gz",
-    "/database.sql",
-    "/db.sql",
-    "/swagger.json",
-    "/openapi.json",
-    "/api-docs",
-    "/robots.txt",
-    "/sitemap.xml",
-    "/wp-config.php.bak",
+CONNECT_TIMEOUT = 2.0
+MAX_CONCURRENT = 40
+COMMON_PORTS = [
+    20, 21, 22, 23, 25, 26, 53, 67, 68,
+    80, 81, 82, 88, 110, 111, 123, 135,
+    137, 138, 139, 143, 161, 162, 179,
+    194, 389, 443, 445, 465, 500, 502,
+    514, 515, 587, 593, 623, 631, 636,
+    873, 902, 989, 990, 993, 995, 1080,
+    1194, 1433, 1521, 1701, 1723, 1883,
+    2049, 2082, 2083, 2086, 2087, 2181,
+    2375, 2376, 3000, 3306, 3389, 3690,
+    4443, 5000, 5432, 5601, 5672, 5900,
+    5985, 5986, 6379, 6443, 7001, 8000,
+    8008, 8080, 8081, 8088, 8443, 8888,
+    9000, 9090, 9200, 9300, 9418, 10000,
+    11211, 27017
 ]
-
-SECRET_PATTERNS = {
-    "AWS_ACCESS_KEY": (
-        r"\bAKIA[0-9A-Z]{16}\b"
-    ),
-    "JWT_TOKEN": (
-        r"\beyJ[A-Za-z0-9_-]{10,}\."
-        r"[A-Za-z0-9_-]{10,}\."
-        r"[A-Za-z0-9_-]{10,}\b"
-    ),
-    "PRIVATE_KEY_HEADER": (
-        r"-----BEGIN (?:RSA |EC |OPENSSH )?"
-        r"PRIVATE KEY-----"
-    ),
-    "EMAIL_ADDRESS": (
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\."
-        r"[A-Za-z]{2,}\b"
-    ),
-    "POSSIBLE_SECRET_ASSIGNMENT": (
-        r"""(?i)\b(password|passwd|secret|api_key|"""
-        r"""access_token|client_secret)\b"""
-        r"""\s*[:=]\s*["'][^"'\s]{6,}["']"""
-    ),
-    "EVM_PRIVATE_KEY_PATTERN": (
-        r"\b(?:0x)?[a-fA-F0-9]{64}\b"
-    ),
-    "BITCOIN_WIF_PATTERN": (
-        r"\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b"
-    ),
+COLORS = {
+    "RED": "\033[91m",
+    "GREEN": "\033[92m",
+    "YELLOW": "\033[93m",
+    "CYAN": "\033[96m",
+    "MAGENTA": "\033[95m",
+    "RESET": "\033[0m",
 }
-
-JS_PATTERN = re.compile(
-    r"""(?:src|href)\s*=\s*["']([^"']+\.js(?:\?[^"']*)?)["']""",
-    re.IGNORECASE
-)
-
-
+# ============================================================
+# TERMINAL OUTPUT
+# ============================================================
+def terminal(message):
+    print(message, flush=True)
 # ============================================================
 # TARGET NORMALIZATION
 # ============================================================
-
-def normalize_target(target):
-
-    target = target.strip()
-
-    if "://" not in target:
-        target = "https://" + target
-
-    parsed = urlsplit(target)
-
-    if not parsed.hostname:
+def normalize_host(target):
+    if not isinstance(target, str) or not target.strip():
         raise ValueError("Invalid target.")
-
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError("Only HTTP and HTTPS are supported.")
-
-    hostname = parsed.hostname.encode(
-        "idna"
-    ).decode("ascii")
-
-    port = parsed.port or (
-        443 if parsed.scheme == "https" else 80
-    )
-
-    return {
-        "scheme": parsed.scheme,
-        "hostname": hostname,
-        "port": port,
-        "base_url": urlunsplit((
-            parsed.scheme,
-            parsed.netloc,
-            "",
-            "",
-            ""
-        ))
-    }
-
-
+    target = target.strip()
+    if "://" in target:
+        parsed = urlsplit(target)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("Unsupported URL scheme.")
+        if not parsed.hostname:
+            raise ValueError("Invalid hostname.")
+        if parsed.username or parsed.password:
+            raise ValueError("Embedded credentials are not accepted.")
+        return parsed.hostname
+    if "/" in target:
+        raise ValueError("Expected a hostname, not a URL path.")
+    return target
 # ============================================================
-# REDACTION
+# SERVICE IDENTIFICATION
 # ============================================================
-
-def redact_value(value):
-
-    if not value:
-        return "[REDACTED]"
-
-    if len(value) <= 8:
-        return "[REDACTED]"
-
-    return value[:4] + "..." + value[-4:]
-
-
+SERVICE_MAP = {
+    20: "FTP-DATA",
+    21: "FTP",
+    22: "SSH",
+    23: "TELNET",
+    25: "SMTP",
+    53: "DNS",
+    80: "HTTP",
+    110: "POP3",
+    143: "IMAP",
+    443: "HTTPS",
+    445: "SMB",
+    465: "SMTPS",
+    587: "SMTP-SUBMISSION",
+    993: "IMAPS",
+    995: "POP3S",
+    1433: "MSSQL",
+    1521: "ORACLE",
+    2049: "NFS",
+    3306: "MYSQL",
+    3389: "RDP",
+    5432: "POSTGRESQL",
+    5900: "VNC",
+    6379: "REDIS",
+    8080: "HTTP-ALT",
+    8443: "HTTPS-ALT",
+    9200: "ELASTICSEARCH",
+    27017: "MONGODB",
+}
 # ============================================================
-# SECRET DETECTION
+# BASIC BANNER IDENTIFICATION
 # ============================================================
-
-def scan_text_for_secrets(text, source):
-
-    findings = []
-
-    for category, pattern in SECRET_PATTERNS.items():
-
-        try:
-            matches = re.finditer(pattern, text)
-
-            for match in matches:
-
-                value = match.group(0)
-
-                findings.append({
-                    "type": category,
-                    "source": source,
-                    "evidence": redact_value(value),
-                    "offset": match.start(),
-                    "length": len(value),
-                    "validation": "PATTERN_MATCH_ONLY"
-                })
-
-        except re.error:
-            continue
-
-    return findings
-
-
-# ============================================================
-# HTTP FETCH
-# ============================================================
-
-def fetch_sync(target, path):
-
-    scheme = target["scheme"]
-    hostname = target["hostname"]
-    port = target["port"]
-
-    connection = None
-
+def read_banner(sock):
     try:
-
-        if scheme == "https":
-
+        sock.settimeout(0.8)
+        data = sock.recv(512)
+        if not data:
+            return ""
+        return data.decode(
+            "utf-8",
+            errors="replace"
+        ).strip()
+    except (socket.timeout, OSError):
+        return ""
+# ============================================================
+# HTTP / HTTPS INSPECTION
+# ============================================================
+def inspect_http(host, port, use_ssl):
+    conn = None
+    try:
+        if use_ssl:
             context = ssl.create_default_context()
-
-            connection = http.client.HTTPSConnection(
-                hostname,
+            conn = http.client.HTTPSConnection(
+                host,
                 port,
-                timeout=REQUEST_TIMEOUT,
-                context=context
+                context=context,
+                timeout=CONNECT_TIMEOUT
             )
-
         else:
-
-            connection = http.client.HTTPConnection(
-                hostname,
+            conn = http.client.HTTPConnection(
+                host,
                 port,
-                timeout=REQUEST_TIMEOUT
+                timeout=CONNECT_TIMEOUT
             )
-
-        connection.request(
-            "GET",
-            path,
+        conn.request(
+            "HEAD",
+            "/",
             headers={
-                "Host": hostname,
-                "User-Agent": "BruteDog-Exposure-Audit/2.0",
-                "Accept": "*/*",
-                "Connection": "close"
+                "Host": host,
+                "User-Agent": "BruteDog-Security-Scanner/5.3",
+                "Connection": "close",
             }
         )
-
-        response = connection.getresponse()
-
-        body = response.read(MAX_RESPONSE_SIZE + 1)
-
-        truncated = len(body) > MAX_RESPONSE_SIZE
-
-        body = body[:MAX_RESPONSE_SIZE]
-
+        response = conn.getresponse()
+        status_line = (
+            f"HTTP/{response.version / 10:.1f} "
+            f"{response.status} {response.reason}"
+        )
+        server = response.getheader("Server", "")
         return {
-            "path": path,
-            "status": response.status,
-            "headers": dict(response.getheaders()),
-            "body": body.decode(
-                "utf-8",
-                errors="replace"
-            ),
-            "bytes_received": len(body),
-            "truncated": truncated,
-            "error": None
+            "status_line": status_line,
+            "server": server,
         }
-
+    except ssl.SSLCertVerificationError:
+        return {
+            "status_line": "TLS certificate verification failed",
+            "server": "",
+        }
     except Exception as exc:
-
         return {
-            "path": path,
-            "status": 0,
-            "headers": {},
-            "body": "",
-            "bytes_received": 0,
-            "truncated": False,
-            "error": str(exc)
+            "status_line": f"HTTP inspection unavailable: {type(exc).__name__}",
+            "server": "",
         }
-
     finally:
-
-        if connection:
-            connection.close()
-
-
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 # ============================================================
-# SAME-ORIGIN JAVASCRIPT DISCOVERY
+# SINGLE TCP PORT PROBE
 # ============================================================
-
-def extract_js_urls(html, target):
-
-    discovered = set()
-
-    for match in JS_PATTERN.finditer(html):
-
-        candidate = urljoin(
-            target["base_url"],
-            match.group(1)
-        )
-
-        parsed = urlsplit(candidate)
-
-        expected_scheme = target["scheme"]
-        expected_host = target["hostname"]
-        expected_port = target["port"]
-
-        candidate_port = parsed.port or (
-            443 if parsed.scheme == "https" else 80
-        )
-
-        if (
-            parsed.scheme != expected_scheme
-            or parsed.hostname != expected_host
-            or candidate_port != expected_port
-        ):
-            continue
-
-        discovered.add(
-            urlunsplit((
-                "",
-                "",
-                parsed.path,
-                parsed.query,
-                ""
-            ))
-        )
-
-    return sorted(discovered)[:MAX_JS_FILES]
-
-
-# ============================================================
-# REPORT DIRECTORY
-# ============================================================
-
-def ensure_report_directory():
-
-    os.makedirs(
-        REPORT_DIR,
-        exist_ok=True
-    )
-
-
-# ============================================================
-# MAIN PARSER
-# ============================================================
-
-async def parse_target_source(host):
-
-    started = time.monotonic()
-
-    target = normalize_target(host)
-
-    semaphore = asyncio.Semaphore(
-        MAX_CONCURRENCY
-    )
-
-    findings = []
-    endpoint_results = []
-    js_results = []
-
-    async def fetch_limited(path):
-
-        async with semaphore:
-
-            return await asyncio.to_thread(
-                fetch_sync,
-                target,
-                path
-            )
-
-    # --------------------------------------------------------
-    # PHASE 1: ENDPOINT DISCOVERY
-    # --------------------------------------------------------
-
-    initial_results = await asyncio.gather(
-        *[
-            fetch_limited(path)
-            for path in LEAK_PATHS
-        ]
-    )
-
-    for result in initial_results:
-
-        endpoint_results.append({
-            "path": result["path"],
-            "status": result["status"],
-            "bytes": result["bytes_received"],
-            "truncated": result["truncated"],
-            "error": result["error"]
-        })
-
-        if result["status"] == 0:
-            continue
-
-        if result["status"] in (200, 206):
-
-            body = result["body"]
-
-            findings.extend(
-                scan_text_for_secrets(
-                    body,
-                    result["path"]
-                )
-            )
-
-    # --------------------------------------------------------
-    # PHASE 2: JAVASCRIPT DISCOVERY
-    # --------------------------------------------------------
-
-    root_result = next(
-        (
-            item for item in initial_results
-            if item["path"] == "/"
-        ),
-        None
-    )
-
-    js_paths = []
-
-    if root_result and root_result["status"] == 200:
-
-        js_paths = extract_js_urls(
-            root_result["body"],
-            target
-        )
-
-    # --------------------------------------------------------
-    # PHASE 3: JAVASCRIPT ANALYSIS
-    # --------------------------------------------------------
-
-    if js_paths:
-
-        js_responses = await asyncio.gather(
-            *[
-                fetch_limited(path)
-                for path in js_paths
-            ]
-        )
-
-        for result in js_responses:
-
-            js_results.append({
-                "path": result["path"],
-                "status": result["status"],
-                "bytes": result["bytes_received"],
-                "truncated": result["truncated"]
-            })
-
-            if result["status"] in (200, 206):
-
-                findings.extend(
-                    scan_text_for_secrets(
-                        result["body"],
-                        result["path"]
-                    )
-                )
-
-    # --------------------------------------------------------
-    # PHASE 4: CLASSIFICATION
-    # --------------------------------------------------------
-
-    unique_findings = []
-    seen = set()
-
-    for finding in findings:
-
-        key = (
-            finding["type"],
-            finding["source"],
-            finding["offset"]
-        )
-
-        if key not in seen:
-
-            seen.add(key)
-            unique_findings.append(finding)
-
-    exposed_resources = [
-        item for item in endpoint_results
-        if item["status"] in (200, 206)
-        and item["path"] != "/"
-    ]
-
-    duration = round(
-        time.monotonic() - started,
-        3
-    )
-
-    report = {
-        "tool": "BruteDog",
-        "module": "Source Intelligence Parser",
-        "version": "2.0",
-        "target": target["base_url"],
-        "timestamp": datetime.now(
-            timezone.utc
-        ).isoformat(),
-        "duration_seconds": duration,
-        "summary": {
-            "endpoints_tested": len(endpoint_results),
-            "javascript_files_discovered": len(js_paths),
-            "javascript_files_tested": len(js_results),
-            "exposed_resources": len(exposed_resources),
-            "secret_pattern_matches": len(unique_findings)
+def probe_port(host, port):
+    result = {
+        "port": port,
+        "open": False,
+        "details": {
+            "service": SERVICE_MAP.get(port, "UNKNOWN"),
+            "banner": "",
+            "details": {},
         },
-        "endpoint_results": endpoint_results,
-        "javascript_results": js_results,
-        "exposed_resources": exposed_resources,
-        "findings": unique_findings,
-        "limitations": [
-            "Pattern matches are not proof of valid credentials.",
-            "HTTP 200 does not establish sensitive-data exposure.",
-            "Authentication requirements may affect discovery.",
-            "Secret values are redacted from reports.",
-            "Responses exceeding the size limit are truncated."
-        ]
     }
-
-    # --------------------------------------------------------
-    # PHASE 5: REPORT STORAGE
-    # --------------------------------------------------------
-
-    ensure_report_directory()
-
-    timestamp = int(time.time())
-
-    report_path = os.path.join(
-        REPORT_DIR,
-        f"source_audit_{timestamp}.json"
-    )
-
-    with open(
-        report_path,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            report,
-            file,
-            indent=4
+    sock = None
+    try:
+        sock = socket.create_connection(
+            (host, port),
+            timeout=CONNECT_TIMEOUT
         )
-
-    print("\n====================================")
-    print(" BRUTEDOG SOURCE AUDIT COMPLETE")
-    print("====================================")
-
-    print(f"Target: {target['base_url']}")
-
-    print(
-        f"Endpoints tested: "
-        f"{len(endpoint_results)}"
-    )
-
-    print(
-        f"JavaScript files discovered: "
-        f"{len(js_paths)}"
-    )
-
-    print(
-        f"Exposed resources: "
-        f"{len(exposed_resources)}"
-    )
-
-    print(
-        f"Secret pattern matches: "
-        f"{len(unique_findings)}"
-    )
-
-    print(f"Duration: {duration}s")
-
-    print(f"Report: {report_path}")
-
-    return report
-
-
+        result["open"] = True
+        service = SERVICE_MAP.get(port, "UNKNOWN")
+        banner = ""
+        if port not in (80, 443, 8080, 8443):
+            banner = read_banner(sock)
+        result["details"]["banner"] = banner[:200]
+        if port in (80, 8080):
+            result["details"]["details"] = inspect_http(
+                host,
+                port,
+                False
+            )
+        elif port in (443, 8443):
+            result["details"]["details"] = inspect_http(
+                host,
+                port,
+                True
+            )
+        return result
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return result
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 # ============================================================
-# STANDALONE EXECUTION
+# ASYNC SCANNER
 # ============================================================
-
+async def run_port_scanner(target_host, ports=None):
+    """
+    Live TCP port scanner.
+    Compatible with:
+        result = await run_port_scanner(hostname)
+    Returns:
+        {
+            status,
+            target,
+            ports_tested,
+            open_count,
+            closed_count,
+            open_ports,
+            duration
+        }
+    No report files are created.
+    """
+    started = time.monotonic()
+    try:
+        host = normalize_host(target_host)
+    except ValueError as exc:
+        terminal(
+            f"{COLORS['RED']}[-] {exc}{COLORS['RESET']}"
+        )
+        return {
+            "status": "FAILED",
+            "error": str(exc),
+            "open_ports": [],
+        }
+    if ports is None:
+        ports = COMMON_PORTS
+    ports = sorted(set(int(port) for port in ports))
+    if not ports or any(port < 1 or port > 65535 for port in ports):
+        return {
+            "status": "FAILED",
+            "error": "Invalid port list.",
+            "open_ports": [],
+        }
+    terminal(
+        f"\n{COLORS['MAGENTA']}"
+        f"[***] BRUTEDOG LIVE TCP SCANNER [***]"
+        f"{COLORS['RESET']}"
+    )
+    terminal(
+        f"{COLORS['CYAN']}[*] Target: {host}"
+        f"{COLORS['RESET']}"
+    )
+    terminal(
+        f"[*] Ports scheduled: {len(ports)}"
+    )
+    terminal(
+        f"[*] Maximum concurrency: {MAX_CONCURRENT}"
+    )
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+    open_ports = []
+    completed = 0
+    async def scan_one(port):
+        nonlocal completed
+        async with semaphore:
+            result = await asyncio.to_thread(
+                probe_port,
+                host,
+                port
+            )
+            completed += 1
+            if result["open"]:
+                open_ports.append(result)
+                service = result["details"]["service"]
+                terminal(
+                    f"{COLORS['GREEN']}"
+                    f"[OPEN] TCP/{port} — {service}"
+                    f"{COLORS['RESET']}"
+                )
+            elif completed % 15 == 0:
+                terminal(
+                    f"{COLORS['CYAN']}"
+                    f"[*] Progress: {completed}/{len(ports)}"
+                    f"{COLORS['RESET']}"
+                )
+            return result
+    try:
+        await asyncio.gather(
+            *(scan_one(port) for port in ports)
+        )
+    except Exception as exc:
+        terminal(
+            f"{COLORS['RED']}[-] Scanner error: {exc}"
+            f"{COLORS['RESET']}"
+        )
+        return {
+            "status": "FAILED",
+            "target": host,
+            "error": str(exc),
+            "open_ports": open_ports,
+        }
+    elapsed = round(
+        time.monotonic() - started,
+        2
+    )
+    open_ports.sort(
+        key=lambda item: item["port"]
+    )
+    open_count = len(open_ports)
+    result = {
+        "status": "COMPLETED",
+        "target": host,
+        "ports_tested": len(ports),
+        "open_count": open_count,
+        "closed_count": len(ports) - open_count,
+        "open_ports": open_ports,
+        "duration": elapsed,
+    }
+    terminal(
+        f"\n{COLORS['GREEN']}"
+        f"[+] TCP assessment completed."
+        f"{COLORS['RESET']}"
+    )
+    terminal(
+        f"    Ports tested: {len(ports)}"
+    )
+    terminal(
+        f"    Open ports: {open_count}"
+    )
+    terminal(
+        f"    Closed/unavailable: {len(ports) - open_count}"
+    )
+    terminal(
+        f"    Duration: {elapsed} seconds"
+    )
+    terminal(
+        f"    Local files created: 0\n"
+    )
+    return result
+# ============================================================
+# COMMAND-LINE ENTRY POINT
+# ============================================================
 if __name__ == "__main__":
-
     import argparse
-
     parser = argparse.ArgumentParser(
-        description="BruteDog Source Intelligence Parser"
+        description="BruteDog Live TCP Scanner"
     )
-
     parser.add_argument(
         "target",
-        help="Target hostname or URL"
+        help="Target hostname"
     )
-
     args = parser.parse_args()
-
     asyncio.run(
-        parse_target_source(args.target)
+        run_port_scanner(args.target)
     )
