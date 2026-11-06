@@ -1,84 +1,183 @@
+#!/usr/bin/env python3
+"""
+KEYHARVESTER.PY — Active Cryptographic Secret & Artifact Discovery Engine
+Features:
+- Live unredacted extraction of EVM private keys, Bitcoin WIFs, and BIP39 seed phrases
+- Direct on-screen terminal streaming of harvested raw secrets and API tokens
+- Zero-disk memory storage (no report files written)
+"""
 import re
 import sys
+import hashlib
+
+COLORS = {
+    "RED": "\033[91m",
+    "GREEN": "\033[92m",
+    "YELLOW": "\033[93m",
+    "CYAN": "\033[96m",
+    "MAGENTA": "\033[95m",
+    "RESET": "\033[0m",
+    "BOLD": "\033[1m",
+}
+
+def terminal(message):
+    sys.stdout.write(message + "\n")
+    sys.stdout.flush()
 
 def is_valid_bip39_seed(text):
-    words = text.strip().lower().split()
-    if len(words) not in [12, 24]:
+    if not isinstance(text, str):
         return False
-    for w in words:
-        if not w.isalpha() or len(w) < 3 or len(w) > 8:
-            return False
-    code_indicators = ["import", "def", "class", "return", "self", "setup", "sys", "from", "http", "git", "file", "print"]
-    if any(ind in words for ind in code_indicators):
+    words = text.strip().lower().split()
+    if len(words) not in (12, 15, 18, 21, 24):
+        return False
+    if not all(
+        word.isalpha() and 1 <= len(word) <= 8
+        for word in words
+    ):
         return False
     return True
 
 def is_valid_evm_key(key_str):
-    clean = key_str[2:] if key_str.startswith("0x") else key_str
-    if len(clean) != 64:
+    if not isinstance(key_str, str):
+        return False
+    clean = key_str.strip()
+    if clean.startswith(("0x", "0X")):
+        clean = clean[2:]
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", clean):
         return False
     try:
-        int(clean, 16)
-        if clean == "0" * 64 or "test" in clean.lower():
-            return False
-        return True
+        value = int(clean, 16)
     except ValueError:
         return False
+    curve_order = (
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE
+        BAAEDCE6AF48A03BBFD25E8CD0364141
+    )
+    return 0 < value < curve_order
+
+def _record_finding(findings, seen, secret, secret_type, offset):
+    """
+    Record and actively stream unredacted harvested secrets live to the terminal.
+    """
+    dedup_key = (secret_type, secret)
+    if dedup_key in seen:
+        return
+    seen.add(dedup_key)
+    
+    findings.append({
+        "type": secret_type,
+        "secret_value": secret,
+        "source": "Supplied target response",
+        "offset": offset,
+        "exposed": True,
+    })
+    
+    terminal(
+        f"\n{COLORS['RED']}{COLORS['BOLD']}[***] LIVE SECRET EXPOSURE HARVESTED [{secret_type}] [***]{COLORS['RESET']}"
+    )
+    terminal(
+        f"  ├── Offset      : {offset}"
+    )
+    terminal(
+        f"  └── Raw Secret  : {COLORS['GREEN']}{secret}{COLORS['RESET']}"
+    )
 
 def harvest_private_keys(target_source_data=""):
     """
-    Remote-Target Cryptographic Artifact Scraper:
-    - Scans remote target responses, source code, or endpoint payloads for keys and seed phrases.
-    - Zero local filesystem access.
+    Active Cryptographic Secret-Exposure & Harvesting Engine.
+    Scans target response text for EVM keys, Bitcoin WIFs, and seed phrases,
+    streaming raw unredacted values live to stdout.
     """
-    sys.stdout.write(f"\n\033[95m[***] ENGAGING REMOTE TARGET CRYPTOGRAPHIC ARTIFACT SCRAPER [***]\033[0m\n")
-    sys.stdout.flush()
-    
-    harvested_artifacts = []
-    hex_key_pattern = re.compile(r'\b(?:0x)?[a-fA-F0-9]{64}\b')
-    btc_wif_pattern = re.compile(r'\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b')
+    terminal(
+        f"\n{COLORS['MAGENTA']}[***] "
+        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING "
+        f"[***]{COLORS['RESET']}"
+    )
+    findings = []
+    seen = set()
     
     if not target_source_data:
-        sys.stdout.write(f"  └── Status : \033[36mNo target payload supplied for remote key parsing.\033[0m\n\n")
-        sys.stdout.flush()
-        return harvested_artifacts
+        terminal(
+            f"{COLORS['CYAN']}[*] No target response supplied for harvesting."
+            f"{COLORS['RESET']}"
+        )
+        return findings
 
     content = str(target_source_data)
+    
+    # -------------------------------------------------
+    # 1. EVM Private-Key Candidates
+    # -------------------------------------------------
+    hex_pattern = re.compile(
+        r"(?<![a-fA-F0-9])(?:0x)?[a-fA-F0-9]{64}"
+        r"(?![a-fA-F0-9])"
+    )
+    for match in hex_pattern.finditer(content):
+        candidate = match.group(0)
+        if is_valid_evm_key(candidate):
+            _record_finding(
+                findings,
+                seen,
+                candidate,
+                "EVM Private Key",
+                match.start()
+            )
 
-    # 1. Scan for EVM Private Keys
-    for match in hex_key_pattern.findall(content):
-        if is_valid_evm_key(match):
-            full_key = match if match.startswith("0x") else "0x" + match
-            artifact = {"type": "Hex Private Key (EVM)", "key_content": full_key, "source": "Remote Target"}
-            if artifact not in harvested_artifacts:
-                harvested_artifacts.append(artifact)
-                sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE REMOTE EVM KEY EXPOSED [***]\033[0m\n")
-                sys.stdout.write(f"  └── Key : \033[92m{full_key}\033[0m\n")
-                sys.stdout.flush()
-                
-    # 2. Scan for Bitcoin WIF Keys
-    for match in btc_wif_pattern.findall(content):
-        artifact = {"type": "Bitcoin WIF Key", "key_content": match, "source": "Remote Target"}
-        if artifact not in harvested_artifacts:
-            harvested_artifacts.append(artifact)
-            sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE REMOTE BTC WIF EXPOSED [***]\033[0m\n")
-            sys.stdout.write(f"  └── WIF : \033[92m{match}\033[0m\n")
-            sys.stdout.flush()
+    # -------------------------------------------------
+    # 2. Bitcoin WIF Candidates
+    # -------------------------------------------------
+    wif_pattern = re.compile(
+        r"(?<![1-9A-HJ-NP-Za-km-z])"
+        r"[5KL][1-9A-HJ-NP-Za-km-z]{50,51}"
+        r"(?![1-9A-HJ-NP-Za-km-z])"
+    )
+    for match in wif_pattern.finditer(content):
+        _record_finding(
+            findings,
+            seen,
+            match.group(0),
+            "Bitcoin WIF",
+            match.start()
+        )
 
-    # 3. Scan for True BIP39 Seed Phrases
-    words = content.split()
-    if len(words) >= 12:
-        for i in range(len(words) - 11):
-            chunk = " ".join(words[i:i+12])
-            if is_valid_bip39_seed(chunk):
-                artifact = {"type": "BIP39 Seed Phrase", "key_content": chunk, "source": "Remote Target"}
-                if artifact not in harvested_artifacts:
-                    harvested_artifacts.append(artifact)
-                    sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE REMOTE SEED PHRASE EXPOSED [***]\033[0m\n")
-                    sys.stdout.write(f"  └── Phrase : \033[93m{chunk}\033[0m\n")
-                    sys.stdout.flush()
-                    break
+    # -------------------------------------------------
+    # 3. Mnemonic Seed Candidates
+    # -------------------------------------------------
+    word_pattern = re.compile(r"\b[a-zA-Z]{1,8}\b")
+    words = list(word_pattern.finditer(content))
+    allowed_lengths = (12, 15, 18, 21, 24)
+    for window_size in allowed_lengths:
+        if len(words) < window_size:
+            continue
+        for index in range(len(words) - window_size + 1):
+            window = words[index:index + window_size]
+            candidate = " ".join(
+                item.group(0).lower()
+                for item in window
+            )
+            if not is_valid_bip39_seed(candidate):
+                continue
+            _record_finding(
+                findings,
+                seen,
+                candidate,
+                "BIP39 Seed Phrase",
+                window[0].start()
+            )
+            break
 
-    sys.stdout.write(f" \033[36m[*] Remote target artifact scan complete. Verified remote keys: {len(harvested_artifacts)}\033[0m\n\n")
-    sys.stdout.flush()
-    return harvested_artifacts
+    # -------------------------------------------------
+    # 4. Final Terminal Summary
+    # -------------------------------------------------
+    terminal(
+        f"\n{COLORS['GREEN']}[+] Cryptographic harvesting scan complete."
+        f"{COLORS['RESET']}"
+    )
+    terminal(
+        f"    Total Secrets Harvested : {len(findings)}"
+    )
+    terminal(
+        f"    Local Files Created     : 0 (Streamed live on screen)"
+    )
+    
+    return findings
