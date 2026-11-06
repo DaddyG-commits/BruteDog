@@ -263,9 +263,10 @@ def display_result(result):
             f"{path} | {result['error']}"
         )
     for finding in result["findings"]:
+        import sys
         sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE EXPOSED SECRET HARVESTED [***]\033[0m\n")
         sys.stdout.write(f"  ├── Path  : {path}\n")
-        sys.stdout.write(f>  ├── Type  : {finding['type']}\n")
+        sys.stdout.write(f"  ├── Type  : {finding['type']}\n")
         sys.stdout.write(f"  └── Value : \033[92m{finding['matched_value']}\033[0m\n")
         sys.stdout.flush()
 
