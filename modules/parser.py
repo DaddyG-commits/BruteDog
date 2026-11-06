@@ -4,6 +4,8 @@ import urllib.parse
 import re
 import sys
 import time
+import json
+import os
 
 # Global SSL context
 _ssl_context = ssl.create_default_context()
@@ -13,16 +15,17 @@ _ssl_context.verify_mode = ssl.CERT_NONE
 async def parse_target_source(host):
     """
     Performs real-time source code scraping, security header analysis,
-    and regex-based secret/vulnerability extraction.
+    regex-based secret extraction, and automated session cookie/JWT harvesting.
     """
-    print(f"\n\033[95m[***] DEPLOYING DOM & SOURCE-CODE PARSER V1.0 [***]\033[0m")
-    print(f"\033[90m[TARGET] Fetching raw HTML, headers, and assets from https://{host}...\033[0m\n")
+    print(f"\n\033[95m[***] DEPLOYING DOM & SESSION HIJACKING PARSER V2.0 [***]\033[0m")
+    print(f"\033[90m[TARGET] Fetching raw HTML, headers, and cookies from https://{host}...\033[0m\n")
     
     findings = {
         "headers_missing": [],
         "exposed_secrets": [],
         "hidden_endpoints": [],
-        "insecure_forms": []
+        "insecure_forms": [],
+        "harvested_sessions": []
     }
 
     try:
@@ -32,6 +35,7 @@ async def parse_target_source(host):
         resp = conn.getresponse()
         html_body = resp.read().decode(errors="ignore")
         headers = dict(resp.getheaders())
+        resp_raw_headers = resp.msg._headers  # Captures multiple Set-Cookie headers if present
         conn.close()
 
         print(f" \033[92m[+] Successfully pulled {len(html_body)} bytes of raw DOM source code.\033[0m")
@@ -47,17 +51,52 @@ async def parse_target_source(host):
         
         print(f"\n\033[36m[*] Auditing HTTP Response Headers...\033[0m")
         for header in security_headers:
-            if header in headers:
-                print(f"   \033[92m[SECURE] {header}: {headers[header][:50]}\033[0m")
+            if any(header.lower() == k.lower() for k in headers.keys()):
+                print(f"   \033[92m[SECURE] {header}\033[0m")
             else:
                 print(f"   \033[91m[VULN] Missing Security Header -> {header}\033[0m")
                 findings["headers_missing"].append(header)
 
-        # 2. Regex-Based Secret & API Key Extraction from Source Code
-        print(f"\n\033[36m[*] Scanning source code and JavaScript payloads for exposed secrets...\033[0m")
+        # 2. Automated Session Cookie & JWT Exfiltration
+        print(f"\n\033[36m[*] Extracting session cookies, JWT tokens, and authorization artifacts...\033[0m")
         
+        # Extract all Set-Cookie headers
+        raw_cookies = [val for key, val in resp_raw_headers if key.lower() == 'set-cookie']
+        
+        # Regex patterns for secrets & tokens
+        jwt_pattern = r'eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*'
+        api_key_pattern = r'(?:api[_-]?key|secret[_-]?token|bearer)\s*[:=]\s*["\']([a-zA-Z0-9_\-]{16,40})["\']'
+        
+        jwts = re.findall(jwt_pattern, html_body, re.IGNORECASE)
+        api_keys = re.findall(api_key_pattern, html_body, re.IGNORECASE)
+
+        session_payload = {
+            "target": host,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "set_cookies": raw_cookies,
+            "jwts": jwts,
+            "api_keys": api_keys
+        }
+
+        if raw_cookies or jwts:
+            print(f"   \033[92m[+++] CRITICAL SESSION INTELLIGENCE FOUND!\033[0m")
+            if raw_cookies:
+                print(f"       -> Harvested {len(raw_cookies)} Set-Cookie strings.")
+            if jwts:
+                print(f"       -> Harvested {len(jwts)} JWT tokens.")
+            
+            # Serialize directly to reports/sessions/ for instant session cloning
+            os.makedirs("reports/sessions", exist_ok=True)
+            session_file = f"reports/sessions/session_{host.replace('.', '_')}.json"
+            with open(session_file, "w") as f:
+                json.dump(session_payload, f, indent=4)
+            print(f"       -> Serialized to: {session_file}")
+            findings["harvested_sessions"].append(session_file)
+        else:
+            print(f"   \033[90m[-] No active session tokens or cookies exposed in response headers.\033[0m")
+
+        # 3. Regex-Based Secret & API Key Extraction from Source Code
         secret_patterns = {
-            "JWT Token": r"eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*",
             "Google API Key": r"AIza[0-9A-Za-z-_]{35}",
             "AWS Access Key": r"AKIA[0-9A-Z]{16}",
             "Firebase URL": r"https://[a-z0-9-]+\.firebaseio\.com",
@@ -68,17 +107,10 @@ async def parse_target_source(host):
         for secret_name, pattern in secret_patterns.items():
             matches = re.findall(pattern, html_body, re.IGNORECASE)
             if matches:
-                print(f"   \033[91m[!] CRITICAL: Exposed {secret_name} detected in source! Matches: {len(matches)}\033[0m")
+                print(f"   \033[91m[!] Exposed {secret_name} detected in DOM source! Matches: {len(matches)}\033[0m")
                 findings["exposed_secrets"].append({"type": secret_name, "count": len(matches)})
-            else:
-                sys.stdout.write(f"\r\033[K\033[90m[-] Checked pattern: {secret_name} -> Clean\033[0m")
-                sys.stdout.flush()
-        print()
 
-        # 3. Hidden Endpoint & API Route Extraction
-        print(f"\n\033[36m[*] Extracting embedded links, API routes, and comment flags...\033[0m")
-        
-        # Extract href attributes, form actions, and script sources
+        # 4. Hidden Endpoint & API Route Extraction
         links = re.findall(r'(?:href|src|action)=["\']([^"\']+)["\']', html_body, re.IGNORECASE)
         internal_endpoints = set()
         
@@ -87,23 +119,21 @@ async def parse_target_source(host):
                 internal_endpoints.add(link)
 
         if internal_endpoints:
-            print(f"   \033[93m[+] Discovered {len(internal_endpoints)} internal routes/endpoints in DOM:\033[0m")
-            for ep in list(internal_endpoints)[:10]: # Print top 10
-                print(f"       -> {ep}")
+            print(f"   \033[93m[+] Discovered {len(internal_endpoints)} internal routes/endpoints in DOM.\033[0m")
+            for ep in list(internal_endpoints)[:10]:
                 findings["hidden_endpoints"].append(ep)
-        else:
-            print("   \033[90m[-] No anomalous hidden endpoints found in DOM tags.\033[0m")
 
-        # 4. Insecure Form Inspection
+        # 5. Insecure Form Inspection
         forms = re.findall(r'<form[^>]*>', html_body, re.IGNORECASE)
         for form in forms:
             if "method=\"get\"" in form.lower() or 'method=\'get\'' in form.lower():
-                print(f"   \033[91m[VULN] Insecure HTTP GET Form Action detected (Credentials may leak in URL history)! -> {form}\033[0m")
+                print(f"   \033[91m[VULN] Insecure HTTP GET Form Action detected -> {form}\033[0m")
                 findings["insecure_forms"].append(form)
 
-        print(f"\n\033[92m[*] DOM and Source-Code analysis completed successfully.\033[0m\n")
+        print(f"\n\033[92m[*] DOM and Session Hijacking analysis completed successfully.\033[0m\n")
         return findings
 
     except Exception as e:
         print(f"\n\033[91m[!] Error parsing target source code: {e}\033[0m")
         return findings
+
