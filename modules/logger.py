@@ -1,10 +1,11 @@
 import logging
-import os
-from datetime import datetime
+import sys
 
-def setup_logger(log_to_file=True, log_dir="logs"):
+def setup_logger(log_to_file=False, log_dir="logs"):
     """
-    Configures and returns a structured logger for telemetry and audit trails.
+    Zero-Lag Live Terminal Logger:
+    - Eliminates persistent log files to maintain elite stealth and zero disk footprint.
+    - Streams telemetry and audit events instantly in high-contrast plain text to stdout.
     """
     logger = logging.getLogger("AsyncReconEngine")
     logger.setLevel(logging.INFO)
@@ -13,25 +14,29 @@ def setup_logger(log_to_file=True, log_dir="logs"):
     if logger.handlers:
         return logger
 
-    # Console Handler with custom format
-    console_handler = logging.StreamHandler()
+    # High-Contrast Terminal Console Handler
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
-    console_format = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+    
+    # Cyberpunk structured color formatter
+    class CyberFormatter(logging.Formatter):
+        MATRIX_GREEN = "\033[38;5;46m"
+        RED = "\033[91m"
+        YELLOW = "\033[93m"
+        RESET = "\033[0m"
+
+        def format(self, record):
+            color = self.MATRIX_GREEN
+            if record.levelname == "WARNING":
+                color = self.YELLOW
+            elif record.levelname in ["ERROR", "CRITICAL"]:
+                color = self.RED
+            
+            timestamp = self.formatTime(record, self.datefmt)
+            return f"{color}[{timestamp}] [{record.levelname}] {record.getMessage()}{self.RESET}"
+
+    console_format = CyberFormatter(datefmt="%H:%M:%S")
     console_handler.setFormatter(console_format)
     logger.addHandler(console_handler)
-
-    # Optional File Handler for persistent session logs
-    if log_to_file:
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = os.path.join(log_dir, f"session_{timestamp}.log")
-        
-        file_handler = logging.FileHandler(log_filename, encoding="utf-8")
-        file_handler.setLevel(logging.INFO)
-        file_format = logging.Formatter("[%(asctime)s] [%(levelname)s] %(filename)s:%(lineno)d - %(message)s")
-        file_handler.setFormatter(file_format)
-        logger.addHandler(file_handler)
 
     return logger
