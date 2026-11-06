@@ -2,6 +2,7 @@ import asyncio
 import sys
 import time
 from modules.loader import load_wordlist
+from modules.parser import parse_target_source
 from modules.engine import run_autonomous_engine
 
 # Cyberpunk Neon ANSI Color Palette
@@ -15,12 +16,10 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 BLINK = "\033[5m"
 
+# Scaled down by 50% for optimal mobile terminal view (3 rows instead of 6)
 BANNER = f"""{GREEN}{BOLD}
  ██████╗ ██████╗ ██╗   ██╗████████╗███████╗██████╗  ██████╗  ██████╗ 
  ██╔══██╗██╔══██╗██║   ██║╚══██╔══╝██╔════╝██╔══██╗██╔═══██╗██╔════╝ 
- ██████╔╝██████╔╝██║   ██║   ██║   █████╗  ██║  ██║██║   ██║██║  ███╗
- ██╔═══╝ ██╔══██╗██║   ██║   ██║   ██╔══╝  ██║  ██║██║   ██║██║   ██║
- ██║     ██║  ██║╚██████╔╝   ██║   ███████╗██████╔╝╚██████╔╝╚██████╔╝
  ╚═╝     ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚══════╝╚═════╝  ╚═════╝  ╚═════╝ 
 {RESET}{CYAN}═════════════════════════════════════════════════════════════
          [NEURAL RECON & MULTI-VECTOR EXPLOIT ENGINE]
@@ -39,7 +38,7 @@ def main():
         sys.exit(1)
 
     print(f"\n{YELLOW}[INIT] Injecting payloads and loading local wordlist dictionaries...{RESET}")
-    time.sleep(0.4) # Aesthetic cyberpunk micro-delay
+    time.sleep(0.4)
     
     try:
         passwords = load_wordlist("config/passwords.txt")
@@ -48,13 +47,14 @@ def main():
         sys.exit(1)
 
     print(f"{GREEN}[SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.{RESET}")
+
+    # Step 1: Real-time DOM & Source Code Vulnerability Audit
+    asyncio.run(parse_target_source(target))
+
     print(f"{MAGENTA}{BOLD}[ENGINE] Spawning asynchronous threads and initializing socket rings...\n{RESET}")
     time.sleep(0.5)
 
-    # Launch engine and track live metrics
-    start_time = time.time()
-    
-    # Running the autonomous engine with high-velocity telemetry
+    # Step 2: Launch Wireshark Packet Telemetry & Stealth Brute-Force Engine
     hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
 
     # Cyberpunk Completion Dashboard
