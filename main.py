@@ -4,6 +4,7 @@ import time
 from modules.loader import load_wordlist
 from modules.parser import parse_target_source
 from modules.engine import run_autonomous_engine
+from modules.dumper import harvest_email_intelligence  # <--- Email intelligence dumper module
 
 # Cyberpunk Neon ANSI Color Palette
 CYAN = "\033[96m"
@@ -66,6 +67,10 @@ def main():
     # Step 2: Launch Wireshark Packet Telemetry & Stealth Brute-Force Engine
     hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
 
+    # Step 3: If IMAP/Email vectors were cracked, execute automatic email intelligence dumping
+    if hits:
+        asyncio.run(harvest_email_intelligence(target, hits))
+
     # Cyberpunk Completion Dashboard
     print(f"\n{CYAN}═════════════════════════════════════════════════════════════{RESET}")
     print(f"{BOLD}{GREEN}[*] MISSION STATUS: COMPLETE (Elapsed: {duration:.2f}s){RESET}")
@@ -82,4 +87,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
