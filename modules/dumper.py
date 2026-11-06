@@ -1,6 +1,5 @@
 import asyncio
 import ssl
-import imliblib if False else None # Standard library only: using imaplib and poplib via asyncio/to_thread
 import imaplib
 import poplib
 import os
@@ -40,7 +39,6 @@ def dump_imap_mailbox_sync(host, port, user, password, use_ssl=True):
         status, messages = mail.search(None, 'ALL')
         if status == 'OK':
             id_list = messages[0].split()
-            # Grab up to the last 5 messages for rapid intelligence extraction
             recent_ids = id_list[-5:] if len(id_list) >= 5 else id_list
             
             for msg_id in recent_ids:
