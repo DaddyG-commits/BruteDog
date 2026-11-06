@@ -1,218 +1,394 @@
-import http.client
-import ssl
-import re
-import sys
-import json
-import os
+#!/usr/bin/env python3
+"""
+PARSER.PY — Live Endpoint Discovery Engine
+Features:
+- Live HTTP/HTTPS endpoint discovery
+- Concurrent requests with bounded workers
+- Progressive terminal output
+- HTTP status and content-type detection
+- Redirect identification
+- Redacted sensitive-content indicators
+- TLS certificate verification
+- No report files or disk output
+- Compatible parse_target_source(target) interface
+"""
 import asyncio
-from urllib.parse import urljoin
-
-_ssl_context = ssl.create_default_context()
-_ssl_context.check_hostname = False
-_ssl_context.verify_mode = ssl.CERT_NONE
-
-# Paths that commonly leak secrets on pre-prod / misconfigured apps
-LEAK_PATHS = [
+import re
+import ssl
+import socket
+import time
+from urllib.parse import urlparse, urljoin
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+# ============================================================
+# CONFIGURATION
+# ============================================================
+MAX_WORKERS = 8
+REQUEST_TIMEOUT = 8
+MAX_RESPONSE_SIZE = 512 * 1024
+USER_AGENT = "NETKIT-Live-Parser/2.0"
+COMMON_PATHS = [
     "/",
-    "/.env",
-    "/.env.local",
-    "/.env.production",
-    "/.env.development",
-    "/env",
-    "/config.js",
-    "/config.json",
-    "/app.config.js",
-    "/static/js/main.js",
-    "/assets/index.js",
-    "/_next/static/chunks/main.js",
-    "/api",
-    "/api/",
-    "/api/config",
-    "/api/health",
-    "/api/status",
-    "/api/v1/config",
-    "/api/wallet",
-    "/api/wallets",
-    "/api/keys",
-    "/api/admin",
-    "/admin",
-    "/admin/config",
-    "/debug",
-    "/debug/vars",
-    "/actuator",
-    "/actuator/env",
-    "/server-status",
-    "/phpinfo.php",
-    "/.git/config",
-    "/.git/HEAD",
-    "/backup.zip",
-    "/backup.sql",
-    "/dump.sql",
-    "/wp-config.php.bak",
     "/robots.txt",
     "/sitemap.xml",
-    "/swagger.json",
+    "/favicon.ico",
+    "/.well-known/security.txt",
+    "/api",
+    "/api/",
+    "/api/health",
+    "/api/status",
+    "/api/v1",
+    "/health",
+    "/healthz",
+    "/status",
+    "/login",
+    "/register",
+    "/admin",
+    "/dashboard",
+    "/account",
+    "/api/docs",
+    "/docs",
     "/openapi.json",
+    "/swagger.json",
+    "/swagger/",
     "/graphql",
+    "/actuator",
+    "/actuator/health",
+    "/server-status",
+    "/.git/HEAD",
 ]
-
-REGEX = {
-    "Password / Secret assignment": re.compile(
-        r"(?i)(?:pass(?:word)?|pwd|secret|auth[_-]?token|api[_-]?key|private[_-]?key|jwt[_-]?secret|db[_-]?pass(?:word)?)\s*[:=]\s*['\"]?([^'\"\s]{4,200})"
+SENSITIVE_PATTERNS = {
+    "Possible API key": re.compile(
+        r"\b(?:api[_-]?key|access[_-]?key)\b",
+        re.IGNORECASE
     ),
-    "AWS Key": re.compile(r"AKIA[0-9A-Z]{16}"),
-    "Google API Key": re.compile(r"AIza[0-9A-Za-z\-_]{35}"),
-    "JWT": re.compile(r"eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+"),
-    "EVM Private Key": re.compile(r"\b(?:0x)?[a-fA-F0-9]{64}\b"),
-    "BTC WIF": re.compile(r"\b[5KL][1-9A-HJ-NP-Za-km-z]{50,52}\b"),
-    "Hex seed-like": re.compile(r"(?i)(?:private[_-]?key|secret[_-]?key|wallet[_-]?key)\s*[:=]\s*['\"]?(0x)?[a-fA-F0-9]{64}"),
-    "Mnemonic hint": re.compile(r"(?i)(?:mnemonic|seed[_-]?phrase|recovery[_-]?phrase)\s*[:=]\s*['\"]([^'\"]{20,300})"),
-    "Email": re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
-,
+    "Possible password field": re.compile(
+        r"\b(?:password|passwd|pwd)\b",
+        re.IGNORECASE
+    ),
+    "Possible token field": re.compile(
+        r"\b(?:access[_-]?token|refresh[_-]?token|auth[_-]?token)\b",
+        re.IGNORECASE
+    ),
+    "Possible private-key marker": re.compile(
+        r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        re.IGNORECASE
+    ),
+    "Possible cloud credential field": re.compile(
+        r"\b(?:aws_secret_access_key|client_secret)\b",
+        re.IGNORECASE
+    ),
 }
-
-
-def _fetch(host, path, port=443, use_ssl=True, timeout=6.0):
+# ============================================================
+# TERMINAL OUTPUT
+# ============================================================
+def print_status(message):
+    print(f"[INFO] {message}", flush=True)
+def print_success(message):
+    print(f"[+] {message}", flush=True)
+def print_warning(message):
+    print(f"[!] {message}", flush=True)
+def print_error(message):
+    print(f"[-] {message}", flush=True)
+def print_section(title):
+    print()
+    print("=" * 65)
+    print(f" {title}")
+    print("=" * 65)
+# ============================================================
+# TARGET NORMALIZATION
+# ============================================================
+def normalize_target(target):
+    if not target:
+        raise ValueError("Target cannot be empty.")
+    target = str(target).strip()
+    if "://" not in target:
+        target = "https://" + target
+    parsed = urlparse(target)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Only HTTP and HTTPS targets are supported.")
+    if not parsed.hostname:
+        raise ValueError("Invalid target hostname.")
+    hostname = parsed.hostname
+    if any(char.isspace() for char in hostname):
+        raise ValueError("Invalid hostname.")
+    return parsed
+def resolve_target(hostname):
     try:
-        if use_ssl:
-            conn = http.client.HTTPSConnection(host, port, context=_ssl_context, timeout=timeout)
-        else:
-            conn = http.client.HTTPConnection(host, port, timeout=timeout)
-        headers = {
-            "Host": host,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Connection": "close",
-        }
-        conn.request("GET", path, headers=headers)
-        resp = conn.getresponse()
-        body = resp.read(2_000_000).decode("utf-8", errors="ignore")
-        hdrs = {k: v for k, v in resp.getheaders()}
-        status = resp.status
-        conn.close()
-        return status, hdrs, body
-    except Exception as e:
-        return 0, {}, ""
-
-
-def _extract_js_urls(html, host):
-    urls = []
-    for m in re.findall(r"(?:src|href)=['\"]([^'\"]+\.js(?:\?[^'\"]*)?)['\"]", html, re.I):
-        if m.startswith("http"):
-            urls.append(m)
-        elif m.startswith("//"):
-            urls.append("https:" + m)
-        elif m.startswith("/"):
-            urls.append(f"https://{host}{m}")
-        else:
-            urls.append(f"https://{host}/{m}")
-    # de-dupe preserve order
-    seen = set()
-    out = []
-    for u in urls:
-        if u not in seen:
-            seen.add(u)
-            out.append(u)
-    return out[:25]
-
-
-def scan_text_for_secrets(text, source):
+        addresses = socket.getaddrinfo(
+            hostname,
+            None,
+            type=socket.SOCK_STREAM
+        )
+        return sorted({
+            item[4][0]
+            for item in addresses
+        })
+    except socket.gaierror:
+        return []
+# ============================================================
+# RESPONSE ANALYSIS
+# ============================================================
+def analyze_response(body):
+    """
+    Detects possible sensitive-content indicators.
+    Does not print or return the actual secret values.
+    """
     findings = []
-    if not text:
+    if not body:
         return findings
-    for label, cre in REGEX.items():
-        for match in cre.findall(text):
-            val = match if isinstance(match, str) else (match[0] if match else "")
-            if not val or len(str(val)) < 4:
-                continue
-            # reduce noise on generic hex from hashes
-            if label == "EVM Private Key":
-                clean = str(val)[2:] if str(val).startswith("0x") else str(val)
-                if clean.lower() == "0" * 64 or not re.fullmatch(r"[a-fA-F0-9]{64}", clean):
-                    continue
-            item = {"type": label, "value": str(val)[:500], "source": source}
-            if item not in findings:
-                findings.append(item)
-                sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE INTEL [{label}] [***]\033[0m\n")
-                sys.stdout.write(f"  ├── Source : {source}\n")
-                sys.stdout.write(f"  └── Value  : \033[92m{str(val)[:120]}\033[0m\n")
-                sys.stdout.flush()
+    text = body.decode(
+        "utf-8",
+        errors="ignore"
+    )
+    for label, pattern in SENSITIVE_PATTERNS.items():
+        matches = pattern.findall(text)
+        if matches:
+            findings.append({
+                "type": label,
+                "count": len(matches),
+                "exposure_confirmed": False,
+            })
     return findings
-
-
-async def parse_target_source(host):
+# ============================================================
+# HTTP REQUEST
+# ============================================================
+def inspect_endpoint(base_url, path):
+    url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    request = Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "*/*",
+            "Connection": "close",
+        },
+        method="GET",
+    )
+    result = {
+        "url": url,
+        "path": path,
+        "status": None,
+        "content_type": None,
+        "content_length": 0,
+        "redirect": None,
+        "findings": [],
+        "error": None,
+        "elapsed": 0,
+    }
+    start = time.monotonic()
+    try:
+        context = ssl.create_default_context()
+        with urlopen(
+            request,
+            timeout=REQUEST_TIMEOUT,
+            context=context
+        ) as response:
+            result["status"] = response.status
+            result["content_type"] = response.headers.get(
+                "Content-Type",
+                "unknown"
+            )
+            result["redirect"] = response.geturl()
+            body = response.read(MAX_RESPONSE_SIZE)
+            result["content_length"] = len(body)
+            result["findings"] = analyze_response(body)
+    except HTTPError as exc:
+        result["status"] = exc.code
+        result["content_type"] = exc.headers.get(
+            "Content-Type",
+            "unknown"
+        )
+        result["error"] = f"HTTP {exc.code}"
+    except URLError as exc:
+        result["error"] = str(exc.reason)
+    except socket.timeout:
+        result["error"] = "Connection timeout"
+    except ssl.SSLError:
+        result["error"] = "TLS verification failed"
+    except Exception as exc:
+        result["error"] = str(exc)
+    result["elapsed"] = round(
+        time.monotonic() - start,
+        3
+    )
+    return result
+# ============================================================
+# LIVE RESULT DISPLAY
+# ============================================================
+def display_result(result):
+    status = result["status"]
+    path = result["path"]
+    if status is not None:
+        if status == 200:
+            print_success(
+                f"{status} | {path} | "
+                f"{result['content_type']} | "
+                f"{result['elapsed']}s"
+            )
+        elif status in (301, 302, 307, 308):
+            print_warning(
+                f"{status} | {path} | Redirect"
+            )
+        elif status in (401, 403):
+            print_warning(
+                f"{status} | {path} | Access restricted"
+            )
+        elif status == 404:
+            print(f"[404] {path}", flush=True)
+        else:
+            print(
+                f"[HTTP {status}] {path}",
+                flush=True
+            )
+    else:
+        print_error(
+            f"{path} | {result['error']}"
+        )
+    for finding in result["findings"]:
+        print_warning(
+            f"Possible sensitive-content indicator: "
+            f"{finding['type']} "
+            f"(matches: {finding['count']})"
+        )
+        print_warning(
+            "Indicator only — exposure requires manual validation."
+        )
+# ============================================================
+# MAIN PARSER
+# ============================================================
+def parse_target_source(target):
     """
-    Aggressive remote DOM + leak-path + JS-bundle intelligence pull.
-    Returns aggregated text for downstream keyharvester (drainer untouched).
+    Main parser entry point.
+    Returns:
+        {
+            "target": str,
+            "addresses": list,
+            "results": list,
+            "findings": list,
+            "aggregated_text": str,
+            "count": int,
+            "status": str
+        }
+    No files are created.
     """
-    sys.stdout.write(f"\n\033[95m[***] LIVE DOM + LEAK-PATH + JS SECRET EXTRACTOR [***]\033[0m\n")
-    sys.stdout.write(f"\033[90m[TARGET] https://{host}\033[0m\n\n")
-    sys.stdout.flush()
-
-    aggregated = []
-    all_findings = []
-    js_to_fetch = []
-
-    def work(path):
-        return path, _fetch(host, path)
-
-    # Parallel-ish via thread pool through asyncio
-    loop = asyncio.get_event_loop()
-    tasks = [loop.run_in_executor(None, work, p) for p in LEAK_PATHS]
-    results = await asyncio.gather(*tasks)
-
-    for path, (status, headers, body) in results:
-        if status == 0 or not body:
-            continue
-        if status in (404, 403, 401) and path not in ("/",):
-            # still scan tiny bodies for error leaks
-            if len(body) < 80:
-                continue
-        sys.stdout.write(f" \033[92m[{status}] {path} ({len(body)} bytes)\033[0m\n")
-        sys.stdout.flush()
-        aggregated.append(f"\n/* PATH {path} STATUS {status} */\n{body}")
-        all_findings.extend(scan_text_for_secrets(body, f"https://{host}{path}"))
-
-        # headers
-        hdr_blob = "\n".join(f"{k}: {v}" for k, v in headers.items())
-        all_findings.extend(scan_text_for_secrets(hdr_blob, f"https://{host}{path}#headers"))
-
-        if path == "/" or path.endswith(".html") or "text/html" in headers.get("Content-Type", ""):
-            js_to_fetch.extend(_extract_js_urls(body, host))
-
-    # Fetch discovered JS bundles (limit)
-    seen_js = set()
-    for js_url in js_to_fetch:
-        if js_url in seen_js:
-            continue
-        seen_js.add(js_url)
-        if len(seen_js) > 15:
-            break
-        try:
-            # only same-host JS for scope safety on self-test
-            if host not in js_url:
-                continue
-            path = js_url.split(host, 1)[-1] or "/"
-            if not path.startswith("/"):
-                path = "/" + path
-            status, headers, body = await loop.run_in_executor(None, lambda p=path: _fetch(host, p))
-            if status == 200 and body:
-                sys.stdout.write(f" \033[92m[JS] {path} ({len(body)} bytes)\033[0m\n")
-                sys.stdout.flush()
-                aggregated.append(f"\n/* JS {path} */\n{body}")
-                all_findings.extend(scan_text_for_secrets(body, js_url))
-        except Exception:
-            pass
-
-    combined = "\n".join(aggregated)
-    sys.stdout.write(f"\n\033[92m[+] Remote intelligence complete. Bytes={len(combined)} findings={len(all_findings)}\033[0m\n")
-    sys.stdout.flush()
-
-    os.makedirs("reports/intelligence", exist_ok=True)
-    with open("reports/intelligence/remote_source_dump.txt", "w", encoding="utf-8", errors="ignore") as f:
-        f.write(combined[:5_000_000])
-    with open("reports/intelligence/secret_findings.json", "w", encoding="utf-8") as f:
-        json.dump(all_findings, f, indent=2)
-
-    return {"status": "success", "findings": all_findings, "aggregated_text": combined, "count": len(all_findings)}
+    print_section("LIVE ENDPOINT DISCOVERY")
+    parsed = normalize_target(target)
+    hostname = parsed.hostname
+    scheme = parsed.scheme
+    base_url = f"{scheme}://{parsed.netloc}/"
+    print_status(f"Target: {base_url}")
+    print_status(f"Hostname: {hostname}")
+    # --------------------------------------------------------
+    # DNS RESOLUTION
+    # --------------------------------------------------------
+    print_section("DNS RESOLUTION")
+    addresses = resolve_target(hostname)
+    if not addresses:
+        print_error("DNS resolution failed.")
+        return {
+            "target": base_url,
+            "addresses": [],
+            "results": [],
+            "findings": [],
+            "aggregated_text": "",
+            "count": 0,
+            "status": "DNS_FAILED",
+        }
+    for address in addresses:
+        print_success(f"Resolved: {address}")
+    # --------------------------------------------------------
+    # ENDPOINT DISCOVERY
+    # --------------------------------------------------------
+    print_section("LIVE ENDPOINT TESTING")
+    print_status(
+        f"Testing {len(COMMON_PATHS)} endpoints "
+        f"with {MAX_WORKERS} workers."
+    )
+    results = []
+    findings = []
+    with ThreadPoolExecutor(
+        max_workers=MAX_WORKERS
+    ) as executor:
+        futures = {
+            executor.submit(
+                inspect_endpoint,
+                base_url,
+                path
+            ): path
+            for path in COMMON_PATHS
+        }
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                results.append(result)
+                display_result(result)
+                for finding in result["findings"]:
+                    findings.append({
+                        "path": result["path"],
+                        **finding,
+                    })
+            except Exception as exc:
+                print_error(
+                    f"Worker failure: {exc}"
+                )
+    # --------------------------------------------------------
+    # SUMMARY
+    # --------------------------------------------------------
+    successful = sum(
+        1 for result in results
+        if result["status"] is not None
+    )
+    open_endpoints = sum(
+        1 for result in results
+        if result["status"] == 200
+    )
+    print_section("PARSER SUMMARY")
+    print(f"Target:              {base_url}")
+    print(f"Resolved addresses:  {len(addresses)}")
+    print(f"Endpoints tested:    {len(results)}")
+    print(f"HTTP responses:      {successful}")
+    print(f"HTTP 200 responses:  {open_endpoints}")
+    print(f"Indicators found:    {len(findings)}")
+    if findings:
+        print_warning(
+            "Sensitive-content indicators require manual verification."
+        )
+    else:
+        print_success(
+            "No configured sensitive-content indicators detected."
+        )
+    print_section("PARSER COMPLETE")
+    return {
+        "target": base_url,
+        "addresses": addresses,
+        "results": results,
+        "findings": findings,
+        "aggregated_text": "",
+        "count": len(results),
+        "status": "COMPLETED",
+    }
+# ============================================================
+# ASYNC COMPATIBILITY WRAPPER
+# ============================================================
+async def parse_target_source_async(target):
+    return await asyncio.to_thread(
+        parse_target_source,
+        target
+    )
+# ============================================================
+# STANDALONE EXECUTION
+# ============================================================
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2:
+        print(
+            "Usage: python3 parser.py https://example.com"
+        )
+        sys.exit(1)
+    try:
+        parse_target_source(sys.argv[1])
+    except KeyboardInterrupt:
+        print_warning("Parser interrupted by user.")
+    except Exception as exc:
+        print_error(f"Parser failed: {exc}")
