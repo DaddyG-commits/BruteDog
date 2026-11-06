@@ -115,7 +115,7 @@ async def test_race_condition_async(host, port, path, payload, use_ssl, concurre
 async def run_autonomous_engine(target_host, credentials_list=None, options=None):
     """
     Elite Autonomous Red-Team Engine: WAF Bypass, IP Spoofing, Schema Mutation, 
-    and Race Condition Exploitation.
+    and Race Condition Exploitation with optimized non-blocking output.
     """
     try:
         resolved_ip = socket.gethostbyname(target_host)
@@ -160,15 +160,18 @@ async def run_autonomous_engine(target_host, credentials_list=None, options=None
     print(f"[*] Dispatched advanced payload permutations with dynamic IP rotation & header spoofing...")
 
     for path in target_paths:
-        # 1. Standard Multi-Vector Permutations with IP Spoofing
+        print(f"\033[90m[*] Probing endpoint route: {path} ({len(payloads)} mutations)...\033[0m")
+        
+        # 1. Standard Multi-Vector Permutations with IP Spoofing (Throttled console feedback)
         for payload in payloads:
             status, headers, body, is_vuln, vuln_type = await test_endpoint_differential_async(
                 resolved_ip, target_port, path, payload, use_ssl
             )
             
-            sys.stdout.write(f"\r\033[K\033[90m[PROBING + WAF EVASION] {path} | Code: {status}\033[0m")
-            sys.stdout.flush()
-            
+            # Only print output for non-standard or interesting return codes to prevent terminal freeze
+            if status in [200, 201, 302, 401, 403, 500]:
+                print(f"       └── [CODE {status}] Route: {path}")
+
             if is_vuln:
                 hit_data = {
                     "type": vuln_type,
