@@ -21,7 +21,7 @@ class ResponseFingerprinter:
         """Capture a known baseline response (e.g., a deliberate 404 or unauthenticated landing page)."""
         fingerprint = self._generate_fingerprint(status_code, text_content, headers)
         self.baselines[label] = fingerprint
-        logger.debug(f"[+] Captured baseline for [{label}] -> Hash: {fingerprint['body_hash'][:8]} (Len: {fingerprint['content_length'])")
+        logger.debug(f"[+] Captured baseline for [{label}] -> Hash: {fingerprint['body_hash'][:8]} (Len: {fingerprint['content_length']})")
 
     def _generate_fingerprint(self, status_code: int, text_content: str, headers: dict) -> Dict[str, Any]:
         """Extract structural features from a response body and headers."""
