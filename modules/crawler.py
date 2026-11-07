@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-CRAWLER.PY v6.2 — Aggressive Stateful Recon, Auto-Provisioning & JSON Code Leak Inspector
+CRAWLER.PY v6.3 — Aggressive Stateful Recon, Auto-Provisioning & JSON Code Leak Inspector
 Features:
 - Integrated with centralized SecureTransport for TLS/cookie session synchronization
 - Live autonomous test-account registration & session cookie/JWT capture
 - Automated JSON response inspection & regex sniffing for leaked OTPs / debug codes
-- Deep client-side JavaScript bundle & source code route harvesting
+- Deep client-side JavaScript bundle & source code route harvesting (enhanced with DOM sink inspection)
 - Aggressive HTML form action, method, and input mapping
 - Zero-disk in-memory intelligence collection
 """
@@ -15,6 +15,9 @@ import re
 import sys
 import time
 from urllib.parse import urlparse, urljoin, urlsplit
+
+# Import the DOM sink inspector for advanced JS route harvesting
+from modules.dom_sink_inspector import inspect_js_bundle
 
 # Common keys developers accidentally leave in JSON responses or debug endpoints
 OTP_DEBUG_KEYS = ["otp", "code", "pin", "debug", "token", "verification", "secret", "auth_code"]
@@ -92,7 +95,7 @@ def register_operator_account(transport, endpoints):
     return transport.cookie_jar, {}, leaked_secrets
 
 def crawl_target(transport):
-    log("\n[***] INITIALIZING AGGRESSIVE STATEFUL RECON & CRAWLER (v6.2) [***]", "\033[95m")
+    log("\n[***] INITIALIZING AGGRESSIVE STATEFUL RECON & CRAWLER (v6.3) [***]", "\033[95m")
     discovered_endpoints = set()
     discovered_scripts = set()
     seed_paths = [transport.base_path or "/", "/login", "/api", "/signup", "/dashboard", "/admin", "/settings", "/transfer"]
@@ -143,14 +146,20 @@ def crawl_target(transport):
             elif not script.startswith("http"):
                 discovered_scripts.add(urljoin(path, script))
 
-    # Phase 2: Client-Side JS Bundle Harvesting (Simulating Dev Mode Source Reading)
+    # Phase 2: Client-Side JS Bundle Harvesting & DOM Sink Inspection
     log(f"[*] Harvesting {len(discovered_scripts)} client-side JavaScript source bundles for hidden routes...", "\033[94m")
-    for script_path in list(discovered_scripts)[:10]:
+    for script_path in list(discovered_scripts)[:15]:
         s_status, _, s_content = transport.request("GET", script_path)
         if s_status == 200:
+            # Original regex check
             for match in endpoint_in_js.findall(s_content):
                 if len(match) > 3 and not any(match.endswith(ext) for ext in ['.js', '.css', '.png']):
                     discovered_endpoints.add(match)
+            
+            # Integrated DOM sink inspector parse
+            hidden_routes, _ = inspect_js_bundle(s_content)
+            for route in hidden_routes:
+                discovered_endpoints.add(route)
 
     # Filter out static assets
     filtered_endpoints = sorted(list({
