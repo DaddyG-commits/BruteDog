@@ -48,7 +48,6 @@ def inspect_json_for_leaked_codes(response_body):
 
     # Regex fallback to sniff out unparsed keys or mixed HTML/JSON debug payloads
     for key in OTP_DEBUG_KEYS:
-            for key in OTP_DEBUG_KEYS:
         pattern = r"['\"]?" + key + r"['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9_\-]{4,12})['\"]?"
         match = re.search(pattern, response_body, re.I)
         if match and key not in leaked_codes:
@@ -179,3 +178,4 @@ def crawl_target(transport):
         "operator_credentials": operator_creds,
         "leaked_secrets": leaked_secrets
     }
+
