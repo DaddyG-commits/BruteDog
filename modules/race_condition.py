@@ -3,8 +3,8 @@
 RACE_CONDITION.PY — High-Concurrency API Logic & Race Condition Fuzzing Engine (v7.0)
 Features:
 - Single-connection HTTP/2 stream multiplexing (True Single-Packet Concurrency)
+- Persistent Session Pool & Shared Cookie Jar integration
 - Eliminates TCP handshake queue jitter and network skew
-- Response anomaly and state-drift detection across parallel streams
 - Zero-disk live terminal streaming
 """
 import asyncio
@@ -13,6 +13,7 @@ import json
 import time
 import sys
 from urllib.parse import urlsplit
+from modules.session_pool import PersistentSessionPool
 
 REQUEST_TIMEOUT = 15.0
 
@@ -20,46 +21,50 @@ def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
-async def fire_single_packet_race_async(host, port, path, payload, secure, num_streams=20, cookies=None, headers=None):
+async def fire_single_packet_race_async(host, port, path, payload, secure, num_streams=20, cookies=None, headers=None, session_pool=None):
     """
-    Pipes multiple concurrent HTTP/2 streams down a single socket connection,
-    forcing simultaneous server-side execution window handling without TCP skew.
+    Pipes multiple concurrent HTTP/2 streams down a single socket connection using 
+    a persistent session pool, forcing simultaneous server-side execution window 
+    handling without TCP skew or session drops.
     """
     scheme = "https" if secure else "http"
-    target_url = f"{scheme}://{host}:{port}{path}" if port else f"{scheme}://{host}{path}"
+    target_base = f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
+    target_url = f"{target_base}{path}"
     
     log(f"\n[***] INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ENGINE [***]", "\033[95m")
     log(f"[*] Firing {num_streams} simultaneous multiplexed streams against: {target_url}", "\033[94m")
     
-    default_headers = {
+    # Initialize or utilize the shared session pool for persistent cookies and headers
+    if session_pool is None:
+        session_pool = PersistentSessionPool(base_url=target_base, verify_ssl=False, http2=True)
+    
+    if cookies:
+        session_pool.cookie_jar.update(cookies)
+    
+    if headers:
+        session_pool.update_headers(headers)
+
+    stream_override_headers = {
         "User-Agent": "BruteDog-RaceCondition/7.0",
         "Content-Type": "application/json",
         "Accept": "application/json, text/plain, */*"
     }
-    if headers:
-        default_headers.update(headers)
 
-    client_kwargs = {
-        "http2": True,
-        "verify": False,
-        "timeout": REQUEST_TIMEOUT
-    }
-    
     start_time = time.monotonic()
     results = []
     
-    async with httpx.AsyncClient(**client_kwargs) as client:
+    # Use the session pool's async client to ensure shared cookie/state persistence
+    async with session_pool.get_async_client(timeout=REQUEST_TIMEOUT) as client:
         try:
             tasks = []
             for i in range(num_streams):
-                stream_headers = default_headers.copy()
-                stream_headers["X-Race-Stream-ID"] = f"stream-{i}"
+                req_headers = stream_override_headers.copy()
+                req_headers["X-Race-Stream-ID"] = f"stream-{i}"
                 
-                # Dispatch task via HTTP/2 client session
+                # Dispatch task via HTTP/2 multiplexed client session
                 task = client.post(
-                    target_url,
-                    headers=stream_headers,
-                    cookies=cookies or {},
+                    path, # Relative path works cleanly with base_url set in PersistentSessionPool
+                    headers=req_headers,
                     json=payload
                 )
                 tasks.append(task)
@@ -91,11 +96,10 @@ async def fire_single_packet_race_async(host, port, path, payload, secure, num_s
             log(f"[-] HTTP/2 multiplexing critical error: {exc}", "\033[91m")
             return []
 
-def run_race_condition_test(target_host, port=None, use_ssl=None, payload=None, cookies=None, headers=None):
+def run_race_condition_test(target_host, port=None, use_ssl=None, payload=None, cookies=None, headers=None, session_pool=None):
     """
     Synchronous wrapper matching your original runner interface, 
-    upgraded under the hood to execute true HTTP/2 single-packet concurrency 
-    with safe event-loop reuse.
+    upgraded to route through the centralized session pool with safe event-loop reuse.
     """
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     host = parsed.hostname
@@ -114,7 +118,8 @@ def run_race_condition_test(target_host, port=None, use_ssl=None, payload=None, 
         secure=secure,
         num_streams=20,
         cookies=cookies,
-        headers=headers
+        headers=headers,
+        session_pool=session_pool
     )
     
     try:
@@ -123,10 +128,9 @@ def run_race_condition_test(target_host, port=None, use_ssl=None, payload=None, 
         loop = None
 
     if loop and loop.is_running():
-        # If called from an active event loop, schedule it cleanly
-        # Note: If called synchronously via ThreadPoolExecutor, this handles it via a new loop or thread future.
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor() as pool:
             return pool.submit(asyncio.run, coro).result()
     else:
         return asyncio.run(coro)
+
