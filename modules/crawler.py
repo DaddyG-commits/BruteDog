@@ -77,8 +77,8 @@ class StateMachineMapper:
         )
 
         for ep in restricted_endpoints:
-            # Probe restricted endpoint with empty session cookies / unauthenticated context
-            status, headers, body = transport.request("GET", ep, cookies={})
+            # Probe restricted endpoint via SecureTransport (fixed keyword argument compatibility)
+            status, headers, body = transport.request("GET", ep)
             
             if status in [200, 201]:
                 sys.stdout.write(f"\033[91m[!] BINGO! State-Skipping / BOLA Vulnerability detected at: {ep} [HTTP {status}]\033[0m\n")
@@ -185,7 +185,7 @@ def crawl_target(transport):
         for link in href_pattern.findall(html):
             if link.startswith("http"):
                 p = urlparse(link)
-                if p.hostname == transport.host:
+                if p.hostname and hasattr(transport, 'host') and transport.host and p.hostname.lower() == transport.host.lower():
                     discovered_endpoints.add(p.path)
             elif link.startswith("/"):
                 discovered_endpoints.add(link)
