@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-TRANSPORT.PY — Centralized Stealth HTTP & TLS Fingerprint Evasion Layer
+TRANSPORT.PY v6.3 — Centralized Stealth HTTP, TLS Evasion & Behavioral Middleware
 Ensures all modules share cookies, headers, and bypass edge firewalls seamlessly.
 """
 import http.client
 import json
 import ssl
 from urllib.parse import urlsplit
+
+# Import advanced evasion & behavioral modules
+from modules.tls_evasion import create_spoofed_ssl_context
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -24,13 +28,15 @@ class SecureTransport:
             self.cookie_jar = new_cookies
 
     def request(self, method, path, payload=None, extra_headers=None):
+        # Inject randomized human-like velocity jitter to defeat anti-bot limiters
+        apply_behavioral_jitter()
+
         endpoint = f"{self.base_path}{path}" if not path.startswith(self.base_path) else path
         conn = None
         try:
             if self.secure:
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
+                # Use browser-grade TLS spoofed context to bypass JA3/JA4 edge blocks (Cloudflare/Akamai)
+                ctx = create_spoofed_ssl_context()
                 conn = http.client.HTTPSConnection(self.host, self.port, timeout=8, context=ctx)
             else:
                 conn = http.client.HTTPConnection(self.host, self.port, timeout=8)
@@ -42,6 +48,9 @@ class SecureTransport:
                 "Accept-Language": "en-US,en;q=0.5",
                 "Connection": "close"
             }
+
+            # Inject randomized browser client hints
+            headers.update(get_randomized_hints())
 
             if self.cookie_jar:
                 headers["Cookie"] = self.cookie_jar
