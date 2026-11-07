@@ -76,8 +76,6 @@ def display_progress(message):
 # ============================================================
 # TARGET VALIDATION
 # ============================================================
-ALLOWED_DOMAIN = "cryptobytes.online"
-
 def normalize_target(raw_target):
     raw_target = raw_target.strip()
     if not raw_target:
@@ -98,13 +96,11 @@ def normalize_target(raw_target):
     hostname = parsed.hostname.encode(
         "idna"
     ).decode("ascii").lower()
-    if not (
-        hostname == ALLOWED_DOMAIN
-        or hostname.endswith("." + ALLOWED_DOMAIN)
-    ):
-        raise ValueError(
-            f"Target outside configured scope: {ALLOWED_DOMAIN}"
-        )
+    
+    # Dynamic acceptance of any valid target domain or IP
+    if not hostname:
+        raise ValueError("Invalid target hostname.")
+        
     try:
         port = parsed.port or (
             443 if parsed.scheme == "https" else 80
