@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V6.1 — LIVE SECURITY ASSESSMENT & RED-TEAM ORCHESTRATION ENGINE
+BRUTEDOG V6.3 — LIVE SECURITY ASSESSMENT & RED-TEAM ORCHESTRATION ENGINE
 Main Orchestrator:
 - Pre-flight DNS and target scope validation
 - Network reconnaissance & port scanning
@@ -55,7 +55,7 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
  ██████╔╝██║  ██║╚██████╔╝   ██║   ███████╗██████╔╝
 {RESET}{NEON_BLUE}
 ════════════════════════════════════════════════════════════
-        BRUTEDOG V6.1 — STATEFUL RED-TEAM ORCHESTRATION
+        BRUTEDOG V6.3 — STATEFUL RED-TEAM ORCHESTRATION
         AUTONOMOUS OFFENSIVE ENGINE / LIVE TELEMETRY STREAMING
 ════════════════════════════════════════════════════════════
 {RESET}
@@ -183,7 +183,7 @@ async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
     print(BANNER)
-    log("[SYSTEM] BruteDog Active Orchestrator Initialized (v6.1).")
+    log("[SYSTEM] BruteDog Active Orchestrator Initialized (v6.3).")
 
     # --------------------------------------------------------
     # TARGET INPUT
@@ -333,3 +333,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
