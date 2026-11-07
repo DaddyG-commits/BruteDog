@@ -160,7 +160,6 @@ def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=Non
     if fingerprinter:
         is_fp, fp_reason = fingerprinter.is_false_positive(status, body, headers)
         if is_fp:
-            # Filtered out as false positive/soft error page
             return [], []
     
     if status in [200, 201, 302] and any(k in body.lower() for k in ["token", "success", "session", "welcome", "auth", "jwt"]):
@@ -340,8 +339,8 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     if not discovered_paths:
         discovered_paths = FALLBACK_LOGIN_PATHS
 
-    if transport.cookie_jar:
-        success(f"Propagating active operator session cookie across transport layer.")
+    if getattr(transport, "cookie_jar", None):
+        success("Propagating active operator session cookie across transport layer.")
         session_pool.cookie_jar.update(transport.cookie_jar)
         verify_hijacked_session(transport, "/dashboard")
 
@@ -383,7 +382,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     except Exception as exc:
         error(f"Session hijack failed: {exc}")
 
-    # 3. High-Concurrency HTTP/2 Single-Packet Race Condition Fuzzing (using shared session pool)
+    # 3. High-Concurrency HTTP/2 Single-Packet Race Condition Fuzzing
     try:
         await run_race_condition_test(
             target_url, 
@@ -415,4 +414,3 @@ if __name__ == "__main__":
         warning("Engine interrupted by operator.")
     except Exception as exc:
         error(f"Engine failure: {exc}")
-
