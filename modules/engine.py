@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v6.2 — High-Aggression Stateful Crawling & Exploitation Engine
+BRUTEDOG ENGINE v6.3 — High-Aggression Stateful Crawling & Exploitation Engine
 Features:
-- Integrated with centralized SecureTransport middleware for TLS/cookie synchronization
-- Stateful intelligence ingestion from v6.2 crawler (endpoints, session cookies, leaked OTPs)
+- Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & behavioral jitter)
+- Stateful intelligence ingestion from v6.3 crawler & DOM sink inspector
 - Live autonomous test-account session propagation across exploit modules
 - Interactive target selection & automated resolution
 - Stateful, adaptive response-parsing and payload mutation loop
@@ -275,7 +275,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None):
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATEFUL OFFENSIVE EXPLOITATION ENGINE v6.2")
+    section("BRUTEDOG STATEFUL OFFENSIVE EXPLOITATION ENGINE v6.3")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -308,7 +308,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         
     start = time.monotonic()
     
-    # Initialize Centralized Secure Transport Wrapper
+    # Initialize Centralized Secure Transport Wrapper (v6.3 with TLS Evasion & Behavioral Jitter)
     transport = SecureTransport(target_url)
 
     # 0. Stateful Dynamic Web Crawling & Auto-Provisioning
@@ -393,3 +393,4 @@ if __name__ == "__main__":
         warning("Engine interrupted by operator.")
     except Exception as exc:
         error(f"Engine failure: {exc}")
+
