@@ -5,6 +5,7 @@ Features:
 - Live unredacted extraction of EVM private keys, Bitcoin WIFs, and BIP39 seed phrases
 - Direct on-screen terminal streaming of harvested raw secrets and API tokens
 - Zero-disk memory storage (no report files written)
+- Anti-noise validation filters for high-precision cryptographic detection
 """
 import re
 import sys
@@ -20,6 +21,14 @@ COLORS = {
     "BOLD": "\033[1m",
 }
 
+# Common non-seed words appearing in HTML logs or error text to prevent false positives
+NOISE_WORDS = {
+    "target", "https", "http", "online", "results", "url", "favicon", "ico", 
+    "path", "status", "text", "html", "redirect", "none", "findings", "error", 
+    "elapsed", "request", "response", "content", "type", "header", "server",
+    "well", "known", "file", "index", "main", "script", "style", "css", "png"
+}
+
 def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
@@ -30,11 +39,13 @@ def is_valid_bip39_seed(text):
     words = text.strip().lower().split()
     if len(words) not in (12, 15, 18, 21, 24):
         return False
-    if not all(
-        word.isalpha() and 1 <= len(word) <= 8
-        for word in words
-    ):
-        return False
+    
+    for word in words:
+        if not word.isalpha() or not (3 <= len(word) <= 8):
+            return False
+        if word in NOISE_WORDS:
+            return False
+            
     return True
 
 def is_valid_evm_key(key_str):
@@ -50,7 +61,6 @@ def is_valid_evm_key(key_str):
     except ValueError:
         return False
     
-    # Corrected multi-line hex string assignment
     curve_order = int(
         "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE"
         "BAAEDCE6AF48A03BBFD25E8CD0364141",
@@ -75,12 +85,8 @@ def _record_finding(findings, seen, secret, secret_type, offset):
     terminal(
         f"\n{COLORS['RED']}{COLORS['BOLD']}[***] LIVE SECRET EXPOSURE HARVESTED [{secret_type}] [***]{COLORS['RESET']}"
     )
-    terminal(
-        f"  ├── Offset      : {offset}"
-    )
-    terminal(
-        f"  └── Raw Secret  : {COLORS['GREEN']}{secret}{COLORS['RESET']}"
-    )
+    terminal(f"  ├── Offset      : {offset}")
+    terminal(f"  └── Raw Secret  : {COLORS['GREEN']}{secret}{COLORS['RESET']}")
 
 def harvest_private_keys(target_source_data=""):
     terminal(
@@ -131,8 +137,8 @@ def harvest_private_keys(target_source_data=""):
             match.start()
         )
 
-    # 3. Mnemonic Seed Candidates
-    word_pattern = re.compile(r"\b[a-zA-Z]{1,8}\b")
+    # 3. Mnemonic Seed Candidates (Filtered)
+    word_pattern = re.compile(r"\b[a-zA-Z]{3,8}\b")
     words = list(word_pattern.finditer(content))
     allowed_lengths = (12, 15, 18, 21, 24)
     for window_size in allowed_lengths:
@@ -159,11 +165,6 @@ def harvest_private_keys(target_source_data=""):
         f"\n{COLORS['GREEN']}[+] Cryptographic harvesting scan complete."
         f"{COLORS['RESET']}"
     )
-    terminal(
-        f"    Total Secrets Harvested : {len(findings)}"
-    )
-    terminal(
-        f"    Local Files Created     : 0 (Streamed live on screen)"
-    )
-    
+    terminal(f"    Total Secrets Harvested : {len(findings)}")
+    terminal(f"    Local Files Created     : 0 (Streamed live on screen)")
     return findings
