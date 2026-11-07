@@ -23,7 +23,7 @@ from modules.engine import run_autonomous_engine
 from modules.replayer import replay_and_inject_payloads
 from modules.bruter import execute_active_assault_engine
 from modules.no_sql_prototype import run_nosql_assault
-from modules.cloud_apex_suite import run_cloud_apex_suite
+from modules.cloud_apex import run_cloud_apex
 from modules.pivot import run_pivot_engine
 from modules.dumper import harvest_email_intelligence
 from modules.keyharvester import harvest_private_keys
@@ -286,7 +286,7 @@ async def async_main():
     section("PHASE 5 — CLOUD INFRASTRUCTURE & LIQUIDITY AUDIT")
     try:
         display_progress("Executing cloud control plane pivot and IMDS metadata exfiltration.")
-        await run_cloud_apex_suite(target["url"])
+        await run_cloud_apex(target["url"])
 
         display_progress("Running autonomous pivot engine and covert exfiltration preparation.")
         await run_pivot_engine(target["url"])
