@@ -49,16 +49,16 @@ def is_valid_evm_key(key_str):
         value = int(clean, 16)
     except ValueError:
         return False
-    curve_order = (
-        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE
-        BAAEDCE6AF48A03BBFD25E8CD0364141
+    
+    # Corrected multi-line hex string assignment
+    curve_order = int(
+        "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE"
+        "BAAEDCE6AF48A03BBFD25E8CD0364141",
+        16
     )
     return 0 < value < curve_order
 
 def _record_finding(findings, seen, secret, secret_type, offset):
-    """
-    Record and actively stream unredacted harvested secrets live to the terminal.
-    """
     dedup_key = (secret_type, secret)
     if dedup_key in seen:
         return
@@ -83,11 +83,6 @@ def _record_finding(findings, seen, secret, secret_type, offset):
     )
 
 def harvest_private_keys(target_source_data=""):
-    """
-    Active Cryptographic Secret-Exposure & Harvesting Engine.
-    Scans target response text for EVM keys, Bitcoin WIFs, and seed phrases,
-    streaming raw unredacted values live to stdout.
-    """
     terminal(
         f"\n{COLORS['MAGENTA']}[***] "
         f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING "
@@ -105,9 +100,7 @@ def harvest_private_keys(target_source_data=""):
 
     content = str(target_source_data)
     
-    # -------------------------------------------------
     # 1. EVM Private-Key Candidates
-    # -------------------------------------------------
     hex_pattern = re.compile(
         r"(?<![a-fA-F0-9])(?:0x)?[a-fA-F0-9]{64}"
         r"(?![a-fA-F0-9])"
@@ -123,9 +116,7 @@ def harvest_private_keys(target_source_data=""):
                 match.start()
             )
 
-    # -------------------------------------------------
     # 2. Bitcoin WIF Candidates
-    # -------------------------------------------------
     wif_pattern = re.compile(
         r"(?<![1-9A-HJ-NP-Za-km-z])"
         r"[5KL][1-9A-HJ-NP-Za-km-z]{50,51}"
@@ -140,9 +131,7 @@ def harvest_private_keys(target_source_data=""):
             match.start()
         )
 
-    # -------------------------------------------------
     # 3. Mnemonic Seed Candidates
-    # -------------------------------------------------
     word_pattern = re.compile(r"\b[a-zA-Z]{1,8}\b")
     words = list(word_pattern.finditer(content))
     allowed_lengths = (12, 15, 18, 21, 24)
@@ -166,9 +155,6 @@ def harvest_private_keys(target_source_data=""):
             )
             break
 
-    # -------------------------------------------------
-    # 4. Final Terminal Summary
-    # -------------------------------------------------
     terminal(
         f"\n{COLORS['GREEN']}[+] Cryptographic harvesting scan complete."
         f"{COLORS['RESET']}"
