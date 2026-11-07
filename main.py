@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V5.6 — LIVE SECURITY ASSESSMENT & RED-TEAM ORCHESTRATION ENGINE
+BRUTEDOG V6.1 — LIVE SECURITY ASSESSMENT & RED-TEAM ORCHESTRATION ENGINE
 Main Orchestrator:
 - Pre-flight DNS and target scope validation
 - Network reconnaissance & port scanning
@@ -55,8 +55,8 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
  ██████╔╝██║  ██║╚██████╔╝   ██║   ███████╗██████╔╝
 {RESET}{NEON_BLUE}
 ════════════════════════════════════════════════════════════
-        BRUTEDOG V5.6 — LIVE RED-TEAM SECURITY ORCHESTRATION
-        AUTONOMOUS OFFENSIVE ENGINE / LIVE TERMINAL STREAMING
+        BRUTEDOG V6.1 — STATEFUL RED-TEAM ORCHESTRATION
+        AUTONOMOUS OFFENSIVE ENGINE / LIVE TELEMETRY STREAMING
 ════════════════════════════════════════════════════════════
 {RESET}
 """
@@ -183,7 +183,7 @@ async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
     print(BANNER)
-    log("[SYSTEM] BruteDog Active Orchestrator Initialized (v5.6).")
+    log("[SYSTEM] BruteDog Active Orchestrator Initialized (v6.1).")
 
     # --------------------------------------------------------
     # TARGET INPUT
@@ -252,11 +252,11 @@ async def async_main():
         log(f"[PARSER ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 3 — AUTHENTICATION ENDPOINT STUFFING & REPLAY
+    # PHASE 3 — STATEFUL CRAWLING, AUTH STUFFING & REPLAY
     # --------------------------------------------------------
-    section("PHASE 3 — AUTHENTICATION STUFFING & REPLAYER ASSAULT")
+    section("PHASE 3 — STATEFUL CRAWL, AUTH STUFFING & REPLAYER")
     try:
-        display_progress("Executing active credential stuffing and authentication bypass loops.")
+        display_progress("Executing stateful crawler, autonomous operator provisioning, and live telemetry engine.")
         await run_autonomous_engine(target_host=target["url"])
 
         display_progress("Replaying secondary attack queue & executing session token fabrication.")
