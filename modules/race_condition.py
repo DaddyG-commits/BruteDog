@@ -26,7 +26,7 @@ async def fire_single_packet_race_async(host, port, path, payload, secure, num_s
     forcing simultaneous server-side execution window handling without TCP skew.
     """
     scheme = "https" if secure else "http"
-    target_url = f"{scheme://{host}:{port}{path}" if port else f"{scheme://{host}{path}"
+    target_url = f"{scheme}://{host}:{port}{path}" if port else f"{scheme}://{host}{path}"
     
     log(f"\n[***] INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ENGINE [***]", "\033[95m")
     log(f"[*] Firing {num_streams} simultaneous multiplexed streams against: {target_url}", "\033[94m")
