@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V6.3 — LIVE SECURITY ASSESSMENT & RED-TEAM ORCHESTRATION ENGINE
+BRUTEDOG V7.0 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE
 Main Orchestrator:
 - Pre-flight DNS and target scope validation
-- Network reconnaissance & port scanning
+- Network reconnaissance & stealth port scanning
 - Source intelligence & credential exposure parsing
-- Autonomous multi-protocol brute-forcing, cloud pivoting, and replaying
-- High-concurrency race condition and logic fuzzing integration
+- Autonomous state-machine mapping, BOLA auditing, and HTTP/2 race condition exploitation
 - Live terminal streaming with zero-disk memory persistence
 """
 import asyncio
@@ -55,8 +54,8 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
  ██████╔╝██║  ██║╚██████╔╝   ██║   ███████╗██████╔╝
 {RESET}{NEON_BLUE}
 ════════════════════════════════════════════════════════════
-        BRUTEDOG V6.3 — STATEFUL RED-TEAM ORCHESTRATION
-        AUTONOMOUS OFFENSIVE ENGINE / LIVE TELEMETRY STREAMING
+        BRUTEDOG V7.0 — STATE-MACHINE & LOGIC EXPLOITATION
+        HTTP/2 SINGLE-PACKET CONCURRENCY / LIVE TELEMETRY
 ════════════════════════════════════════════════════════════
 {RESET}
 """
@@ -183,7 +182,7 @@ async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
     print(BANNER)
-    log("[SYSTEM] BruteDog Active Orchestrator Initialized (v6.3).")
+    log("[SYSTEM] BruteDog Active Orchestrator Initialized (v7.0).")
 
     # --------------------------------------------------------
     # TARGET INPUT
@@ -252,11 +251,11 @@ async def async_main():
         log(f"[PARSER ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 3 — STATEFUL CRAWLING, AUTH STUFFING & REPLAY
+    # PHASE 3 — STATE-MACHINE CRAWLING & LOGIC EXPLOITATION
     # --------------------------------------------------------
-    section("PHASE 3 — STATEFUL CRAWL, AUTH STUFFING & REPLAYER")
+    section("PHASE 3 — STATE-MACHINE CRAWL, BOLA & REPLAYER")
     try:
-        display_progress("Executing stateful crawler, autonomous operator provisioning, and live telemetry engine.")
+        display_progress("Executing state-machine crawler, BOLA state-skipping checks, and live telemetry engine.")
         await run_autonomous_engine(target_host=target["url"])
 
         display_progress("Replaying secondary attack queue & executing session token fabrication.")
@@ -265,9 +264,9 @@ async def async_main():
         log(f"[ENGINE ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 3.5 — AGGRESSIVE DB ASSAULT, SESSION HIJACKING & RACE CONDITIONS
+    # PHASE 3.5 — AGGRESSIVE DB ASSAULT, SESSION HIJACKING & HTTP/2 RACE CONDITIONS
     # --------------------------------------------------------
-    section("PHASE 3.5 — AGGRESSIVE DB ASSAULT, SESSION HIJACKING & CONCURRENCY")
+    section("PHASE 3.5 — AGGRESSIVE DB ASSAULT, SESSION HIJACKING & HTTP/2 CONCURRENCY")
     try:
         display_progress("Executing time-based blind SQLi and NoSQL operator injection.")
         await run_nosql_assault(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
@@ -275,7 +274,7 @@ async def async_main():
         display_progress("Executing JWT secret cracking and cookie privilege escalation fuzzing.")
         await run_session_hijack(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
 
-        display_progress("Firing high-concurrency race condition threads against transaction endpoints.")
+        display_progress("Firing HTTP/2 single-packet multiplexed streams against transaction race condition windows.")
         await run_race_condition_test(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
     except Exception as exc:
         log(f"[EXPLOIT/CONCURRENCY ERROR] {exc}", RED)
