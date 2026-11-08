@@ -332,7 +332,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     section("ADVANCED NETWORK & SERVICE RECON (SCANNER V2.0)")
     try:
         scan_results = await run_port_scanner(host, concurrency=20)
-        if scan_results.get("status"] == "COMPLETED":
+        if scan_results.get("status") == "COMPLETED":
             open_port_list = scan_results.get("open_ports", [])
             success(f"Scanner V2.0 completed. Found {len(open_port_list)} open ports.")
             
