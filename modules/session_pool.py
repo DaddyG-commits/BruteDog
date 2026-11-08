@@ -8,6 +8,7 @@ class PersistentSessionPool:
     """
     Manages persistent sessions, cookie jars, and headers across HTTP/2 multiplexed 
     requests to prevent session drops during high-concurrency race conditions.
+    Weaponized with automatic CSRF synchronization and wrapper request handlers.
     """
     def __init__(self, base_url: str, verify_ssl: bool = False, http2: bool = True):
         self.base_url = base_url.rstrip("/")
@@ -20,17 +21,27 @@ class PersistentSessionPool:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
+            "X-Requested-With": "XMLHttpRequest"
         }
         logger.info(f"[+] Initialized PersistentSessionPool for target: {self.base_url} (HTTP/2: {self.http2})")
 
     def update_headers(self, new_headers: Dict[str, str]) -> None:
-        """Dynamically update default headers (e.g., Authorization Bearer tokens)."""
+        """Dynamically update default headers (e.g., Authorization Bearer tokens or CSRF tokens)."""
         self.default_headers.update(new_headers)
         logger.debug(f"[+] Session headers updated: list of keys -> {list(new_headers.keys())}")
 
+    def set_csrf_token(self, token: str) -> None:
+        """Automatically injects CSRF tokens into standard framework header keys."""
+        if token:
+            self.update_headers({
+                "X-CSRF-TOKEN": token,
+                "X-XSRF-TOKEN": token
+            })
+            logger.debug(f"[+] CSRF tokens synchronized into session headers.")
+
     def get_client(self, timeout: float = 10.0) -> httpx.Client:
         """Returns a synchronous httpx.Client sharing the persistent cookie jar."""
-        client = httpx.Client(
+        return httpx.Client(
             base_url=self.base_url,
             cookies=self.cookie_jar,
             headers=self.default_headers,
@@ -39,11 +50,10 @@ class PersistentSessionPool:
             timeout=timeout,
             follow_redirects=True
         )
-        return client
 
     def get_async_client(self, timeout: float = 10.0) -> httpx.AsyncClient:
         """Returns an asynchronous httpx.AsyncClient sharing the persistent cookie jar and HTTP/2 settings."""
-        client = httpx.AsyncClient(
+        return httpx.AsyncClient(
             base_url=self.base_url,
             cookies=self.cookie_jar,
             headers=self.default_headers,
@@ -52,13 +62,11 @@ class PersistentSessionPool:
             timeout=timeout,
             follow_redirects=True
         )
-        return client
 
     def sync_cookies(self, response_cookies: Union[httpx.Cookies, dict, str]) -> None:
         """Manually synchronize external cookie responses into the master jar safely, handling strings/dicts."""
         try:
             if isinstance(response_cookies, str):
-                # If a raw string cookie header is passed, parse it safely
                 for cookie_pair in response_cookies.split(";"):
                     if "=" in cookie_pair:
                         k, v = cookie_pair.strip().split("=", 1)
@@ -75,3 +83,39 @@ class PersistentSessionPool:
             logger.debug("[+] Cookie jar synchronized with latest response cookies.")
         except Exception as exc:
             logger.error(f"[-] Failed to synchronize cookies: {exc}")
+
+    def request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, timeout: float = 10.0) -> tuple:
+        """
+        Unified wrapper method used by crawlers and assessment engines to fire requests 
+        while auto-syncing cookies and returning standardized (status, headers, body) tuples.
+        """
+        clean_path = path if path.startswith("/") else f"/{path}"
+        url = clean_path if clean_path.startswith("http") else clean_path
+        
+        with self.get_client(timeout=timeout) as client:
+            try:
+                if method.upper() == "POST":
+                    # Support both form data and json payloads seamlessly
+                    if payload and any(isinstance(v, (dict, list)) for v in payload.values()):
+                        resp = client.post(url, json=payload)
+                    else:
+                        resp = client.post(url, data=payload)
+                elif method.upper() == "PUT":
+                    resp = client.put(url, json=payload)
+                else:
+                    resp = client.get(url)
+
+                # Automatically synchronize any new cookies returned by the server
+                if resp.cookies:
+                    self.cookie_jar.update(resp.cookies)
+
+                # Check if a Set-Cookie header came through in raw form
+                set_cookie = resp.headers.get("set-cookie") or resp.headers.get("Set-Cookie")
+                if set_cookie:
+                    self.sync_cookies(set_cookie)
+
+                return resp.status_code, dict(resp.headers), resp.text
+            except Exception as e:
+                logger.error(f"[-] Request failed for {method} {url}: {e}")
+                return 0, {}, str(e)
+
