@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """
-CRAWLER.PY v7.3 — Advanced Stateful DOM Form Inspector & Red-Team Recon Engine
-Senior Red Team Edition: Dynamic form input mapping, CSRF extraction, and adaptive auth probing.
-Includes strategic asset/wallet/transaction route injection.
+CRAWLER.PY v7.4 — Advanced Stateful DOM Form Inspector & Red-Team Recon Engine
+Senior Red Team Edition: Dynamic API prefix expansion, content-length entropy inspection, 
+and robust false-positive elimination for admin/BOLA checks.
 """
 import json
 import random
 import re
 import sys
 from urllib.parse import urlparse, urljoin
-from bs4 import BeautifulSoup  # Robust HTML parser for deep DOM inspection
-
-from modules.dom_sink_inspector import inspect_js_bundle
+from bs4 import BeautifulSoup
 
 OTP_DEBUG_KEYS = ["otp", "code", "pin", "debug", "token", "verification", "secret", "auth_code"]
 
@@ -48,7 +46,7 @@ class StateMachineMapper:
         return self.state_graph
 
     def evaluate_state_skipping(self, transport):
-        sys.stdout.write("\033[95m[***] EVALUATING STATE-SKIPPING & BOLA VECTORS [***]\033[0m\n")
+        sys.stdout.write("\033[95m[***] EVALUATING STATE-SKIPPING & BOLA VECTORS (ENHANCED) [***]\033[0m\n")
         sys.stdout.flush()
         
         vulnerabilities = []
@@ -58,9 +56,20 @@ class StateMachineMapper:
 
         for ep in restricted_endpoints:
             status, headers, body = transport.request("GET", ep)
-            if status in [200, 201]:
-                sys.stdout.write(f"\033[91m[!] BINGO! State-Skipping / BOLA Vulnerability detected at: {ep} [HTTP {status}]\033[0m\n")
+            
+            # False-positive elimination: Check if HTTP 200 actually returned a login form or SPA fallback shell
+            is_false_positive = False
+            if status in [200, 201] and isinstance(body, str):
+                lower_body = body.lower()
+                if any(term in lower_body for term in ["login", "signin", "password", "auth-form", "<form"]):
+                    # If it's an unauthenticated login shell disguised as 200 OK, it's a false positive
+                    is_false_positive = True
+
+            if status in [200, 201] and not is_false_positive:
+                sys.stdout.write(f"\033[91m[!] BINGO! True State-Skipping / BOLA Vulnerability detected at: {ep} [HTTP {status}]\033[0m\n")
                 vulnerabilities.append(ep)
+            elif is_false_positive:
+                sys.stdout.write(f"\033[93m[-] Endpoint {ep} returned HTTP 200 but served a login gate. False positive avoided.\033[0m\n")
             else:
                 sys.stdout.write(f"\033[90m[-] Protected state gate enforced at {ep} [HTTP {status}]\033[0m\n")
             sys.stdout.flush()
@@ -134,8 +143,8 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
     
     if not target_forms:
         target_forms = [
-            {"action": "/api/auth/register", "method": "POST", "inputs": [{"name": "email"}, {"name": "password"}, {"name": "username"}]},
-            {"action": "/user/register", "method": "POST", "inputs": [{"name": "email"}, {"name": "password"}]}
+            {"action": "/api/v1/auth/register", "method": "POST", "inputs": [{"name": "email"}, {"name": "password"}, {"name": "username"}, {"name": "referBy"}]},
+            {"action": "/user/register", "method": "POST", "inputs": [{"name": "email"}, {"name": "password"}, {"name": "referBy"}]}
         ]
 
     for form in target_forms:
@@ -151,6 +160,8 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
                 payload[inp['name']] = f"operator_{rand_id}"
             elif 'pass' in name:
                 payload[inp['name']] = operator_pass
+            elif 'refer' in name:
+                payload[inp['name']] = None  # Testing null referral bypass vector explicitly
             elif 'token' in name or 'csrf' in name:
                 payload[inp['name']] = inp.get('default', 'dummy_token')
             else:
@@ -169,7 +180,7 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
             leaked_secrets.update(detected_codes)
 
         if status in [200, 201, 302]:
-            cookie_header = headers.get("set-cookie")
+            cookie_header = headers.get("set-cookie") or headers.get("Set-Cookie", "")
             if cookie_header:
                 extracted_cookies = {}
                 for cookie_part in cookie_header.split(";"):
@@ -186,12 +197,12 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
     return session_output, operator_creds, leaked_secrets
 
 def crawl_target(transport):
-    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & DOM CRAWLER (v7.3) [***]", "\033[95m")
+    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & DOM CRAWLER (v7.4) [***]", "\033[95m")
     discovered_endpoints = set()
     discovered_scripts = set()
     all_forms_intel = []
     
-    # Strategic seed paths including wallet, transaction, homepage, and asset routes
+    # Expanded seed paths including common Laravel & SPA API prefixes
     seed_paths = [
         transport.base_path or "/", 
         "/homepage",
@@ -200,17 +211,22 @@ def crawl_target(transport):
         "/transaction",
         "/transactions",
         "/login", 
-        "/api", 
+        "/api",
+        "/api/v1",
+        "/api/v1/user",
+        "/api/v1/auth/me",
+        "/api/v1/user/profile",
+        "/api/v1/wallet",
         "/signup", 
         "/dashboard", 
         "/admin", 
+        "/admin/password/reset",
         "/settings", 
         "/transfer", 
         "/user/register",
         "/user/wallet",
         "/user/dashboard",
-        "/api/user/wallet",
-        "/api/v1/wallet"
+        "/api/user/wallet"
     ]
 
     href_pattern = re.compile(r'href=["\']([^"\']+)["\']', re.I)
