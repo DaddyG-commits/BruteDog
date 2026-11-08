@@ -163,10 +163,17 @@ def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=Non
         if is_fp:
             return [], []
     
-    # Check for SPA landing shell false positives (React/Next root containers)
-    is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or len(body.strip()) < 150
+    # Strict SPA Shell Defense: Ignore generic client-side React/Next.js router shells
+    is_spa_shell = (
+        "<div id=\"root\"></div>" in body or 
+        "<div id=\"__next\"></div>" in body or 
+        "<div id=\"app\"></div>" in body or
+        len(body.strip()) < 200
+    )
     
-    if status in [200, 201, 302] and not is_spa_shell and any(k in body.lower() for k in ["token", "success", "session", "welcome", "auth", "jwt", "admin", "dashboard"]):
+    has_valid_auth_indicator = any(k in body.lower() for k in ["access_token", "\"role\":\"admin\"", "\"user_id\":", "auth_token", "session_id", "cryptobyte"])
+    
+    if status in [200, 201, 302] and not is_spa_shell and (has_valid_auth_indicator or "token" in body.lower()):
         extracted_proof = {}
         try:
             data = json.loads(body)
@@ -179,7 +186,7 @@ def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=Non
 
         findings.append({
             "type": "AUTHENTICATION_BYPASS_SUCCESS",
-            "evidence": f"Status {status} with valid session/token indicator",
+            "evidence": f"Status {status} with verified non-SPA session payload",
             "status": status,
         })
 
