@@ -172,8 +172,6 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
     return hijack_findings
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 session_hijack.py <target_url>")
-        sys.exit(1)
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
+    asyncio.run(run_session_hijack(target))
 
-asyncio.run(run_session_hijack(sys.argv[1]))
