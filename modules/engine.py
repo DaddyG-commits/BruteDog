@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v7.2 — State-Machine Logic & High-Aggression Exploitation Engine
+BRUTEDOG ENGINE v7.3 — State-Machine Logic & High-Aggression Exploitation Engine
 Features:
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
+- Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
 - Stateful intelligence ingestion from v7.0 crawler state-machine graph & DOM sink inspector
 - Automated BOLA and state-skipping vector evaluation across security tiers
 - Live autonomous test-account session propagation across exploit modules
@@ -26,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from modules.transport import SecureTransport
 from modules.session_pool import PersistentSessionPool
 from modules.response_diff import ResponseFingerprinter
+from modules.scanner import run_port_scanner
 from modules.crawler import crawl_target
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
@@ -293,7 +295,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.2")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.3")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -323,6 +325,24 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         return [], 0.0
     for address in addresses:
         success(f"Resolved: {address}")
+
+    # ========================================================
+    # SCANNER V2.0 INTEGRATION (Advanced Service & Header Audit)
+    # ========================================================
+    section("ADVANCED NETWORK & SERVICE RECON (SCANNER V2.0)")
+    try:
+        scan_results = await run_port_scanner(host, concurrency=20)
+        if scan_results.get("status") == "COMPLETED":
+            open_port_list = scan_results.get("open_ports", [])
+            success(f"Scanner V2.0 completed. Found {len(open_port_list)} open ports.")
+            
+            # Log security header gaps discovered by Scanner V2.0
+            for p in open_port_list:
+                missing_hdrs = p.get("details", {}).get("http", {}).get("missing_security_headers", [])
+                if missing_hdrs:
+                    warning(f"Port {p['port']} missing security headers: {missing_hdrs}")
+    except Exception as exc:
+        warning(f"Scanner integration warning: {exc}")
         
     start = time.monotonic()
     
