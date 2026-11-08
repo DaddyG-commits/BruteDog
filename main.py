@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V7.0 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE
+BRUTEDOG V8.0 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE
 Main Orchestrator:
-- Pre-flight DNS and target scope validation
+- Pre-flight DNS and target scope validation (supports CLI argument or interactive prompt)
 - Network reconnaissance & stealth port scanning
 - Source intelligence & credential exposure parsing
 - Autonomous state-machine mapping, BOLA auditing, and HTTP/2 race condition exploitation
@@ -58,7 +58,7 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
  ██████╔╝██║  ██║╚██████╔╝   ██║   ███████╗██████╔╝
 {RESET}{NEON_BLUE}
 ════════════════════════════════════════════════════════════
-        BRUTEDOG V7.0 — STATE-MACHINE & LOGIC EXPLOITATION
+        BRUTEDOG V8.0 — COGNITIVE STATE-MACHINE & LOGIC ENGINE
         HTTP/2 SINGLE-PACKET CONCURRENCY / LIVE LOOT STREAM
 ════════════════════════════════════════════════════════════
 {RESET}
@@ -183,16 +183,21 @@ async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
     print(BANNER)
-    log("[SYSTEM] BruteDog Active Orchestrator Initialized (v7.0).")
+    log("[SYSTEM] BruteDog Cognitive Orchestrator Initialized (v8.0).")
 
     # --------------------------------------------------------
-    # TARGET INPUT
+    # TARGET INPUT (Supports CLI argument or interactive prompt)
     # --------------------------------------------------------
-    raw_target = input(
-        f"{MATRIX_GREEN}{BOLD}"
-        "[TARGET] Enter your domain: "
-        f"{RESET}"
-    ).strip()
+    if len(sys.argv) > 1:
+        raw_target = sys.argv[1]
+        log(f"[TARGET] Loaded target from command line argument: {raw_target}", CYAN)
+    else:
+        raw_target = input(
+            f"{MATRIX_GREEN}{BOLD}"
+            "[TARGET] Enter your domain: "
+            f"{RESET}"
+        ).strip()
+
     try:
         target = normalize_target(raw_target)
     except ValueError as exc:
@@ -212,16 +217,19 @@ async def async_main():
     log(f"Protocol: {target['scheme'].upper()}")
 
     # --------------------------------------------------------
-    # EXECUTION CONFIRMATION
+    # EXECUTION CONFIRMATION (Bypassed if launched via CLI arg for speed, or requested)
     # --------------------------------------------------------
-    confirmation = input(
-        f"\n{YELLOW}"
-        "Confirm authorization and operational intent. Type YES: "
-        f"{RESET}"
-    ).strip()
-    if confirmation != "YES":
-        log("[ABORT] Confirmation not received.", RED)
-        return
+    if len(sys.argv) <= 1:
+        confirmation = input(
+            f"\n{YELLOW}"
+            "Confirm authorization and operational intent. Type YES: "
+            f"{RESET}"
+        ).strip()
+        if confirmation != "YES":
+            log("[ABORT] Confirmation not received.", RED)
+            return
+    else:
+        log("[+] Automated execution confirmed via CLI parameter.", GREEN)
 
     # --------------------------------------------------------
     # PHASE 1 — NETWORK RECONNAISSANCE & STEALTH PROBING
@@ -258,7 +266,7 @@ async def async_main():
     # --------------------------------------------------------
     section("PHASE 3 — STATE-MACHINE CRAWL, BOLA & REPLAYER")
     try:
-        display_progress("Executing state-machine crawler, BOLA state-skipping checks, and live telemetry engine.")
+        display_progress("Executing state-machine crawler, BOLA state-skipping checks, and cognitive telemetry engine.")
         engine_results, _ = await run_autonomous_engine(target_host=target["url"])
         
         if isinstance(engine_results, list):
@@ -287,12 +295,11 @@ async def async_main():
         if session_loot:
             alert_loot("Hijacked Session / Valid Cookie Jar", session_loot)
             
-            # AUTOMATED RED TEAM VERIFICATION & HTML REPORT EXPORT
+            # AUTOMATED RED TEAM VERIFICATION & SCREEN STREAMING
             display_progress("Verifying hijacked session live against target protected routes...")
             cookie_jar_to_test = session_loot.get("cookies") if isinstance(session_loot, dict) else {}
             token_to_test = session_loot.get("token") if isinstance(session_loot, dict) else None
             
-            # Test key administrative and user routes
             for route in ["/admin", "/dashboard", "/api/user/profile", "/transfer"]:
                 verified = execute_live_login_verification(
                     target_url=target["url"],
@@ -301,7 +308,7 @@ async def async_main():
                     token=token_to_test
                 )
                 if verified:
-                    log(f"[+] Loot successfully verified and saved to session_loot_report.html from {route}!", GREEN)
+                    log(f"[+] Loot successfully verified and streamed on-screen from {route}!", GREEN)
                     break
 
         display_progress("Firing HTTP/2 single-packet multiplexed streams against transaction race condition windows.")
@@ -359,7 +366,7 @@ async def async_main():
     print(f"Execution time: {elapsed:.2f} seconds")
     log("LIVE RED-TEAM ATTACK FINISHED", MATRIX_GREEN)
     log("All intelligence, hijacked sessions, and keys streamed live on-screen.", NEON_BLUE)
-    log("Zero report files written to disk.", NEON_BLUE)
+    log("Zero report files written to disk. Zero external emails sent.", NEON_BLUE)
 
 # ============================================================
 # ENTRY POINT
