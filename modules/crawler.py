@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-CRAWLER.PY v7.4 — Advanced Stateful DOM Form Inspector & Red-Team Recon Engine
-Senior Red Team Edition: Dynamic API prefix expansion, content-length entropy inspection, 
-and robust false-positive elimination for admin/BOLA checks.
+CRAWLER.PY v7.5 — Advanced Stateful DOM Form Inspector & AST-Level JS Recon Engine (Elite Edition)
+Senior Red Team Edition: AST-level JavaScript bundle parsing, dynamic API prefix expansion,
+entropy inspection, and robust false-positive elimination for admin/BOLA checks.
 """
 import json
 import random
@@ -10,6 +10,13 @@ import re
 import sys
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
+
+# Optional AST parser integration for deep Webpack/Vite bundle analysis
+try:
+    import esprima
+    HAS_ESPRIMA = True
+except ImportError:
+    HAS_ESPRIMA = False
 
 OTP_DEBUG_KEYS = ["otp", "code", "pin", "debug", "token", "verification", "secret", "auth_code"]
 
@@ -62,7 +69,6 @@ class StateMachineMapper:
             if status in [200, 201] and isinstance(body, str):
                 lower_body = body.lower()
                 if any(term in lower_body for term in ["login", "signin", "password", "auth-form", "<form"]):
-                    # If it's an unauthenticated login shell disguised as 200 OK, it's a false positive
                     is_false_positive = True
 
             if status in [200, 201] and not is_false_positive:
@@ -78,6 +84,40 @@ class StateMachineMapper:
 def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
+
+def inspect_js_bundle_ast(js_content):
+    """
+    AST-level JS Parser: Extracts route strings and API endpoints directly from 
+    JavaScript Abstract Syntax Tree nodes (Webpack chunks, React/Vue routers).
+    """
+    discovered_routes = set()
+    if not HAS_ESPRIMA or not isinstance(js_content, str) or len(js_content) > 2_500_000:
+        return discovered_routes, {}
+
+    try:
+        syntax = esprima.parseScript(js_content, tolerant=True)
+        
+        # Recursive node walker to find all string literals representing URI paths
+        def walk(node):
+            if isinstance(node, dict):
+                if node.get("type") == "Literal" and isinstance(node.get("value"), str):
+                    val = node["value"].strip()
+                    # Match route paths or API endpoints
+                    if (val.startswith("/") and len(val) > 1 and " " not in val and 
+                        not any(val.endswith(ext) for ext in ['.js', '.css', '.png', '.jpg', '.woff'])):
+                        discovered_routes.add(val)
+                for k, v in node.items():
+                    if isinstance(v, dict):
+                        walk(v)
+                    elif isinstance(v, list):
+                        for item in v:
+                            if isinstance(item, dict):
+                                walk(item)
+        walk(syntax.toDict() if hasattr(syntax, 'toDict') else syntax.__dict__)
+    except Exception:
+        pass
+        
+    return discovered_routes, {}
 
 def inspect_json_for_leaked_codes(response_body):
     leaked_codes = {}
@@ -197,12 +237,11 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
     return session_output, operator_creds, leaked_secrets
 
 def crawl_target(transport):
-    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & DOM CRAWLER (v7.4) [***]", "\033[95m")
+    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & AST DOM CRAWLER (v7.5) [***]", "\033[95m")
     discovered_endpoints = set()
     discovered_scripts = set()
     all_forms_intel = []
     
-    # Expanded seed paths including common Laravel & SPA API prefixes
     seed_paths = [
         transport.base_path or "/", 
         "/homepage",
@@ -267,15 +306,19 @@ def crawl_target(transport):
             elif not script.startswith("http"):
                 discovered_scripts.add(urljoin(path, script))
 
+    # Advanced AST-Level JavaScript Bundle Harvesting
     for script_path in list(discovered_scripts)[:15]:
         s_status, _, s_content = transport.request("GET", script_path)
         if s_status == 200 and isinstance(s_content, str):
+            # Fallback regex extraction
             for match in endpoint_in_js.findall(s_content):
                 if len(match) > 3 and not any(match.endswith(ext) for ext in ['.js', '.css', '.png']):
                     discovered_endpoints.add(match)
+            
+            # True AST-Level parsing extraction
             try:
-                hidden_routes, _ = inspect_js_bundle(s_content)
-                for route in hidden_routes:
+                ast_routes, _ = inspect_js_bundle_ast(s_content)
+                for route in ast_routes:
                     discovered_endpoints.add(route)
             except Exception:
                 pass
