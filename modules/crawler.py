@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-CRAWLER.PY v7.1 — Stateful Application State-Machine Mapper & Recon Engine
+CRAWLER.PY v7.2 — Advanced Stateful DOM Form Inspector & Red-Team Recon Engine
+Senior Red Team Edition: Dynamic form input mapping, CSRF extraction, and adaptive auth probing.
 """
 import json
 import random
 import re
 import sys
 from urllib.parse import urlparse, urljoin
+from bs4 import BeautifulSoup  # Robust HTML parser for deep DOM inspection
 
 from modules.dom_sink_inspector import inspect_js_bundle
 
@@ -89,34 +91,93 @@ def inspect_json_for_leaked_codes(response_body):
             
     return leaked_codes
 
-def register_operator_account(transport, endpoints):
-    log("[*] Searching for registration/signup vector to provision operator session...", "\033[94m")
-    reg_paths = [ep for ep in endpoints if any(k in ep.lower() for k in ["register", "signup", "join", "create-account"])]
-    if not reg_paths:
-        reg_paths = ["/api/auth/register", "/api/register", "/register", "/signup"]
+def analyze_form_inputs(html_content):
+    """
+    Parses the DOM using BeautifulSoup to extract forms, action URLs, 
+    and identify whether inputs require email/username/password/csrf tokens.
+    """
+    forms_intel = []
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        for form in soup.find_all('form'):
+            action = form.get('action', '')
+            method = form.get('method', 'GET').upper()
+            inputs = []
+            
+            for inp in form.find_all(['input', 'select']):
+                name = inp.get('name')
+                if not name:
+                    continue
+                inputType = inp.get('type', 'text').lower()
+                value = inp.get('value', '')
+                inputs.append({"name": name, "type": inputType, "default": value})
+                
+            forms_intel.append({
+                "action": action,
+                "method": method,
+                "inputs": inputs
+            })
+    except Exception as exc:
+        log(f"[-] DOM Form parsing warning: {exc}", "\033[93m")
         
+    return forms_intel
+
+def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
+    log("[*] Executing intelligent form mapping and auth gate probing...", "\033[94m")
+    
     rand_id = random.randint(10000, 99999)
     operator_email = f"brutedog_operator_{rand_id}@target-audit.com"
     operator_pass = f"P@ssw0rd_{rand_id}!"
     
-    payload = {
-        "email": operator_email,
-        "username": f"operator_{rand_id}",
-        "password": operator_pass
-    }
-    
     leaked_secrets = {}
-    for path in reg_paths:
-        status, headers, body = transport.request("POST", path, payload=payload)
+    session_output = transport.cookie_jar
+    operator_creds = {}
+
+    # Target specific auth forms discovered in DOM or fall back to standard routes
+    target_forms = [f for f in form_intels if any(k in f.get('action', '').lower() for k in ['login', 'register', 'signin', 'signup', 'auth'])]
+    
+    if not target_forms:
+        # Fallback probe targets
+        target_forms = [
+            {"action": "/api/auth/register", "method": "POST", "inputs": [{"name": "email"}, {"name": "password"}, {"name": "username"}]},
+            {"action": "/user/register", "method": "POST", "inputs": [{"name": "email"}, {"name": "password"}]}
+        ]
+
+    for form in target_forms:
+        action_url = form.get('action') or "/user/register"
+        method = form.get('method', 'POST')
+        
+        # Build payload dynamically based on harvested form inputs
+        payload = {}
+        for inp in form.get('inputs', []):
+            name = inp['name'].lower()
+            if 'email' in name:
+                payload[inp['name']] = operator_email
+            elif 'user' in name:
+                payload[inp['name']] = f"operator_{rand_id}"
+            elif 'pass' in name:
+                payload[inp['name']] = operator_pass
+            elif 'token' in name or 'csrf' in name:
+                payload[inp['name']] = inp.get('default', 'dummy_token')
+            else:
+                payload[inp['name']] = f"test_{rand_id}"
+
+        # Ensure core fields exist even if form was minimal
+        if not any('email' in k.lower() for k in payload):
+            payload['email'] = operator_email
+        if not any('pass' in k.lower() for k in payload):
+            payload['password'] = operator_pass
+
+        log(f"[*] Probing auth action [{method}] {action_url} with mapped payload fields: {list(payload.keys())}", "\033[96m")
+        
+        status, headers, body = transport.request(method, action_url, payload=payload)
         detected_codes = inspect_json_for_leaked_codes(body)
         if detected_codes:
             leaked_secrets.update(detected_codes)
 
-            if status in [200, 201, 302]:
-            # Extract raw set-cookie header or fallback to existing transport cookie jar
+        if status in [200, 201, 302]:
             cookie_header = headers.get("set-cookie")
             if cookie_header:
-                # Parse the raw set-cookie string into a dictionary/cookie jar safely
                 extracted_cookies = {}
                 for cookie_part in cookie_header.split(";"):
                     if "=" in cookie_part:
@@ -124,16 +185,19 @@ def register_operator_account(transport, endpoints):
                         if k.lower() not in ["path", "expires", "domain", "samesite", "secure", "httponly"]:
                             extracted_cookies[k] = v
                 session_output = extracted_cookies if extracted_cookies else transport.cookie_jar
-            else:
-                session_output = transport.cookie_jar
-                
-            return session_output, payload, leaked_secrets
+            
+            operator_creds = payload
+            log(f"[+] Auth gate interaction successful at {action_url} [HTTP {status}]", "\033[92m")
+            return session_output, operator_creds, leaked_secrets
+
+    return session_output, operator_creds, leaked_secrets
 
 def crawl_target(transport):
-    log("\n[***] INITIALIZING AGGRESSIVE STATEFUL RECON & CRAWLER (v7.1) [***]", "\033[95m")
+    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & DOM CRAWLER (v7.2) [***]", "\033[95m")
     discovered_endpoints = set()
     discovered_scripts = set()
-    seed_paths = [transport.base_path or "/", "/login", "/api", "/signup", "/dashboard", "/admin", "/settings", "/transfer"]
+    all_forms_intel = []
+    seed_paths = [transport.base_path or "/", "/login", "/api", "/signup", "/dashboard", "/admin", "/settings", "/transfer", "/user/register"]
 
     href_pattern = re.compile(r'href=["\']([^"\']+)["\']', re.I)
     action_pattern = re.compile(r'action=["\']([^"\']+)["\']', re.I)
@@ -147,6 +211,12 @@ def crawl_target(transport):
             continue
             
         discovered_endpoints.add(path)
+        
+        # Extract forms and inputs for advanced red-team analysis
+        forms = analyze_form_inputs(html)
+        if forms:
+            all_forms_intel.extend(forms)
+
         for link in href_pattern.findall(html):
             if link.startswith("http"):
                 p = urlparse(link)
@@ -189,7 +259,9 @@ def crawl_target(transport):
     mapper = StateMachineMapper()
     state_graph = mapper.build_graph(filtered_endpoints)
     bola_vulns = mapper.evaluate_state_skipping(transport)
-    session_cookie, operator_creds, leaked_secrets = register_operator_account(transport, filtered_endpoints)
+    
+    # Execute intelligent form & auth probing
+    session_cookie, operator_creds, leaked_secrets = intelligent_auth_probe(transport, filtered_endpoints, all_forms_intel)
 
     return {
         "endpoints": filtered_endpoints,
