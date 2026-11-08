@@ -1,6 +1,6 @@
 import httpx
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 logger = logging.getLogger("BruteDog.SessionPool")
 
@@ -54,7 +54,24 @@ class PersistentSessionPool:
         )
         return client
 
-    def sync_cookies(self, response_cookies: httpx.Cookies) -> None:
-        """Manually synchronize external cookie responses into the master jar."""
-        self.cookie_jar.update(response_cookies)
-        logger.debug("[+] Cookie jar synchronized with latest response cookies.")
+    def sync_cookies(self, response_cookies: Union[httpx.Cookies, dict, str]) -> None:
+        """Manually synchronize external cookie responses into the master jar safely, handling strings/dicts."""
+        try:
+            if isinstance(response_cookies, str):
+                # If a raw string cookie header is passed, parse it safely
+                for cookie_pair in response_cookies.split(";"):
+                    if "=" in cookie_pair:
+                        k, v = cookie_pair.strip().split("=", 1)
+                        self.cookie_jar.set(k, v)
+            elif isinstance(response_cookies, dict):
+                for k, v in response_cookies.items():
+                    self.cookie_jar.set(k, v)
+            elif hasattr(response_cookies, "items"):
+                for k, v in response_cookies.items():
+                    self.cookie_jar.set(k, v)
+            else:
+                self.cookie_jar.update(response_cookies)
+            
+            logger.debug("[+] Cookie jar synchronized with latest response cookies.")
+        except Exception as exc:
+            logger.error(f"[-] Failed to synchronize cookies: {exc}")
