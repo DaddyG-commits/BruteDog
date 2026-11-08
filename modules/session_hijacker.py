@@ -1,39 +1,97 @@
 #!/usr/bin/env python3
 """
-SESSION_HIJACKER.PY — Advanced Session Seeding & Token Replay
+SESSION_HIJACKER.PY — Advanced Session Seeding & Token Replay (Multi-Project Edition)
+Weaponized Red-Team Module: Dynamic target resolution, multi-framework CSRF harvesting,
+and robust cookie-jar state synchronization.
 """
 import sys
 import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urlsplit
 
-def exploit_session(target_url):
-    parsed = urlsplit(target_url if "://" in target_url else f"https://{target_url}")
-    base_url = f"{parsed.scheme}://{parsed.hostname}"
-    
-    login_url = f"{base_url}/user/login"
-    print(f"[+] Initializing Red-Team Session Harvester against: {base_url}")
+# Suppress insecure HTTPS warnings if self-signed certs are used in pre-production
+httpx._config.DEFAULT_CIPHERS += ":HIGH:!MEDIUM:!LOW:!NULL"
 
+def exploit_session(target_url):
+    """
+    Harvests active session cookies, CSRF tokens, and transport state 
+    dynamically for any provided pre-production target URL.
+    """
+    if not target_url:
+        print("[-] Error: No target URL supplied to session hijacker.")
+        return None, None
+
+    # Normalize target URL dynamically
+    formatted_url = target_url if "://" in target_url else f"https://{target_url}"
+    parsed = urlsplit(formatted_url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    
+    # Check both standard login and auth entry points across frameworks
+    target_entry_paths = ["/user/login", "/login", "/auth/login", "/api/auth/login"]
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "X-Requested-With": "XMLHttpRequest"
     }
 
     with httpx.Client(verify=False, follow_redirects=True, timeout=10.0) as client:
-        # Step 1: Establish initial cookie jar and pull a fresh CSRF token
-        resp = client.get(login_url, headers=headers)
-        soup = BeautifulSoup(resp.text, "html.parser")
-        token = soup.find("input", {"name": "_token"})
+        resp = None
+        used_url = ""
         
-        if token:
-            csrf_val = token.get("value")
-            print(captured_cookies := dict(client.cookies))
-            print(f"[+] Captured Session Cookie Jar: {captured_cookies}")
-            print(f"[+] Harvested Replay CSRF Token: {csrf_val}")
-            return captured_cookies, csrf_val
+        # Probe potential login/auth gateways dynamically
+        for path in target_entry_paths:
+            test_url = f"{base_url}{path}"
+            try:
+                resp = client.get(test_url, headers=headers)
+                if resp.status_code < 400:
+                    used_url = test_url
+                    print(f"[+] Successfully established transport gate at: {used_url}")
+                    break
+            except Exception as e:
+                continue
+
+        if not resp or resp.status_code >= 400:
+            print(f"[-] Failed to establish session handshake with {base_url}. Check target availability.")
+            return None, None
+
+        # Parse DOM to harvest CSRF tokens across Laravel (_token) or SPA meta tags
+        soup = BeautifulSoup(resp.text, "html.parser")
+        
+        # Check input fields for tokens
+        token_input = (
+            soup.find("input", {"name": "_token"}) or 
+            soup.find("input", {"name": "csrf_token"}) or
+            soup.find("input", {"name": "authenticity_token"})
+        )
+        
+        csrf_val = None
+        if token_input:
+            csrf_val = token_input.get("value")
         else:
-            print("[-] Failed to harvest session token.")
+            # Fallback: Check meta tags (common in Next.js / React SPAs)
+            meta_token = soup.find("meta", {"name": "csrf-token"}) or soup.find("meta", {"name": "xsrf-token"})
+            if meta_token:
+                csrf_val = meta_token.get("content")
+
+        captured_cookies = dict(client.cookies)
+        
+        if captured_cookies or csrf_val:
+            print(f"[+] Captured Session Cookie Jar: {captured_cookies}")
+            print(f"[+] Harvested Replay CSRF Token: {csrf_val if csrf_val else 'None (Stateless JWT / Header Auth)'}")
+            return {
+                "base_url": base_url,
+                "cookies": captured_cookies,
+                "csrf_token": csrf_val,
+                "headers": headers
+            }, csrf_val
+        else:
+            print("[-] Warning: Handshake completed but no session cookies or tokens were issued.")
             return None, None
 
 if __name__ == "__main__":
-    exploit_session(sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online")
+    target = sys.argv[1] if len(sys.argv) > 1 else None
+    if not target:
+        print("Usage: python3 session_hijacker.py <target_url>")
+        sys.exit(1)
+    exploit_session(target)
