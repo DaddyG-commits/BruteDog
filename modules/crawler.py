@@ -112,11 +112,22 @@ def register_operator_account(transport, endpoints):
         if detected_codes:
             leaked_secrets.update(detected_codes)
 
-        if status in [200, 201, 302]:
-            set_cookie = headers.get("set-cookie", transport.cookie_jar)
-            return set_cookie, payload, leaked_secrets
-            
-    return transport.cookie_jar, {}, leaked_secrets
+            if status in [200, 201, 302]:
+            # Extract raw set-cookie header or fallback to existing transport cookie jar
+            cookie_header = headers.get("set-cookie")
+            if cookie_header:
+                # Parse the raw set-cookie string into a dictionary/cookie jar safely
+                extracted_cookies = {}
+                for cookie_part in cookie_header.split(";"):
+                    if "=" in cookie_part:
+                        k, v = cookie_part.strip().split("=", 1)
+                        if k.lower() not in ["path", "expires", "domain", "samesite", "secure", "httponly"]:
+                            extracted_cookies[k] = v
+                session_output = extracted_cookies if extracted_cookies else transport.cookie_jar
+            else:
+                session_output = transport.cookie_jar
+                
+            return session_output, payload, leaked_secrets
 
 def crawl_target(transport):
     log("\n[***] INITIALIZING AGGRESSIVE STATEFUL RECON & CRAWLER (v7.1) [***]", "\033[95m")
