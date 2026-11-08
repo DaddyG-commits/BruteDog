@@ -163,7 +163,10 @@ def classify_and_adapt(response, current_payload, endpoint="", fingerprinter=Non
         if is_fp:
             return [], []
     
-    if status in [200, 201, 302] and any(k in body.lower() for k in ["token", "success", "session", "welcome", "auth", "jwt"]):
+    # Check for SPA landing shell false positives (React/Next root containers)
+    is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or len(body.strip()) < 150
+    
+    if status in [200, 201, 302] and not is_spa_shell and any(k in body.lower() for k in ["token", "success", "session", "welcome", "auth", "jwt", "admin", "dashboard"]):
         extracted_proof = {}
         try:
             data = json.loads(body)
@@ -207,11 +210,12 @@ def verify_hijacked_session(transport, endpoint):
     sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected route: {endpoint}{RESET}\n")
     status, headers, body = transport.request("GET", endpoint)
     
-    if status == 200 and len(body) > 50:
+    is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body
+    if status == 200 and not is_spa_shell and len(body) > 100:
         stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": 200})
         return True
     else:
-        sys.stdout.write(f"{RED}[-] Session verification returned status {status}. Stolen session inactive.{RESET}\n")
+        sys.stdout.write(f"{RED}[-] Session verification returned status {status} or generic SPA shell. Inactive.{RESET}\n")
         return False
 
 # ============================================================
@@ -348,7 +352,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     if bola_vulnerabilities:
         warning(f"Discovered {len(bola_vulnerabilities)} pre-validated BOLA / State-Skipping routes!")
         
-        # AUTOMATED LIVE VERIFICATION OF DISCOVERED BOLA ROUTES
         section("LIVE BOLA / STATE-SKIPPING VERIFICATION ASSAULT")
         for bola_route in bola_vulnerabilities:
             execute_live_login_verification(
