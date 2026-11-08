@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("CognitiveOperator")
 
-class AutonomousReasoningEngine:
+class CognitiveOperator:
     def __init__(self, target_url: str, max_budget: int = 150):
         self.attack_memory = {
             "target": target_url,
