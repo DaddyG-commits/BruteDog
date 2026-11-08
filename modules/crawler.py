@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-CRAWLER.PY v7.2 — Advanced Stateful DOM Form Inspector & Red-Team Recon Engine
+CRAWLER.PY v7.3 — Advanced Stateful DOM Form Inspector & Red-Team Recon Engine
 Senior Red Team Edition: Dynamic form input mapping, CSRF extraction, and adaptive auth probing.
+Includes strategic asset/wallet/transaction route injection.
 """
 import json
 import random
@@ -33,7 +34,7 @@ class StateMachineMapper:
         lower_url = str(url).lower()
         if any(k in lower_url for k in ["admin", "root", "manage", "config", "dashboard/admin"]):
             return ApplicationState.PRIVILEGED_ADMIN
-        elif any(k in lower_url for k in ["transfer", "withdraw", "dashboard", "account", "settings", "wallet"]):
+        elif any(k in lower_url for k in ["transfer", "withdraw", "dashboard", "account", "settings", "wallet", "transaction", "balance", "portfolio", "assets"]):
             return ApplicationState.AUTHENTICATED_ACTIVE
         elif any(k in lower_url for k in ["kyc", "verify", "onboarding", "identity", "step-2"]):
             return ApplicationState.KYC_PENDING
@@ -92,10 +93,6 @@ def inspect_json_for_leaked_codes(response_body):
     return leaked_codes
 
 def analyze_form_inputs(html_content):
-    """
-    Parses the DOM using BeautifulSoup to extract forms, action URLs, 
-    and identify whether inputs require email/username/password/csrf tokens.
-    """
     forms_intel = []
     try:
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -133,11 +130,9 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
     session_output = transport.cookie_jar
     operator_creds = {}
 
-    # Target specific auth forms discovered in DOM or fall back to standard routes
     target_forms = [f for f in form_intels if any(k in f.get('action', '').lower() for k in ['login', 'register', 'signin', 'signup', 'auth'])]
     
     if not target_forms:
-        # Fallback probe targets
         target_forms = [
             {"action": "/api/auth/register", "method": "POST", "inputs": [{"name": "email"}, {"name": "password"}, {"name": "username"}]},
             {"action": "/user/register", "method": "POST", "inputs": [{"name": "email"}, {"name": "password"}]}
@@ -147,7 +142,6 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
         action_url = form.get('action') or "/user/register"
         method = form.get('method', 'POST')
         
-        # Build payload dynamically based on harvested form inputs
         payload = {}
         for inp in form.get('inputs', []):
             name = inp['name'].lower()
@@ -162,7 +156,6 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
             else:
                 payload[inp['name']] = f"test_{rand_id}"
 
-        # Ensure core fields exist even if form was minimal
         if not any('email' in k.lower() for k in payload):
             payload['email'] = operator_email
         if not any('pass' in k.lower() for k in payload):
@@ -193,11 +186,32 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
     return session_output, operator_creds, leaked_secrets
 
 def crawl_target(transport):
-    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & DOM CRAWLER (v7.2) [***]", "\033[95m")
+    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & DOM CRAWLER (v7.3) [***]", "\033[95m")
     discovered_endpoints = set()
     discovered_scripts = set()
     all_forms_intel = []
-    seed_paths = [transport.base_path or "/", "/login", "/api", "/signup", "/dashboard", "/admin", "/settings", "/transfer", "/user/register"]
+    
+    # Strategic seed paths including wallet, transaction, homepage, and asset routes
+    seed_paths = [
+        transport.base_path or "/", 
+        "/homepage",
+        "/home",
+        "/wallet",
+        "/transaction",
+        "/transactions",
+        "/login", 
+        "/api", 
+        "/signup", 
+        "/dashboard", 
+        "/admin", 
+        "/settings", 
+        "/transfer", 
+        "/user/register",
+        "/user/wallet",
+        "/user/dashboard",
+        "/api/user/wallet",
+        "/api/v1/wallet"
+    ]
 
     href_pattern = re.compile(r'href=["\']([^"\']+)["\']', re.I)
     action_pattern = re.compile(r'action=["\']([^"\']+)["\']', re.I)
@@ -212,7 +226,6 @@ def crawl_target(transport):
             
         discovered_endpoints.add(path)
         
-        # Extract forms and inputs for advanced red-team analysis
         forms = analyze_form_inputs(html)
         if forms:
             all_forms_intel.extend(forms)
@@ -260,7 +273,6 @@ def crawl_target(transport):
     state_graph = mapper.build_graph(filtered_endpoints)
     bola_vulns = mapper.evaluate_state_skipping(transport)
     
-    # Execute intelligent form & auth probing
     session_cookie, operator_creds, leaked_secrets = intelligent_auth_probe(transport, filtered_endpoints, all_forms_intel)
 
     return {
