@@ -38,10 +38,10 @@ def parse_admin_dom(html_content):
     clean_headings = [re.sub(r"<[^>]+>", "", h).strip() for h in headings if h.strip()]
     
     # Extract form inputs or names
-    inputs = re.findall(r"<input[^>]+name=[\"']([^\"']+)[\"']", html_content, re.IGNORECASE)
+    inputs = re.findall(r"<input[^>]+name=['\"]([^'\"]+)['\"]", html_content, re.IGNORECASE)
     
     # Extract script sources
-    scripts = re.findall(r"<script[^>]+src=[\"']([^\"']+)[\"']", html_content, re.IGNORECASE)
+    scripts = re.findall(r"<script[^>]+src=['\"]([^'\"]+)['\"]", html_content, re.IGNORECASE)
 
     return {
         "title": title,
@@ -82,7 +82,7 @@ def execute_live_login_verification(target_url, endpoint="/admin", token=None, c
             status = response.status_code
             body = response.text
             
-            terminal(f"\n{COLORS['BOLD']}=== LIVE RESPONSE TELEMETRY ==="{COLORS['RESET']}")
+            terminal(f"\n{COLORS['BOLD']}=== LIVE RESPONSE TELEMETRY ==={COLORS['RESET']}")
             terminal(f"  ├── Status Code : {COLORS['GREEN'] if status == 200 else COLORS['RED']}{status}{COLORS['RESET']}")
             terminal(f"  └── Content Len : {len(body)} bytes")
             
@@ -108,7 +108,6 @@ def execute_live_login_verification(target_url, endpoint="/admin", token=None, c
         return False
 
 if __name__ == "__main__":
-    # Test execution against target
     execute_live_login_verification(
         target_url="https://cryptobytes.online",
         endpoint="/admin",
