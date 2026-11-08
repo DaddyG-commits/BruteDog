@@ -55,9 +55,9 @@ class TransportClient:
 
 # ==================== GUARDRAILS & INTELLIGENCE ====================
 class CognitiveOperator:
-    def __init__(self, base_url: str, headers: dict = None):
-        self.base_url = base_url.rstrip("/")
-        self.transport = TransportClient(base_url, headers=headers)
+        def __init__(self, base_url: str = "", headers: dict = None):
+        self.base_url = base_url.rstrip("/") if base_url else ""
+        self.transport = TransportClient(self.base_url, headers=headers) if self.base_url else None
         self.memory_context = []                    # Persistent attack history
         self.evaluated_endpoints = set()            # Prevents duplicate work
         self.session_tokens = {}                    # Persisted session hijacks
