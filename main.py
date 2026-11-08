@@ -31,6 +31,7 @@ from modules.pivot import run_pivot_engine
 from modules.dumper import harvest_email_intelligence
 from modules.keyharvester import harvest_private_keys
 from modules.stealth_ops import run_stealth_engine
+from modules.live_login_verifier import execute_live_login_verification
 
 # ============================================================
 # TERMINAL COLORS & LOOT HIGHLIGHTS
@@ -171,7 +172,6 @@ def display_parser_results(result):
     findings = result.get("findings", [])
     log(f"Findings detected: {len(findings)}")
     
-    # Check for leaked tokens or credentials in source parsing
     for finding in findings:
         if any(keyword in str(finding).lower() for keyword in ["token", "key", "secret", "auth", "credential"]):
             alert_loot("Source Exposure / Secret Token", finding)
@@ -261,7 +261,6 @@ async def async_main():
         display_progress("Executing state-machine crawler, BOLA state-skipping checks, and live telemetry engine.")
         engine_results, _ = await run_autonomous_engine(target_host=target["url"])
         
-        # Intercept live findings for session tokens or authentication bypasses
         if isinstance(engine_results, list):
             for res in engine_results:
                 for finding in res.get("findings", []):
@@ -291,7 +290,6 @@ async def async_main():
         display_progress("Firing HTTP/2 single-packet multiplexed streams against transaction race condition windows.")
         race_loot = await run_race_condition_test(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
         if race_loot:
-            # Check if any race condition stream returned success/transfer execution
             successful_races = [r for r in race_loot if r.get("status") in (200, 201)]
             if successful_races:
                 alert_loot("Race Condition Transfer / Execution Success", successful_races)
