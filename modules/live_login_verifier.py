@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v7.1
+LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v7.2
 Features:
 - Multi-endpoint administrative and dashboard route auto-probing
 - Rejects login form shells (prevents false-positive login pages from being marked as loot)
 - Live injection of hijacked tokens or cookie jars into protected endpoints
-- Automatic HTML report generation for visual verification via HTML viewers
+- Automatic timestamped HTML report generation for visual verification via HTML viewers
 """
 import sys
 import os
+import time
 import httpx
 from urllib.parse import urlsplit
 
@@ -18,10 +19,11 @@ def log(msg, color="\033[92m"):
 
 def save_loot_report(endpoint, status, body):
     """
-    Saves the verified response into a clean, standalone HTML file 
+    Saves the verified response into a clean, standalone timestamped HTML file 
     optimized for viewing in any mobile or desktop HTML viewer.
     """
-    filename = "session_loot_report.html"
+    timestamp = int(time.time())
+    filename = f"session_loot_report_{timestamp}.html"
     
     # If raw JSON, wrap it in a sleek dark-mode container
     if body.strip().startswith("{") or body.strip().startswith("["):
@@ -29,7 +31,7 @@ def save_loot_report(endpoint, status, body):
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>BruteDog v7.1 — Verified Session Loot</title>
+    <title>BruteDog v7.2 — Verified Session Loot</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }}
         .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 2rem; max-width: 900px; margin: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
@@ -41,7 +43,7 @@ def save_loot_report(endpoint, status, body):
 <body>
     <div class="card">
         <h2>🔓 Verified Session Loot / Data Dump</h2>
-        <div class="meta"><strong>Endpoint:</strong> {endpoint} | <strong>Status Code:</strong> {status}</div>
+        <div class="meta"><strong>Endpoint:</strong> {endpoint} | <strong>Status Code:</strong> {status} | <strong>Timestamp:</strong> {timestamp}</div>
         <h3>Response Payload (JSON):</h3>
         <pre>{body}</pre>
     </div>
@@ -53,7 +55,7 @@ def save_loot_report(endpoint, status, body):
         badge_bar = f"""
         <div style="background: #0f172a; color: #38bdf8; padding: 12px 20px; font-family: monospace; font-size: 14px; border-bottom: 2px solid #334155; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 9999;">
             <span>🔓 <strong>BruteDog Loot Verified:</strong> {endpoint} [HTTP {status}]</span>
-            <span style="color: #34d399;">Access Confirmed</span>
+            <span style="color: #34d399;">Access Confirmed ({timestamp})</span>
         </div>
         """
         if "<body" in body:
@@ -64,7 +66,7 @@ def save_loot_report(endpoint, status, body):
     with open(filename, "w", encoding="utf-8") as f:
         f.write(html_content)
     
-    log(f"[+] Successfully exported verified dashboard/balance view to local HTML file: {filename}", "\033[92m")
+    log(f"[+] Successfully exported verified dashboard/balance view to timestamped HTML file: {filename}", "\033[92m")
     return filename
 
 def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=None, token=None):
