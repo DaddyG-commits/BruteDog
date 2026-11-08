@@ -1,15 +1,55 @@
 #!/usr/bin/env python3
+"""
+BRUTEDOG SCANNER V2.0
+Advanced Network Reconnaissance & Security Assessment Engine
+
+Features:
+- Native asynchronous TCP connections
+- IPv4 / IPv6 DNS resolution
+- Service identification
+- HTTP response inspection
+- HTTP security-header assessment
+- TLS certificate inspection
+- TLS protocol identification
+- Passive service-banner collection
+- Structured error classification
+- Concurrency management
+- Evidence-based reporting
+
+Python: 3.10+
+Dependencies: Python standard library only
+
+Integration:
+    result = await run_port_scanner(hostname)
+"""
+
 import asyncio
+import argparse
+import ipaddress
 import socket
 import ssl
 import time
-import http.client
+
 from urllib.parse import urlsplit
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
-CONNECT_TIMEOUT = 2.0
+
+CONNECT_TIMEOUT = 2.5
+HTTP_TIMEOUT = 3.0
+BANNER_TIMEOUT = 0.4
+
 MAX_CONCURRENT = 40
+MAX_PORTS = 256
+
+MAX_BANNER_SIZE = 512
+MAX_HTTP_HEADERS = 64
+MAX_HEADER_SIZE = 16384
+
+USER_AGENT = "BruteDog-Security-Scanner/2.0"
+
 COMMON_PORTS = [
     20, 21, 22, 23, 25, 26, 53, 67, 68,
     80, 81, 82, 88, 110, 111, 123, 135,
@@ -26,6 +66,7 @@ COMMON_PORTS = [
     9000, 9090, 9200, 9300, 9418, 10000,
     11211, 27017
 ]
+
 COLORS = {
     "RED": "\033[91m",
     "GREEN": "\033[92m",
@@ -34,327 +75,1252 @@ COLORS = {
     "MAGENTA": "\033[95m",
     "RESET": "\033[0m",
 }
+
+
 # ============================================================
-# TERMINAL OUTPUT
+# SERVICE DATABASE
 # ============================================================
-def terminal(message):
-    print(message, flush=True)
-# ============================================================
-# TARGET NORMALIZATION
-# ============================================================
-def normalize_host(target):
-    if not isinstance(target, str) or not target.strip():
-        raise ValueError("Invalid target.")
-    target = target.strip()
-    if "://" in target:
-        parsed = urlsplit(target)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError("Unsupported URL scheme.")
-        if not parsed.hostname:
-            raise ValueError("Invalid hostname.")
-        if parsed.username or parsed.password:
-            raise ValueError("Embedded credentials are not accepted.")
-        return parsed.hostname
-    if "/" in target:
-        raise ValueError("Expected a hostname, not a URL path.")
-    return target
-# ============================================================
-# SERVICE IDENTIFICATION
-# ============================================================
+
 SERVICE_MAP = {
     20: "FTP-DATA",
     21: "FTP",
     22: "SSH",
     23: "TELNET",
     25: "SMTP",
+    26: "SMTP-ALT",
     53: "DNS",
     80: "HTTP",
     110: "POP3",
+    111: "RPCBIND",
+    123: "NTP",
+    135: "MSRPC",
+    139: "NETBIOS",
     143: "IMAP",
+    179: "BGP",
+    389: "LDAP",
     443: "HTTPS",
     445: "SMB",
     465: "SMTPS",
     587: "SMTP-SUBMISSION",
+    636: "LDAPS",
+    873: "RSYNC",
+    990: "FTPS",
     993: "IMAPS",
     995: "POP3S",
     1433: "MSSQL",
     1521: "ORACLE",
+    1883: "MQTT",
     2049: "NFS",
+    2375: "DOCKER-API",
+    2376: "DOCKER-TLS",
+    3000: "HTTP-ALT",
     3306: "MYSQL",
     3389: "RDP",
     5432: "POSTGRESQL",
+    5601: "KIBANA",
+    5672: "AMQP",
     5900: "VNC",
+    5985: "WINRM",
+    5986: "WINRM-TLS",
     6379: "REDIS",
+    6443: "KUBERNETES-API",
+    7001: "WEBLOGIC",
+    8000: "HTTP-ALT",
+    8008: "HTTP-ALT",
     8080: "HTTP-ALT",
+    8081: "HTTP-ALT",
+    8088: "HTTP-ALT",
     8443: "HTTPS-ALT",
+    8888: "HTTP-ALT",
+    9000: "HTTP-ALT",
+    9090: "HTTP-ALT",
     9200: "ELASTICSEARCH",
+    9300: "ELASTICSEARCH-TRANSPORT",
+    9418: "GIT",
+    10000: "WEBMIN",
+    11211: "MEMCACHED",
     27017: "MONGODB",
 }
+
+
+HTTP_PORTS = {
+    80, 81, 82, 3000, 5000,
+    8000, 8008, 8080, 8081,
+    8088, 8888, 9000, 9090,
+}
+
+HTTPS_PORTS = {
+    443, 4443, 8443, 2376,
+    5986,
+}
+
+BANNER_PORTS = {
+    21, 22, 23, 25, 26,
+    110, 143, 465, 587,
+    993, 995,
+}
+
+SECURITY_HEADERS = {
+    "strict-transport-security":
+        "HSTS missing",
+
+    "content-security-policy":
+        "CSP missing",
+
+    "x-content-type-options":
+        "X-Content-Type-Options missing",
+
+    "x-frame-options":
+        "X-Frame-Options missing",
+
+    "referrer-policy":
+        "Referrer-Policy missing",
+
+    "permissions-policy":
+        "Permissions-Policy missing",
+}
+
+
 # ============================================================
-# BASIC BANNER IDENTIFICATION
+# TERMINAL OUTPUT
 # ============================================================
-def read_banner(sock):
+
+def terminal(message):
+    print(message, flush=True)
+
+
+def color(message, name):
+    return (
+        f"{COLORS.get(name, '')}"
+        f"{message}"
+        f"{COLORS['RESET']}"
+    )
+
+
+# ============================================================
+# TARGET NORMALIZATION
+# ============================================================
+
+def normalize_host(target):
+
+    if not isinstance(target, str):
+        raise ValueError("Target must be a string.")
+
+    target = target.strip()
+
+    if not target:
+        raise ValueError("Empty target.")
+
+    if "://" in target:
+
+        parsed = urlsplit(target)
+
+        if parsed.scheme.lower() not in ("http", "https"):
+            raise ValueError("Unsupported URL scheme.")
+
+        if not parsed.hostname:
+            raise ValueError("Invalid URL hostname.")
+
+        if parsed.username or parsed.password:
+            raise ValueError(
+                "Embedded credentials are prohibited."
+            )
+
+        target = parsed.hostname
+
+    elif "/" in target or "@" in target:
+
+        raise ValueError("Invalid hostname.")
+
+    if target.startswith("[") and target.endswith("]"):
+        target = target[1:-1]
+
     try:
-        sock.settimeout(0.8)
-        data = sock.recv(512)
+        return str(ipaddress.ip_address(target))
+    except ValueError:
+        pass
+
+    target = target.rstrip(".").lower()
+
+    try:
+        target = target.encode("idna").decode("ascii")
+    except UnicodeError:
+        raise ValueError("Invalid internationalized hostname.")
+
+    if len(target) > 253:
+        raise ValueError("Hostname is too long.")
+
+    if not target:
+        raise ValueError("Invalid hostname.")
+
+    return target
+
+
+# ============================================================
+# PORT VALIDATION
+# ============================================================
+
+def validate_ports(ports):
+
+    if ports is None:
+        ports = COMMON_PORTS
+
+    validated = set()
+
+    try:
+        for port in ports:
+
+            if isinstance(port, bool):
+                raise ValueError
+
+            port = int(port)
+
+            if not 1 <= port <= 65535:
+                raise ValueError
+
+            validated.add(port)
+
+    except (TypeError, ValueError):
+        raise ValueError("Invalid port configuration.")
+
+    if not validated:
+        raise ValueError("No ports supplied.")
+
+    if len(validated) > MAX_PORTS:
+        raise ValueError(
+            f"Maximum supported ports: {MAX_PORTS}"
+        )
+
+    return sorted(validated)
+
+
+# ============================================================
+# DNS RESOLUTION
+# ============================================================
+
+async def resolve_target(host):
+
+    started = time.monotonic()
+
+    try:
+
+        results = await asyncio.get_running_loop().getaddrinfo(
+            host,
+            None,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+        )
+
+        addresses = []
+
+        seen = set()
+
+        for family, socktype, proto, canonname, sockaddr in results:
+
+            address = sockaddr[0]
+
+            if address in seen:
+                continue
+
+            seen.add(address)
+
+            addresses.append({
+                "address": address,
+                "family": (
+                    "IPv6"
+                    if family == socket.AF_INET6
+                    else "IPv4"
+                ),
+            })
+
+        elapsed = round(
+            time.monotonic() - started,
+            4
+        )
+
+        return {
+            "success": bool(addresses),
+            "addresses": addresses,
+            "duration": elapsed,
+            "error": None,
+        }
+
+    except socket.gaierror as exc:
+
+        return {
+            "success": False,
+            "addresses": [],
+            "duration": round(
+                time.monotonic() - started,
+                4
+            ),
+            "error": str(exc),
+        }
+
+
+# ============================================================
+# SERVICE IDENTIFICATION
+# ============================================================
+
+def identify_service(port):
+
+    service = SERVICE_MAP.get(
+        port,
+        "UNKNOWN"
+    )
+
+    return {
+        "expected_service": service,
+        "confidence": (
+            "PORT_BASED"
+            if service != "UNKNOWN"
+            else "UNIDENTIFIED"
+        ),
+    }
+
+
+# ============================================================
+# CONNECTION MANAGEMENT
+# ============================================================
+
+async def open_connection(
+    address,
+    port,
+    timeout=CONNECT_TIMEOUT,
+    use_tls=False,
+    hostname=None,
+):
+
+    context = None
+
+    if use_tls:
+
+        context = ssl.create_default_context()
+
+    connection = asyncio.open_connection(
+        address,
+        port,
+        ssl=context,
+        server_hostname=hostname if use_tls else None,
+        ssl_handshake_timeout=timeout if use_tls else None,
+    )
+
+    return await asyncio.wait_for(
+        connection,
+        timeout=timeout
+    )
+
+
+async def close_writer(writer):
+
+    if writer is None:
+        return
+
+    try:
+
+        writer.close()
+
+        await asyncio.wait_for(
+            writer.wait_closed(),
+            timeout=0.5
+        )
+
+    except (Exception, asyncio.CancelledError):
+        pass
+
+
+# ============================================================
+# BANNER COLLECTION
+# ============================================================
+
+async def collect_banner(reader):
+
+    try:
+
+        data = await asyncio.wait_for(
+            reader.read(MAX_BANNER_SIZE),
+            timeout=BANNER_TIMEOUT
+        )
+
         if not data:
             return ""
+
         return data.decode(
             "utf-8",
             errors="replace"
-        ).strip()
-    except (socket.timeout, OSError):
+        ).strip()[:200]
+
+    except (TimeoutError, OSError):
         return ""
+
+
 # ============================================================
-# HTTP / HTTPS INSPECTION
+# HTTP INSPECTION
 # ============================================================
-def inspect_http(host, port, use_ssl):
-    conn = None
-    try:
-        if use_ssl:
-            context = ssl.create_default_context()
-            conn = http.client.HTTPSConnection(
-                host,
-                port,
-                context=context,
-                timeout=CONNECT_TIMEOUT
-            )
-        else:
-            conn = http.client.HTTPConnection(
-                host,
-                port,
-                timeout=CONNECT_TIMEOUT
-            )
-        conn.request(
-            "HEAD",
-            "/",
-            headers={
-                "Host": host,
-                "User-Agent": "BruteDog-Security-Scanner/5.3",
-                "Connection": "close",
-            }
-        )
-        response = conn.getresponse()
-        status_line = (
-            f"HTTP/{response.version / 10:.1f} "
-            f"{response.status} {response.reason}"
-        )
-        server = response.getheader("Server", "")
-        return {
-            "status_line": status_line,
-            "server": server,
-        }
-    except ssl.SSLCertVerificationError:
-        return {
-            "status_line": "TLS certificate verification failed",
-            "server": "",
-        }
-    except Exception as exc:
-        return {
-            "status_line": f"HTTP inspection unavailable: {type(exc).__name__}",
-            "server": "",
-        }
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
-# ============================================================
-# SINGLE TCP PORT PROBE
-# ============================================================
-def probe_port(host, port):
+
+async def inspect_http(
+    address,
+    hostname,
+    port,
+    use_tls=False,
+):
+
+    writer = None
+
     result = {
+        "available": False,
+        "status_code": None,
+        "reason": "",
+        "http_version": "",
+        "server": "",
+        "headers": {},
+        "security_headers": {},
+        "missing_security_headers": [],
+        "error": None,
+    }
+
+    try:
+
+        reader, writer = await open_connection(
+            address,
+            port,
+            timeout=HTTP_TIMEOUT,
+            use_tls=use_tls,
+            hostname=hostname,
+        )
+
+        request = (
+            f"HEAD / HTTP/1.1\r\n"
+            f"Host: {hostname}\r\n"
+            f"User-Agent: {USER_AGENT}\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        )
+
+        writer.write(
+            request.encode("ascii")
+        )
+
+        await writer.drain()
+
+        status_line = await asyncio.wait_for(
+            reader.readline(),
+            timeout=HTTP_TIMEOUT
+        )
+
+        status_line = status_line.decode(
+            "latin-1",
+            errors="replace"
+        ).strip()
+
+        parts = status_line.split(" ", 2)
+
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+
+            result["error"] = "Invalid HTTP response."
+
+            return result
+
+        result["http_version"] = parts[0]
+
+        try:
+            result["status_code"] = int(parts[1])
+        except ValueError:
+            result["error"] = "Invalid HTTP status code."
+            return result
+
+        result["reason"] = (
+            parts[2]
+            if len(parts) > 2
+            else ""
+        )
+
+        result["available"] = True
+
+        headers = {}
+
+        total_size = len(status_line)
+
+        for _ in range(MAX_HTTP_HEADERS):
+
+            line = await asyncio.wait_for(
+                reader.readline(),
+                timeout=HTTP_TIMEOUT
+            )
+
+            if not line:
+                break
+
+            total_size += len(line)
+
+            if total_size > MAX_HEADER_SIZE:
+                result["error"] = "HTTP headers exceeded size limit."
+                break
+
+            if line in (b"\r\n", b"\n"):
+                break
+
+            decoded = line.decode(
+                "latin-1",
+                errors="replace"
+            ).strip()
+
+            if ":" not in decoded:
+                continue
+
+            key, value = decoded.split(":", 1)
+
+            headers[key.lower().strip()] = value.strip()
+
+        result["headers"] = headers
+
+        result["server"] = headers.get(
+            "server",
+            ""
+        )
+
+        for header in SECURITY_HEADERS:
+
+            present = header in headers
+
+            result["security_headers"][header] = present
+
+            if not present:
+
+                result["missing_security_headers"].append(
+                    SECURITY_HEADERS[header]
+                )
+
+        return result
+
+    except ssl.SSLCertVerificationError:
+
+        result["error"] = "TLS certificate verification failed."
+
+        return result
+
+    except ssl.SSLError as exc:
+
+        result["error"] = (
+            f"TLS error: {type(exc).__name__}"
+        )
+
+        return result
+
+    except TimeoutError:
+
+        result["error"] = "HTTP inspection timed out."
+
+        return result
+
+    except (OSError, asyncio.IncompleteReadError) as exc:
+
+        result["error"] = (
+            f"HTTP inspection failed: {type(exc).__name__}"
+        )
+
+        return result
+
+    finally:
+
+        await close_writer(writer)
+
+
+# ============================================================
+# TLS CERTIFICATE INSPECTION
+# ============================================================
+
+async def inspect_tls(
+    address,
+    hostname,
+    port,
+):
+
+    writer = None
+
+    result = {
+        "available": False,
+        "verified": False,
+        "protocol": "",
+        "cipher": "",
+        "certificate": {},
+        "error": None,
+    }
+
+    try:
+
+        reader, writer = await open_connection(
+            address,
+            port,
+            timeout=CONNECT_TIMEOUT,
+            use_tls=True,
+            hostname=hostname,
+        )
+
+        ssl_object = writer.get_extra_info(
+            "ssl_object"
+        )
+
+        if ssl_object is None:
+
+            result["error"] = "TLS session unavailable."
+
+            return result
+
+        certificate = ssl_object.getpeercert()
+
+        result["available"] = True
+        result["verified"] = True
+
+        result["protocol"] = (
+            ssl_object.version() or ""
+        )
+
+        cipher = ssl_object.cipher()
+
+        if cipher:
+
+            result["cipher"] = {
+                "name": cipher[0],
+                "protocol": cipher[1],
+                "bits": cipher[2],
+            }
+
+        result["certificate"] = {
+            "subject": certificate.get(
+                "subject",
+                ()
+            ),
+
+            "issuer": certificate.get(
+                "issuer",
+                ()
+            ),
+
+            "not_before": certificate.get(
+                "notBefore",
+                ""
+            ),
+
+            "not_after": certificate.get(
+                "notAfter",
+                ""
+            ),
+
+            "subject_alt_names": certificate.get(
+                "subjectAltName",
+                ()
+            ),
+        }
+
+        return result
+
+    except ssl.SSLCertVerificationError:
+
+        result["error"] = (
+            "Certificate verification failed."
+        )
+
+        return result
+
+    except ssl.SSLError as exc:
+
+        result["error"] = (
+            f"TLS negotiation failed: {type(exc).__name__}"
+        )
+
+        return result
+
+    except TimeoutError:
+
+        result["error"] = "TLS handshake timed out."
+
+        return result
+
+    except OSError as exc:
+
+        result["error"] = (
+            f"TLS connection failed: {type(exc).__name__}"
+        )
+
+        return result
+
+    finally:
+
+        await close_writer(writer)
+
+
+# ============================================================
+# SINGLE TCP PROBE
+# ============================================================
+
+async def probe_port(
+    hostname,
+    address,
+    port,
+):
+
+    result = {
+        "address": address,
         "port": port,
+        "protocol": "TCP",
+        "state": "UNKNOWN",
         "open": False,
+
         "details": {
-            "service": SERVICE_MAP.get(port, "UNKNOWN"),
+            "service": SERVICE_MAP.get(
+                port,
+                "UNKNOWN"
+            ),
+
+            "service_identification": identify_service(
+                port
+            ),
+
             "banner": "",
-            "details": {},
+
+            "http": {},
+
+            "tls": {},
+
+            "errors": [],
         },
     }
-    sock = None
+
+    writer = None
+
     try:
-        sock = socket.create_connection(
-            (host, port),
-            timeout=CONNECT_TIMEOUT
+
+        reader, writer = await open_connection(
+            address,
+            port,
+            timeout=CONNECT_TIMEOUT,
         )
+
+        result["state"] = "OPEN"
         result["open"] = True
-        service = SERVICE_MAP.get(port, "UNKNOWN")
-        banner = ""
-        if port not in (80, 443, 8080, 8443):
-            banner = read_banner(sock)
-        result["details"]["banner"] = banner[:200]
-        if port in (80, 8080):
-            result["details"]["details"] = inspect_http(
-                host,
-                port,
-                False
+
+        if port in BANNER_PORTS:
+
+            result["details"]["banner"] = (
+                await collect_banner(reader)
             )
-        elif port in (443, 8443):
-            result["details"]["details"] = inspect_http(
-                host,
-                port,
-                True
+
+    except ConnectionRefusedError:
+
+        result["state"] = "CLOSED"
+
+    except TimeoutError:
+
+        result["state"] = "FILTERED_OR_NO_RESPONSE"
+
+    except OSError as exc:
+
+        if isinstance(exc, ConnectionRefusedError):
+
+            result["state"] = "CLOSED"
+
+        else:
+
+            result["state"] = "ERROR"
+
+            result["details"]["errors"].append(
+                type(exc).__name__
             )
-        return result
-    except (socket.timeout, ConnectionRefusedError, OSError):
-        return result
+
     finally:
-        if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
+
+        await close_writer(writer)
+
+    if not result["open"]:
+        return result
+
+    # HTTP inspection
+
+    if port in HTTP_PORTS:
+
+        result["details"]["http"] = await inspect_http(
+            address,
+            hostname,
+            port,
+            use_tls=False,
+        )
+
+    # HTTPS inspection
+
+    elif port in HTTPS_PORTS:
+
+        result["details"]["tls"] = await inspect_tls(
+            address,
+            hostname,
+            port,
+        )
+
+        result["details"]["http"] = await inspect_http(
+            address,
+            hostname,
+            port,
+            use_tls=True,
+        )
+
+    return result
+
+
 # ============================================================
 # ASYNC SCANNER
 # ============================================================
-async def run_port_scanner(target_host, ports=None):
+
+async def run_port_scanner(
+    target_host,
+    ports=None,
+    concurrency=MAX_CONCURRENT,
+):
     """
-    Live TCP port scanner.
+    BruteDog Scanner V2.0
+
     Compatible with:
         result = await run_port_scanner(hostname)
-    Returns:
-        {
-            status,
-            target,
-            ports_tested,
-            open_count,
-            closed_count,
-            open_ports,
-            duration
-        }
-    No report files are created.
-    """
-    started = time.monotonic()
-    try:
-        host = normalize_host(target_host)
-    except ValueError as exc:
-        terminal(
-            f"{COLORS['RED']}[-] {exc}{COLORS['RESET']}"
+
+    Optional:
+        result = await run_port_scanner(
+            hostname,
+            ports=[80, 443, 8080]
         )
+
+    Returns structured Python dictionaries.
+
+    No local report files are created.
+    """
+
+    started = time.monotonic()
+
+    # --------------------------------------------------------
+    # TARGET VALIDATION
+    # --------------------------------------------------------
+
+    try:
+
+        host = normalize_host(target_host)
+
+        ports = validate_ports(ports)
+
+        if isinstance(concurrency, bool):
+            raise ValueError
+
+        concurrency = int(concurrency)
+
+        if not 1 <= concurrency <= 100:
+            raise ValueError(
+                "Concurrency must be between 1 and 100."
+            )
+
+    except (ValueError, TypeError) as exc:
+
         return {
             "status": "FAILED",
             "error": str(exc),
             "open_ports": [],
         }
-    if ports is None:
-        ports = COMMON_PORTS
-    ports = sorted(set(int(port) for port in ports))
-    if not ports or any(port < 1 or port > 65535 for port in ports):
-        return {
-            "status": "FAILED",
-            "error": "Invalid port list.",
-            "open_ports": [],
-        }
+
+    # --------------------------------------------------------
+    # INITIALIZATION
+    # --------------------------------------------------------
+
     terminal(
-        f"\n{COLORS['MAGENTA']}"
-        f"[***] BRUTEDOG LIVE TCP SCANNER [***]"
-        f"{COLORS['RESET']}"
+        color(
+            "\n[***] BRUTEDOG SCANNER V2.0 [***]",
+            "MAGENTA"
+        )
     )
+
     terminal(
-        f"{COLORS['CYAN']}[*] Target: {host}"
-        f"{COLORS['RESET']}"
+        color(
+            f"[*] Target: {host}",
+            "CYAN"
+        )
     )
+
     terminal(
         f"[*] Ports scheduled: {len(ports)}"
     )
+
     terminal(
-        f"[*] Maximum concurrency: {MAX_CONCURRENT}"
+        f"[*] Maximum concurrency: {concurrency}"
     )
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
-    open_ports = []
-    completed = 0
-    async def scan_one(port):
-        nonlocal completed
-        async with semaphore:
-            result = await asyncio.to_thread(
-                probe_port,
-                host,
-                port
-            )
-            completed += 1
-            if result["open"]:
-                open_ports.append(result)
-                service = result["details"]["service"]
-                terminal(
-                    f"{COLORS['GREEN']}"
-                    f"[OPEN] TCP/{port} — {service}"
-                    f"{COLORS['RESET']}"
-                )
-            elif completed % 15 == 0:
-                terminal(
-                    f"{COLORS['CYAN']}"
-                    f"[*] Progress: {completed}/{len(ports)}"
-                    f"{COLORS['RESET']}"
-                )
-            return result
-    try:
-        await asyncio.gather(
-            *(scan_one(port) for port in ports)
+
+    # --------------------------------------------------------
+    # DNS RESOLUTION
+    # --------------------------------------------------------
+
+    terminal(
+        color(
+            "[*] Resolving target...",
+            "CYAN"
         )
-    except Exception as exc:
-        terminal(
-            f"{COLORS['RED']}[-] Scanner error: {exc}"
-            f"{COLORS['RESET']}"
-        )
+    )
+
+    dns = await resolve_target(host)
+
+    if not dns["success"]:
+
         return {
             "status": "FAILED",
             "target": host,
-            "error": str(exc),
-            "open_ports": open_ports,
+            "error": "DNS resolution failed.",
+            "dns": dns,
+            "open_ports": [],
         }
+
+    addresses = dns["addresses"]
+
+    for item in addresses:
+
+        terminal(
+            f"    [{item['family']}] "
+            f"{item['address']}"
+        )
+
+    # --------------------------------------------------------
+    # SCAN INITIALIZATION
+    # --------------------------------------------------------
+
+    semaphore = asyncio.Semaphore(
+        concurrency
+    )
+
+    results = []
+
+    completed = 0
+
+    total_probes = len(addresses) * len(ports)
+
+    async def scan_one(address, port):
+
+        nonlocal completed
+
+        async with semaphore:
+
+            result = await probe_port(
+                host,
+                address,
+                port,
+            )
+
+            completed += 1
+
+            if result["open"]:
+
+                terminal(
+                    color(
+                        f"[OPEN] {address}:{port} "
+                        f"— {result['details']['service']}",
+                        "GREEN"
+                    )
+                )
+
+            elif completed % 20 == 0:
+
+                terminal(
+                    color(
+                        f"[*] Progress: "
+                        f"{completed}/{total_probes}",
+                        "CYAN"
+                    )
+                )
+
+            return result
+
+    # --------------------------------------------------------
+    # EXECUTE SCAN
+    # --------------------------------------------------------
+
+    try:
+
+        tasks = [
+
+            asyncio.create_task(
+                scan_one(
+                    address["address"],
+                    port
+                )
+            )
+
+            for address in addresses
+
+            for port in ports
+        ]
+
+        results = await asyncio.gather(
+            *tasks
+        )
+
+    except asyncio.CancelledError:
+
+        terminal(
+            color(
+                "[-] Scan cancelled.",
+                "YELLOW"
+            )
+        )
+
+        raise
+
+    except Exception as exc:
+
+        terminal(
+            color(
+                f"[-] Scanner failure: "
+                f"{type(exc).__name__}",
+                "RED"
+            )
+        )
+
+        return {
+            "status": "FAILED",
+            "target": host,
+            "error": type(exc).__name__,
+            "open_ports": [],
+        }
+
+    # --------------------------------------------------------
+    # RESULT CLASSIFICATION
+    # --------------------------------------------------------
+
+    open_ports = [
+        item
+        for item in results
+        if item["open"]
+    ]
+
+    open_port_numbers = sorted({
+        item["port"]
+        for item in open_ports
+    })
+
+    port_states = {}
+
+    for port in ports:
+
+        states = [
+            item["state"]
+            for item in results
+            if item["port"] == port
+        ]
+
+        if "OPEN" in states:
+
+            state = "OPEN"
+
+        elif all(
+            item == "CLOSED"
+            for item in states
+        ):
+
+            state = "CLOSED"
+
+        else:
+
+            state = "FILTERED_OR_UNKNOWN"
+
+        port_states[str(port)] = state
+
+    closed_count = sum(
+        1
+        for state in port_states.values()
+        if state == "CLOSED"
+    )
+
+    filtered_count = sum(
+        1
+        for state in port_states.values()
+        if state == "FILTERED_OR_UNKNOWN"
+    )
+
+    # --------------------------------------------------------
+    # STATISTICS
+    # --------------------------------------------------------
+
     elapsed = round(
         time.monotonic() - started,
-        2
+        3
     )
-    open_ports.sort(
-        key=lambda item: item["port"]
-    )
-    open_count = len(open_ports)
-    result = {
+
+    statistics = {
+        "total_probes": total_probes,
+
+        "completed_probes": completed,
+
+        "unique_ports_tested": len(ports),
+
+        "resolved_addresses": len(addresses),
+
+        "open_ports": len(open_port_numbers),
+
+        "closed_ports": closed_count,
+
+        "filtered_or_unknown_ports": filtered_count,
+
+        "concurrency": concurrency,
+
+        "dns_duration": dns["duration"],
+
+        "scan_duration": elapsed,
+    }
+
+    # --------------------------------------------------------
+    # FINAL REPORT
+    # --------------------------------------------------------
+
+    final_result = {
         "status": "COMPLETED",
+
+        "scanner": "BruteDog Scanner V2.0",
+
         "target": host,
+
+        "dns": dns,
+
         "ports_tested": len(ports),
-        "open_count": open_count,
-        "closed_count": len(ports) - open_count,
+
+        "open_count": len(open_port_numbers),
+
+        "closed_count": closed_count,
+
+        "filtered_count": filtered_count,
+
         "open_ports": open_ports,
+
+        "port_states": port_states,
+
+        "statistics": statistics,
+
         "duration": elapsed,
     }
+
+    # --------------------------------------------------------
+    # TERMINAL SUMMARY
+    # --------------------------------------------------------
+
     terminal(
-        f"\n{COLORS['GREEN']}"
-        f"[+] TCP assessment completed."
-        f"{COLORS['RESET']}"
+        color(
+            "\n[+] NETWORK ASSESSMENT COMPLETED",
+            "GREEN"
+        )
     )
+
+    terminal(
+        f"    Resolved addresses: {len(addresses)}"
+    )
+
     terminal(
         f"    Ports tested: {len(ports)}"
     )
+
     terminal(
-        f"    Open ports: {open_count}"
+        f"    Open ports: {len(open_port_numbers)}"
     )
+
     terminal(
-        f"    Closed/unavailable: {len(ports) - open_count}"
+        f"    Closed ports: {closed_count}"
     )
+
     terminal(
-        f"    Duration: {elapsed} seconds"
+        f"    Filtered/unknown: {filtered_count}"
     )
+
     terminal(
-        f"    Local files created: 0\n"
+        f"    Total probes: {total_probes}"
     )
-    return result
+
+    terminal(
+        f"    Duration: {elapsed}s"
+    )
+
+    terminal(
+        "    Local files created: 0\n"
+    )
+
+    return final_result
+
+
 # ============================================================
-# COMMAND-LINE ENTRY POINT
+# COMMAND-LINE INTERFACE
 # ============================================================
-if __name__ == "__main__":
-    import argparse
+
+def parse_port_argument(value):
+
+    try:
+
+        return [
+            int(item.strip())
+            for item in value.split(",")
+            if item.strip()
+        ]
+
+    except ValueError:
+
+        raise argparse.ArgumentTypeError(
+            "Ports must be comma-separated integers."
+        )
+
+
+async def main():
+
     parser = argparse.ArgumentParser(
-        description="BruteDog Live TCP Scanner"
+        description=(
+            "BruteDog Scanner V2.0 "
+            "Network Reconnaissance Engine"
+        )
     )
+
     parser.add_argument(
         "target",
-        help="Target hostname"
+        help="Single authorized hostname or IP address"
     )
+
+    parser.add_argument(
+        "--ports",
+        type=parse_port_argument,
+        default=None,
+        help="Comma-separated TCP ports"
+    )
+
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=MAX_CONCURRENT,
+        help="Maximum concurrent connections"
+    )
+
     args = parser.parse_args()
-    asyncio.run(
-        run_port_scanner(args.target)
+
+    result = await run_port_scanner(
+        args.target,
+        ports=args.ports,
+        concurrency=args.concurrency,
     )
+
+    if result["status"] != "COMPLETED":
+
+        terminal(
+            color(
+                f"[-] {result.get('error', 'Scan failed')}",
+                "RED"
+            )
+        )
+
+
+if __name__ == "__main__":
+
+    try:
+
+        asyncio.run(main())
+
+    except KeyboardInterrupt:
+
+        terminal(
+            color(
+                "\n[-] Interrupted by user.",
+                "YELLOW"
+            )
+        )
