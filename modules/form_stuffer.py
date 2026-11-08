@@ -36,7 +36,7 @@ def execute_form_stuffing(target_url, username, password, login_path="/user/logi
     with httpx.Client(verify=False, follow_redirects=True, timeout=15.0) as client:
         try:
             # Step 1: GET the login page to harvest cookies and the dynamic CSRF token (_token)
-            log([*] Fetching login form and harvesting CSRF token...", "\033[94m")
+            log("[*] Fetching login form and harvesting CSRF token...", "\033[94m")
             get_resp = client.get(login_url, headers=headers)
             
             if get_resp.status_code != 200:
