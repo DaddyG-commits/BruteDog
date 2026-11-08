@@ -63,7 +63,7 @@ async def fire_single_packet_race_async(host, port, path, payload, secure, num_s
                 
                 # Dispatch task via HTTP/2 multiplexed client session
                 task = client.post(
-                    path, # Relative path works cleanly with base_url set in PersistentSessionPool
+                    path, 
                     headers=req_headers,
                     json=payload
                 )
@@ -127,7 +127,7 @@ def run_race_condition_test(target_host, port=None, use_ssl=None, payload=None, 
     except RuntimeError:
         loop = None
 
-    if loop and loop.is_running():
+    if loop and loop.is_running:
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor() as pool:
             return pool.submit(asyncio.run, coro).result()
