@@ -36,7 +36,7 @@ from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
 
 # Import the referral validation bypass probe
-from test_referral import audit_referral_logic
+from modules.test_referral import audit_referral_logic
 
 # ============================================================
 # CONFIGURATION
