@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-KEYHARVESTER.PY — Active Cryptographic Secret & Artifact Discovery Engine v7.5
+KEYHARVESTER.PY — Active Cryptographic Secret & Artifact Discovery Engine v7.6
 Features:
 - Live unredacted extraction of EVM private keys, Bitcoin WIFs, and BIP39 seed phrases
 - Direct on-screen terminal streaming of harvested raw secrets and API tokens
@@ -9,6 +9,7 @@ Features:
 """
 import re
 import sys
+import os
 import hashlib
 
 # Import centralized framework telemetry and immutable loot persistence
@@ -65,6 +66,7 @@ def is_valid_evm_key(key_str):
     except ValueError:
         return False
     
+    # Secp256k1 curve order check
     curve_order = int(
         "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE"
         "BAAEDCE6AF48A03BBFD25E8CD0364141",
@@ -87,7 +89,7 @@ def _record_finding(findings, seen, secret, secret_type, offset, target_context=
     })
     
     terminal(
-        f"\n{COLORS['RED']}{COLORS['BOLD']}[***] LIVE SECRET EXPOSURE HARVESTED [{secret_type}] [***]{COLORS['RESET']}"
+        f"\n{COLORS['RED']}{COLORS['BOLD']}[***] VERIFIED SECRET EXPOSURE HARVESTED [{secret_type}] [***]{COLORS['RESET']}"
     )
     terminal(f"  ├── Offset      : {offset}")
     terminal(f"  └── Raw Secret  : {COLORS['GREEN']}{secret}{COLORS['RESET']}")
@@ -107,7 +109,7 @@ def _record_finding(findings, seen, secret, secret_type, offset, target_context=
 def harvest_private_keys(target_source_data="", target_context="https://cryptobytes.online"):
     terminal(
         f"\n{COLORS['MAGENTA']}[***] "
-        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING "
+        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING (V7.6 HARDENED) "
         f"[***]{COLORS['RESET']}"
     )
     findings = []
@@ -190,7 +192,11 @@ def harvest_private_keys(target_source_data="", target_context="https://cryptoby
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        with open(sys.argv[1], "r", encoding="utf-8", errors="ignore") as f:
-            harvest_private_keys(f.read(), sys.argv[1])
+        target_file = sys.argv[1]
+        if os.path.exists(target_file):
+            with open(target_file, "r", encoding="utf-8", errors="ignore") as f:
+                harvest_private_keys(f.read(), target_file)
+        else:
+            print(f"[!] File not found: {target_file}")
     else:
         print("Usage: python3 keyharvester.py <target_response_file>")
