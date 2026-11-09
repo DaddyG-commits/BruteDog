@@ -333,4 +333,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 cloud_apex.py https://example.com")
         sys.exit(1)
-asyncio.run(run_cloud_apex(sys.argv[1]))
+    asyncio.run(run_cloud_apex(sys.argv[1]))
