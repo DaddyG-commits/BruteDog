@@ -196,7 +196,7 @@ class CognitiveOperator:
                     "hypothesis": hyp.get("hypothesis"),
                     "within_test_scope": True,
                     "within_resource_budget": self.requests_spent < self.max_budget,
-                    "requires_irreversible_action": False  # Enforce safety guardrails
+                    "requires_irreversible_action": False
                 })
         return candidates
 
