@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-KEYHARVESTER.PY — Active Cryptographic Secret & Artifact Discovery Engine
+KEYHARVESTER.PY — Active Cryptographic Secret & Artifact Discovery Engine v7.5
 Features:
 - Live unredacted extraction of EVM private keys, Bitcoin WIFs, and BIP39 seed phrases
 - Direct on-screen terminal streaming of harvested raw secrets and API tokens
-- Zero-disk memory storage (no report files written)
+- Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Anti-noise validation filters for high-precision cryptographic detection
 """
 import re
 import sys
 import hashlib
+
+# Import centralized framework telemetry and immutable loot persistence
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 COLORS = {
     "RED": "\033[91m",
@@ -68,7 +72,7 @@ def is_valid_evm_key(key_str):
     )
     return 0 < value < curve_order
 
-def _record_finding(findings, seen, secret, secret_type, offset):
+def _record_finding(findings, seen, secret, secret_type, offset, target_context="Target Response"):
     dedup_key = (secret_type, secret)
     if dedup_key in seen:
         return
@@ -77,7 +81,7 @@ def _record_finding(findings, seen, secret, secret_type, offset):
     findings.append({
         "type": secret_type,
         "secret_value": secret,
-        "source": "Supplied target response",
+        "source": target_context,
         "offset": offset,
         "exposed": True,
     })
@@ -88,7 +92,19 @@ def _record_finding(findings, seen, secret, secret_type, offset):
     terminal(f"  ├── Offset      : {offset}")
     terminal(f"  └── Raw Secret  : {COLORS['GREEN']}{secret}{COLORS['RESET']}")
 
-def harvest_private_keys(target_source_data=""):
+    # STREAM TELEMETRY & PERSIST CRYPTOGRAPHIC LOOT TO DISK IMMEDIATELY
+    stream_proof("CRYPTO_SECRET_HARVESTED", f"offset_{offset}", {"secret_type": secret_type}, secret[:12] + "...", {"exposed": True})
+    save_session_loot(
+        target=target_context,
+        endpoint=f"crypto_offset_{offset}",
+        finding_type=f"CRYPTO_HARVEST_{secret_type.replace(' ', '_').upper()}",
+        status=200,
+        headers={},
+        body=secret,
+        extra_loot={"secret_type": secret_type, "offset": offset, "raw_secret": secret}
+    )
+
+def harvest_private_keys(target_source_data="", target_context="https://cryptobytes.online"):
     terminal(
         f"\n{COLORS['MAGENTA']}[***] "
         f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING "
@@ -119,7 +135,8 @@ def harvest_private_keys(target_source_data=""):
                 seen,
                 candidate,
                 "EVM Private Key",
-                match.start()
+                match.start(),
+                target_context
             )
 
     # 2. Bitcoin WIF Candidates
@@ -134,7 +151,8 @@ def harvest_private_keys(target_source_data=""):
             seen,
             match.group(0),
             "Bitcoin WIF",
-            match.start()
+            match.start(),
+            target_context
         )
 
     # 3. Mnemonic Seed Candidates (Filtered)
@@ -157,7 +175,8 @@ def harvest_private_keys(target_source_data=""):
                 seen,
                 candidate,
                 "BIP39 Seed Phrase",
-                window[0].start()
+                window[0].start(),
+                target_context
             )
             break
 
@@ -166,5 +185,12 @@ def harvest_private_keys(target_source_data=""):
         f"{COLORS['RESET']}"
     )
     terminal(f"    Total Secrets Harvested : {len(findings)}")
-    terminal(f"    Local Files Created     : 0 (Streamed live on screen)")
+    terminal(f"    Secured to Disk         : loot_output/")
     return findings
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        with open(sys.argv[1], "r", encoding="utf-8", errors="ignore") as f:
+            harvest_private_keys(f.read(), sys.argv[1])
+    else:
+        print("Usage: python3 keyharvester.py <target_response_file>")
