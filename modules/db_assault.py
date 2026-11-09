@@ -246,4 +246,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 db_assault.py <target_url>")
         sys.exit(1)
-asyncio.run(run_nosql_assault(sys.argv[1]))
+    asyncio.run(run_nosql_assault(sys.argv[1]))
