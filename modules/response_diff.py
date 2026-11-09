@@ -76,7 +76,6 @@ class ResponseFingerprinter:
 
         # Rule 2: Compare against captured soft-404 or error baselines
         for label, baseline in self.baselines.items():
-            # If status code matches baseline and hash is identical, it's a soft error page
             if current_fp["status_code"] == baseline["status_code"]:
                 if current_fp["body_hash"] == baseline["body_hash"]:
                     return True, f"Exact match with baseline fingerprint [{label}]"
