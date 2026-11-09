@@ -124,7 +124,7 @@ def section(title):
     sys.stdout.flush()
 
 # Initialize the Cognitive Supreme Commander Brain globally for the engine session
-cognitive_brain = CognitiveOperator(target_url)
+cognitive_brain = CognitiveOperator(target_url=target_url)
 
 # ============================================================
 # TARGET HANDLING
