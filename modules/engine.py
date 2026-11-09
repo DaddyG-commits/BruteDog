@@ -123,8 +123,7 @@ def section(title):
     sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
 
-# Initialize the Cognitive Supreme Commander Brain globally for the engine session
-cognitive_brain = CognitiveOperator(target_url)
+# (Removed global premature cognitive_brain instantiation to fix NameError)
 
 # ============================================================
 # TARGET HANDLING
@@ -175,7 +174,7 @@ def inspect_cookie_security(headers):
         issues.append("SameSite attribute missing")
     return issues
 
-def classify_and_adapt(response, current_payload, endpoint="", transport=None, fingerprinter=None, target_url=None):
+def classify_and_adapt(response, current_payload, endpoint="", transport=None, fingerprinter=None, target_url=None, cognitive_brain=None):
     status = response.get("status", 0)
     body = response.get("body", "")
     headers = response.get("headers", {})
@@ -190,21 +189,22 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
     # ========================================================
     # COGNITIVE SUPREME COMMANDER EXECUTION HOOK
     # ========================================================
-    cognitive_result = cognitive_brain.evaluate_and_execute(
-        endpoint=endpoint,
-        status=status,
-        headers=headers,
-        body=body,
-        transport=transport,
-        target_url=target_url
-    )
-    
-    if cognitive_result.get("success"):
-        findings.append({
-            "type": "COGNITIVE_AUTONOMOUS_PIVOT_SUCCESS",
-            "evidence": cognitive_result.get("reasoning"),
-            "status": status
-        })
+    if cognitive_brain:
+        cognitive_result = cognitive_brain.evaluate_and_execute(
+            endpoint=endpoint,
+            status=status,
+            headers=headers,
+            body=body,
+            transport=transport,
+            target_url=target_url
+        )
+        
+        if cognitive_result.get("success"):
+            findings.append({
+                "type": "COGNITIVE_AUTONOMOUS_PIVOT_SUCCESS",
+                "evidence": cognitive_result.get("reasoning"),
+                "status": status
+            })
     # ========================================================
 
     # Strict SPA Shell Defense: Ignore generic client-side React/Next.js router shells
@@ -277,7 +277,7 @@ def verify_hijacked_session(transport):
 # ============================================================
 # ACTIVE ADAPTIVE ENDPOINT TESTING
 # ============================================================
-def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, fingerprinter=None, target_url=None):
+def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, fingerprinter=None, target_url=None, cognitive_brain=None):
     endpoint = f"{transport.base_path}{path}" if not path.startswith(transport.base_path) else path
     info(f"Targeting endpoint (State-Machine Adaptive Mode): {endpoint}")
     results = []
@@ -313,7 +313,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
             
         res_obj = {"status": status, "headers": headers, "body": body}
         findings, dynamic_mutations = classify_and_adapt(
-            res_obj, current_test["payload"], endpoint=endpoint, transport=transport, fingerprinter=fingerprinter, target_url=target_url
+            res_obj, current_test["payload"], endpoint=endpoint, transport=transport, fingerprinter=fingerprinter, target_url=target_url, cognitive_brain=cognitive_brain
         )
         
         if findings:
@@ -354,6 +354,9 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     except Exception as exc:
         error(f"Target configuration failed: {exc}")
         return [], 0.0
+
+    # Initialize the Cognitive Supreme Commander Brain dynamically with the target URL
+    cognitive_brain = CognitiveOperator(target_url=target_url)
 
     protocol = "HTTPS" if secure else "HTTP"
     info(f"Target Host : {host}")
@@ -472,7 +475,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     async def worker(path):
         async with semaphore:
             return await asyncio.to_thread(
-                test_endpoint, transport, path, credentials_list, leaked_secrets, fingerprinter, target_url
+                test_endpoint, transport, path, credentials_list, leaked_secrets, fingerprinter, target_url, cognitive_brain
             )
             
     tasks = [asyncio.create_task(worker(path)) for path in discovered_paths]
@@ -551,4 +554,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         warning("Engine interrupted by operator.")
     except Exception as exc:
-        error(f"Fatal engine error: {exc}")
+        error(f"Engine crashed: {exc}")
