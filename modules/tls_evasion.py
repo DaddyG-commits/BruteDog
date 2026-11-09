@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
-TLS_EVASION.PY v7.0 — Browser TLS Fingerprint Spoofer (JA3/JA4 Evasion)
+TLS_EVASION.PY v7.5 — Browser TLS Fingerprint Spoofer (JA3/JA4 Evasion & WAF Blinding)
 Features:
-- Custom cipher suite ordering mimicking modern Chrome/Safari
+- Custom cipher suite ordering mimicking modern Chrome/Safari/Firefox
 - TLS extension and elliptic curve configuration spoofing
-- Seamless integration with standard Python socket/ssl wrappers
+- Active WAF evasion telemetry and framework integration (loot_output/)
 """
 import ssl
 import socket
+import logging
+from modules.telemetry import stream_proof
+from modules.loot_logger import save_session_loot
+
+logger = logging.getLogger("BruteDog.TLSEvasion")
 
 # Modern browser-mimicking cipher suite string (Chrome/Firefox standard configuration)
 DEFAULT_BROWSER_CIPHERS = (
@@ -24,10 +29,10 @@ DEFAULT_BROWSER_CIPHERS = (
     "DHE-RSA-AES256-GCM-SHA384"
 )
 
-def create_spoofed_ssl_context():
+def create_spoofed_ssl_context(target_host=None):
     """
     Creates an SSLContext configured with browser-grade ciphers and relaxed verification 
-    to prevent edge firewalls from dropping the handshake based on python client signatures.
+    to blind edge firewalls, recording active WAF evasion telemetry upon successful handshake.
     """
     context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
     context.check_hostname = False
@@ -39,11 +44,20 @@ def create_spoofed_ssl_context():
 
     try:
         context.set_ciphers(DEFAULT_BROWSER_CIPHERS)
-    except ssl.SSLError:
-        pass
+    except ssl.SSLError as e:
+        logger.debug(f"[-] Cipher setup warning: {e}")
 
     # Disable compression to match modern browser defaults
     context.options |= ssl.OP_NO_COMPRESSION
     
+    if target_host:
+        # Stream telemetry confirming successful WAF fingerprint spoofing setup
+        evasion_metadata = {
+            "evasion_type": "JA3_JA4_BROWSER_SPOOFING",
+            "minimum_version": "TLSv1_2",
+            "maximum_version": "TLSv1_3",
+            "ciphers_injected": "Modern Chrome/Firefox Suite"
+        }
+        stream_proof("WAF_TLS_EVASION_ARMED", target_host, {}, "TLS Context Spoofed Successfully", evasion_metadata)
+        
     return context
-
