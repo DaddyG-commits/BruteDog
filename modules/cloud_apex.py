@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLOUD_APEX.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine v8.0 (With Telegram Telemetry)
+CLOUD_APEX.PY v8.5 — Active Cloud Infrastructure Exploitation & IAM Pivot Engine (WAF Hardened)
 Features:
 - Live AWS control plane pivoting and IAM enumeration
 - Automated instance metadata service (IMDSv1/IMDSv2) & SSRF credential exfiltration
@@ -25,6 +25,7 @@ import sys
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 # ============================================================
 # CONFIGURATION & OFFENSIVE PAYLOADS
@@ -87,10 +88,12 @@ def normalize_target(target):
 # HTTP REQUEST
 # ============================================================
 def http_get(url, headers=None):
+    apply_behavioral_jitter()
     request_headers = {
-        "User-Agent": "BruteDog-Offensive-CloudApex/8.0",
+        "User-Agent": "BruteDog-Offensive-CloudApex/8.5",
         "Accept": "application/json,text/plain,*/*",
     }
+    request_headers.update(get_randomized_hints())
     if headers:
         request_headers.update(headers)
     request = urllib.request.Request(
