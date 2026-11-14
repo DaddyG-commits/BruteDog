@@ -170,4 +170,4 @@ class APIFuzzer:
         sys.stdout.write(f"\033[92m[+] API Fuzzer sweep complete across {len(endpoints)} routes.\033[0m\n")
 
 if __name__ == "__main__":
-    print("API Fuzzer module loaded successfully. Import and run via engine.py or CognitiveOperator.")
+    pass
