@@ -112,6 +112,10 @@ async def audit_websocket(target_ws_url, auth_cookie=None, custom_payloads=None)
         
     return captured_loot
 
+async def run_websocket_audit(target_ws_url, auth_cookie=None, custom_payloads=None):
+    """Compatibility wrapper for CognitiveOperator."""
+    return await audit_websocket(target_ws_url, auth_cookie, custom_payloads)
+
 if __name__ == "__main__":
     import sys
     target = sys.argv[1] if len(sys.argv) > 1 else "wss://cryptobytes.online/ws"
