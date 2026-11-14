@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+RESPONSE_DIFF.PY v8.5 — Advanced Differential Analysis & False-Positive Elimination Engine
+Features:
+- Robust structural tag hierarchy parsing and JSON key extraction
+- Advanced Single Page Application (SPA) shell & soft-404 heuristic detection
+- Fuzzy Jaccard token vocabulary overlap and structural similarity delta calculation
+- High-concurrency safe baseline caching and comparative fingerprinting
+"""
 import hashlib
 import json
 import logging
@@ -15,7 +24,7 @@ class ResponseFingerprinter:
         self.similarity_threshold = similarity_threshold
         # Store baseline fingerprints keyed by error/status type (e.g., 'soft_404', 'spa_shell_403')
         self.baselines: Dict[str, Dict[str, Any]] = {}
-        logger.info("[+] Initialized ResponseFingerprinter engine with fuzzy delta capability.")
+        logger.info("[+] Initialized ResponseFingerprinter engine with advanced fuzzy delta capability (v8.5).")
 
     def capture_baseline(self, label: str, status_code: int, text_content: str, headers: dict) -> None:
         """Capture a known baseline response (e.g., a deliberate 403 SPA redirect or unauthenticated shell)."""
@@ -27,30 +36,32 @@ class ResponseFingerprinter:
         """Extract structural features, semantic token density, and layout signatures from body and headers."""
         content_length = len(text_content)
         
-        # Hash full body content
-        body_hash = hashlib.sha256(text_content.encode('utf-8', errors='ignore')).hexdigest()
+        # Hash full body content safely
+        body_hash = hashlib.sha256((text_content or "").encode('utf-8', errors='ignore')).hexdigest()
 
         structure_keys = []
         is_spa_shell = False
         text_density_tokens = set()
 
         try:
-            if headers.get("content-type", "").startswith("application/json"):
+            content_type = headers.get("content-type", "").lower()
+            if "application/json" in content_type:
                 data = json.loads(text_content)
                 structure_keys = self._extract_json_keys(data)
             else:
                 soup = BeautifulSoup(text_content, 'html.parser')
-                # Collect tag hierarchy signature (up to 100 elements for deep SPA layouts)
-                structure_keys = [tag.name for tag in soup.find_all(True)[:100]]
+                # Collect tag hierarchy signature (up to 150 elements for deep SPA layouts)
+                structure_keys = [tag.name for tag in soup.find_all(True)[:150]]
                 
                 # Heuristic: Detect generic Single Page Application (SPA) empty wrappers / root nodes
-                root_divs = soup.find_all(id=lambda x: x and x in ['root', 'app', '__next'])
+                root_divs = soup.find_all(id=lambda x: x and x in ['root', 'app', '__next', '__nuxt', 'viewport'])
                 body_text = soup.get_text(strip=True)
                 
-                if (root_divs and len(body_text) < 350) or "loading..." in body_text.lower():
+                lower_text = body_text.lower()
+                if (root_divs and len(body_text) < 450) or any(term in lower_text for term in ["loading...", "please wait", "javascript is required", "enable javascript"]):
                     is_spa_shell = True
 
-                # Extract token vocabulary for fuzzy Jaccard comparison
+                # Extract token vocabulary for fuzzy Jaccard comparison (filtering out short words)
                 text_density_tokens = {word.lower() for word in body_text.split() if len(word) > 3}
         except Exception as e:
             logger.debug(f"[-] Error parsing response structure: {e}")
@@ -92,9 +103,9 @@ class ResponseFingerprinter:
         """
         current_fp = self._generate_fingerprint(status_code, text_content, headers)
 
-        # Rule 1: Catch generic client-side SPA shells served with HTTP 200/403
+        # Rule 1: Catch generic client-side SPA shells served with HTTP 200/403/404
         if current_fp["is_spa_shell"]:
-            return True, f"Detected generic SPA shell wrapper (Status: {status_code})"
+            return True, f"Detected generic SPA shell wrapper or placeholder (Status: {status_code})"
 
         # Rule 2: Compare against captured baselines with fuzzy structural & token delta
         for label, baseline in self.baselines.items():
