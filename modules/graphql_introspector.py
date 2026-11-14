@@ -128,6 +128,11 @@ class GraphQLIntrospector:
         
         return {"status": status, "batch_count": batch_count, "response": body[:500]}
 
+async def run_graphql_introspection(target_url):
+    """Compatibility wrapper for CognitiveOperator."""
+    engine = GraphQLIntrospector(target_url)
+    return engine.run_introspection("/graphql")
+
 async def run_graphql_engine(target_url):
     engine = GraphQLIntrospector(target_url)
     engine.run_introspection("/graphql")
