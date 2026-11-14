@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """
-STEALTH_OPS.PY — Active Evasion, Proxy Rotation & Stealth Operations Engine
+STEALTH_OPS.PY — Active Evasion, Proxy Rotation & Stealth Operations Engine v8.0 (With Telegram Telemetry)
 Features:
-- Dynamic User-Agent and TLS fingerprint rotation
-- SOCKS5 / HTTP proxy routing and evasion configuration
+- Dynamic User-Agent, Client-Hints and browser-grade TLS fingerprint rotation via SecureTransport
+- WAF / CDN edge defense detection and evasion configuration
 - Timing jitter and request rate obfuscation
-- Anti-forensics and live terminal telemetry streaming
-- Zero-disk memory storage (no report files written)
+- Real-time asynchronous Telegram notification dispatch for unredacted evasion loot
+- Zero-disk memory storage (streamed live to Telegram and memory)
 """
 import asyncio
 import time
-import ssl
-import http.client
-import json
-import random
 import sys
+import random
 from urllib.parse import urlparse
+
+# Import centralized SecureTransport middleware, telemetry, and Telegram notifier
+from modules.transport import SecureTransport
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 COLORS = {
     "RED": "\033[91m",
@@ -34,93 +37,53 @@ USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 ]
 
+def terminal(message):
+    sys.stdout.write(message + "\n")
+    sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous stealth functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
+
 class StealthOperationsEngine:
     """
     Active Evasion & Stealth Operations Engine.
-    Executes cloaked requests with proxy routing, jitter, and fingerprint randomization.
+    Executes cloaked requests utilizing centralized SecureTransport JA3/JA4 spoofing and jitter.
     """
-    def __init__(self, target_host, port=443, use_ssl=True, proxy_url=None):
-        self.target_host = target_host
-        self.port = int(port)
-        self.use_ssl = use_ssl
-        self.scheme = "https" if use_ssl else "http"
+    def __init__(self, target_url, proxy_url=None):
+        self.target_url = target_url
         self.proxy_url = proxy_url
-        
-        # Enforce aggressive TLS context with verification bypass for stealth auditing
-        self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
+        self.transport = SecureTransport(target_url)
         self.results = []
 
     def _execute_probe_sync(self, path, payload=None, method="GET"):
-        conn = None
         try:
             if not path.startswith("/"):
                 path = "/" + path
-                
+
             # Apply anti-forensics timing jitter
             jitter = random.uniform(0.1, 0.4)
             time.sleep(jitter)
 
-            if self.use_ssl:
-                conn = http.client.HTTPSConnection(
-                    self.target_host,
-                    self.port,
-                    context=self.ssl_context,
-                    timeout=8
-                )
-            else:
-                conn = http.client.HTTPConnection(
-                    self.target_host,
-                    self.port,
-                    timeout=8
-                )
-                
-            headers = {
-                "User-Agent": random.choice(USER_AGENTS),
-                "Accept": "application/json, text/html, */*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Connection": "close",
-                "Cache-Control": "no-cache",
-                "X-Forwarded-For": f"{random.randint(1,254)}.{random.randint(1,254)}.{random.randint(1,254)}.{random.randint(1,254)}"
-            }
-            
-            data = None
-            if payload is not None:
-                headers["Content-Type"] = "application/json"
-                data = json.dumps(payload).encode("utf-8")
-
             started = time.monotonic()
-            conn.request(
-                method,
-                path,
-                body=data,
-                headers=headers
-            )
-            response = conn.getresponse()
-            body = response.read(65536)
-            elapsed = round(
-                time.monotonic() - started,
-                3
-            )
-            response_headers = {
-                key.lower(): value
-                for key, value in response.getheaders()
-            }
-            
-            sys.stdout.write(f"{COLORS['CYAN']}[+] Stealth Probe [{method}] {path} -> HTTP {response.status} ({elapsed}s){COLORS['RESET']}\n")
-            sys.stdout.flush()
+            status, headers, body = self.transport.request(method, path, payload=payload)
+            elapsed = round(time.monotonic() - started, 3)
+
+            terminal(f"{COLORS['CYAN']}[+] Stealth Probe [{method}] {path} -> HTTP {status} ({elapsed}s){COLORS['RESET']}")
 
             return {
-                "status": response.status,
-                "reason": response.reason,
+                "status": status,
                 "bytes": len(body),
                 "elapsed": elapsed,
-                "headers": response_headers,
-                "body_sample": body[:2048].decode(
-                    "utf-8",
-                    errors="replace"
-                ),
+                "headers": headers,
+                "body_sample": body[:2048] if isinstance(body, str) else str(body)[:2048],
                 "error": None,
             }
         except Exception as exc:
@@ -128,12 +91,6 @@ class StealthOperationsEngine:
                 "status": 0,
                 "error": f"{type(exc).__name__}: {exc}",
             }
-        finally:
-            if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
 
     async def probe_with_stealth(self, path, payload=None):
         """
@@ -156,11 +113,11 @@ class StealthOperationsEngine:
             self._execute_probe_sync,
             path
         )
-        if result.get("error"):
+        if result.get("error") or result.get("status") == 0:
             return {
                 "path": path,
                 "status": 0,
-                "error": result["error"],
+                "error": result.get("error", "Connection error"),
                 "findings": [],
             }
             
@@ -181,37 +138,55 @@ class StealthOperationsEngine:
                 providers.add(provider)
                 
         if providers:
+            provider_list = sorted(providers)
             findings.append({
                 "type": "WAF/CDN Evasion Target Identified",
-                "providers": sorted(providers),
+                "providers": provider_list,
             })
+            terminal(f"{COLORS['YELLOW']}[!] WAF/CDN Fingerprint Detected: {', '.join(provider_list)}{COLORS['RESET']}")
 
         status = result["status"]
         if status in (401, 403, 406, 429):
-            sys.stdout.write(f"{COLORS['RED']}[!] WAF Rate-Limit / Block Evasion Triggered [{status}]{COLORS['RESET']}\n")
-            sys.stdout.flush()
+            terminal(f"{COLORS['RED']}[!] WAF Rate-Limit / Block Evasion Triggered [{status}]{COLORS['RESET']}")
             findings.append({
                 "type": "Security Control Enforcement Active",
                 "status": status,
                 "description": "Request challenged or rate-limited by defense controls.",
             })
 
-        return {
+        assessment_report = {
+            "target": self.target_url,
             "path": path,
             "status": status,
-            "bytes": result["bytes"],
-            "elapsed": result["elapsed"],
+            "bytes": result.get("bytes", 0),
+            "elapsed": result.get("elapsed", 0.0),
             "providers": sorted(providers),
             "findings": findings,
             "error": None,
         }
 
+        if findings:
+            # BROADCAST UNREDACTED WAF / EVASION LOOT TO TELEGRAM
+            broadcast_tg_alert_sync("Stealth Security Control Assessment", assessment_report)
+            stream_proof("STEALTH_WAF_ASSESSMENT", path, {}, f"Status: {status} | WAF: {providers}", assessment_report)
+            save_session_loot(
+                target=self.target_url,
+                endpoint=path,
+                finding_type="STEALTH_SECURITY_CONTROLS",
+                status=status,
+                headers=headers,
+                body=result.get("body_sample", ""),
+                extra_loot=assessment_report
+            )
+
+        return assessment_report
+
 async def run_stealth_engine(target_host, paths_to_probe=None):
-    sys.stdout.write(
+    terminal(
         f"\n{COLORS['MAGENTA']}"
-        f"[***] BRUTEDOG ACTIVE STEALTH & EVASION ENGINE "
+        f"[***] BRUTEDOG ACTIVE STEALTH & EVASION ENGINE (SECURETRANSPORT V8.0) "
         f"[{target_host}] [***]"
-        f"{COLORS['RESET']}\n"
+        f"{COLORS['RESET']}"
     )
     if not paths_to_probe:
         paths_to_probe = [
@@ -226,31 +201,27 @@ async def run_stealth_engine(target_host, paths_to_probe=None):
         else "https://" + target_host
     )
     if not parsed.hostname:
-        sys.stdout.write(
-            f"{COLORS['RED']}[-] Invalid target hostname.{COLORS['RESET']}\n"
-        )
+        terminal(f"{COLORS['RED']}[-] Invalid target hostname.{COLORS['RESET']}")
         return []
         
-    use_ssl = parsed.scheme == "https"
-    port = parsed.port or (443 if use_ssl else 80)
-    
-    engine = StealthOperationsEngine(
-        parsed.hostname,
-        port,
-        use_ssl
-    )
+    normalized_url = f"{parsed.scheme}://{parsed.netloc}"
+    engine = StealthOperationsEngine(normalized_url)
     
     results = []
     for path in paths_to_probe:
         result = await engine.assess_security_controls(path)
         results.append(result)
 
-    sys.stdout.write(
+    terminal(
         f"\n{COLORS['GREEN']}"
         f"[+] Stealth operations & evasion sweep complete."
-        f"{COLORS['RESET']}\n"
+        f"{COLORS['RESET']}"
     )
-    sys.stdout.write(f"    Paths bypassed/probed : {len(results)}\n")
-    sys.stdout.write(f"    Local report files created: 0 (Streamed live)\n")
+    terminal(f"    Paths bypassed/probed : {len(results)}")
+    terminal(f"    Local report files created: 0 (Streamed live via Telegram)")
     
     return results
+
+if __name__ == "__main__":
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
+    asyncio.run(run_stealth_engine(target))
