@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-STEALTH_OPS.PY — Active Evasion, Proxy Rotation & Stealth Operations Engine v8.0 (With Telegram Telemetry)
+STEALTH_OPS.PY v8.5 — Active Evasion, Proxy Rotation & Stealth Operations Engine (WAF Hardened)
 Features:
 - Dynamic User-Agent, Client-Hints and browser-grade TLS fingerprint rotation via SecureTransport
-- WAF / CDN edge defense detection and evasion configuration
+- WAF / CDN edge defense detection and evasion configuration with behavioral timing jitter
 - Timing jitter and request rate obfuscation
 - Real-time asynchronous Telegram notification dispatch for unredacted evasion loot
 - Zero-disk memory storage (streamed live to Telegram and memory)
@@ -14,11 +14,12 @@ import sys
 import random
 from urllib.parse import urlparse
 
-# Import centralized SecureTransport middleware, telemetry, and Telegram notifier
+# Import centralized SecureTransport middleware, telemetry, Telegram notifier, and behavioral mimicry
 from modules.transport import SecureTransport
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter
 
 COLORS = {
     "RED": "\033[91m",
@@ -31,10 +32,10 @@ COLORS = {
 }
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 ]
 
 def terminal(message):
@@ -69,8 +70,7 @@ class StealthOperationsEngine:
                 path = "/" + path
 
             # Apply anti-forensics timing jitter
-            jitter = random.uniform(0.1, 0.4)
-            time.sleep(jitter)
+            apply_behavioral_jitter()
 
             started = time.monotonic()
             status, headers, body = self.transport.request(method, path, payload=payload)
@@ -184,7 +184,7 @@ class StealthOperationsEngine:
 async def run_stealth_engine(target_host, paths_to_probe=None):
     terminal(
         f"\n{COLORS['MAGENTA']}"
-        f"[***] BRUTEDOG ACTIVE STEALTH & EVASION ENGINE (SECURETRANSPORT V8.0) "
+        f"[***] BRUTEDOG ACTIVE STEALTH & EVASION ENGINE (SECURETRANSPORT V8.5) "
         f"[{target_host}] [***]"
         f"{COLORS['RESET']}"
     )
