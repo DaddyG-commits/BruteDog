@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG SCANNER V2.0 — Advanced Network Reconnaissance & Security Assessment Engine (With Telegram Telemetry)
+BRUTEDOG SCANNER V2.0 — Advanced Network Reconnaissance & Security Assessment Engine (Hardened with WAF Evasion)
 Features:
 - Native asynchronous TCP connections
 - IPv4 / IPv6 DNS resolution
-- Service identification
-- HTTP response inspection via SecureTransport and behavioral mimicry
+- Service identification & header override testing on open HTTP ports
+- HTTP response inspection via SecureTransport and behavioral mimicry (Poisson jitter)
 - HTTP security-header assessment
 - TLS certificate inspection & protocol identification
 - Passive service-banner collection
@@ -19,32 +19,34 @@ import ipaddress
 import socket
 import ssl
 import time
+import random
 
 from urllib.parse import urlsplit
 
-# Import centralized Telegram broadcaster, secure transport, and loot persistence
+# Import centralized Telegram broadcaster, secure transport, loot persistence, and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
 from modules.transport import SecureTransport
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.behavioral_mimic import apply_behavioral_jitter
 
 
 # ============================================================
 # CONFIGURATION & TIMEOUT CONSTANTS
 # ============================================================
 
-CONNECT_TIMEOUT = 2.5
-HTTP_TIMEOUT = 3.0
-BANNER_TIMEOUT = 0.4
+CONNECT_TIMEOUT = 3.0
+HTTP_TIMEOUT = 3.5
+BANNER_TIMEOUT = 0.5
 
-MAX_CONCURRENT = 40
+MAX_CONCURRENT = 35
 MAX_PORTS = 256
 
 MAX_BANNER_SIZE = 512
 MAX_HTTP_HEADERS = 64
 MAX_HEADER_SIZE = 16384
 
-USER_AGENT = "BruteDog-Security-Scanner/2.0"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 COMMON_PORTS = [
     20, 21, 22, 23, 25, 26, 53, 67, 68,
@@ -330,6 +332,8 @@ async def open_connection(
     context = None
     if use_tls:
         context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
 
     connection = asyncio.open_connection(
         address,
@@ -395,13 +399,15 @@ async def inspect_http(
     target_url = f"{scheme}://{hostname}:{port}"
 
     try:
+        apply_behavioral_jitter()
         transport = SecureTransport(target_url)
+        
+        # Try HEAD request first, fallback to GET or Method Tampering if blocked by WAF 403
         status, headers, body = await asyncio.to_thread(
             transport.request, "HEAD", "/"
         )
 
-        if status == 0:
-            # Fallback to GET if HEAD was blocked by WAF
+        if status in [403, 405, 0]:
             status, headers, body = await asyncio.to_thread(
                 transport.request, "GET", "/"
             )
@@ -448,6 +454,7 @@ async def inspect_tls(
     }
 
     try:
+        apply_behavioral_jitter()
         reader, writer = await open_connection(
             address,
             port,
@@ -526,6 +533,7 @@ async def probe_port(
 
     writer = None
     try:
+        apply_behavioral_jitter()
         reader, writer = await open_connection(address, port, timeout=CONNECT_TIMEOUT)
         result["state"] = "OPEN"
         result["open"] = True
@@ -568,7 +576,7 @@ async def run_port_scanner(
     concurrency=MAX_CONCURRENT,
 ):
     """
-    BruteDog Scanner V2.0 — Asynchronous Network Reconnaissance & Security Assessment Engine
+    BruteDog Scanner V2.5 — Asynchronous Network Reconnaissance & Security Assessment Engine
     """
     started = time.monotonic()
 
@@ -587,7 +595,7 @@ async def run_port_scanner(
             "open_ports": [],
         }
 
-    terminal(color("\n[***] BRUTEDOG SCANNER V2.0 (SECURETRANSPORT V8.0) [***]", "MAGENTA"))
+    terminal(color("\n[***] BRUTEDOG SCANNER V2.5 (WAF-HARDENED SECURETRANSPORT) [***]", "MAGENTA"))
     terminal(color(f"[*] Target: {host}", "CYAN"))
     terminal(f"[*] Ports scheduled: {len(ports)}")
     terminal(f"[*] Maximum concurrency: {concurrency}")
