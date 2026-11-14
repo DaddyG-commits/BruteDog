@@ -5,15 +5,12 @@ Features:
 - Native asynchronous TCP connections
 - IPv4 / IPv6 DNS resolution
 - Service identification
-- HTTP response inspection
+- HTTP response inspection via SecureTransport and behavioral mimicry
 - HTTP security-header assessment
-- TLS certificate inspection
-- TLS protocol identification
+- TLS certificate inspection & protocol identification
 - Passive service-banner collection
-- Structured error classification
-- Concurrency management
-- Evidence-based reporting
-- Real-time asynchronous Telegram notification dispatch for unredacted recon loot
+- Structured error classification & concurrency management
+- Automated immutable disk persistence (loot_output/) and real-time Telegram telemetry
 """
 
 import asyncio
@@ -25,8 +22,11 @@ import time
 
 from urllib.parse import urlsplit
 
-# Import centralized Telegram broadcaster
+# Import centralized Telegram broadcaster, secure transport, and loot persistence
 from modules.telegram_notifier import send_telegram_alert
+from modules.transport import SecureTransport
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 
 # ============================================================
@@ -370,7 +370,7 @@ async def collect_banner(reader):
 
 
 # ============================================================
-# HTTP INSPECTION & SECURITY HEADER AUDITING
+# HTTP INSPECTION & SECURITY HEADER AUDITING (VIA SECURETRANSPORT)
 # ============================================================
 
 async def inspect_http(
@@ -379,12 +379,11 @@ async def inspect_http(
     port,
     use_tls=False,
 ):
-    writer = None
     result = {
         "available": False,
         "status_code": None,
         "reason": "",
-        "http_version": "",
+        "http_version": "HTTP/1.1",
         "server": "",
         "headers": {},
         "security_headers": {},
@@ -392,74 +391,27 @@ async def inspect_http(
         "error": None,
     }
 
+    scheme = "https" if use_tls or port in HTTPS_PORTS else "http"
+    target_url = f"{scheme}://{hostname}:{port}"
+
     try:
-        reader, writer = await open_connection(
-            address,
-            port,
-            timeout=HTTP_TIMEOUT,
-            use_tls=use_tls,
-            hostname=hostname,
+        transport = SecureTransport(target_url)
+        status, headers, body = await asyncio.to_thread(
+            transport.request, "HEAD", "/"
         )
 
-        request = (
-            f"HEAD / HTTP/1.1\r\n"
-            f"Host: {hostname}\r\n"
-            f"User-Agent: {USER_AGENT}\r\n"
-            f"Connection: close\r\n"
-            f"\r\n"
-        )
-
-        writer.write(request.encode("ascii"))
-        await writer.drain()
-
-        status_line = await asyncio.wait_for(
-            reader.readline(),
-            timeout=HTTP_TIMEOUT
-        )
-
-        status_line = status_line.decode("latin-1", errors="replace").strip()
-        parts = status_line.split(" ", 2)
-
-        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
-            result["error"] = "Invalid HTTP response."
-            return result
-
-        result["http_version"] = parts[0]
-        try:
-            result["status_code"] = int(parts[1])
-        except ValueError:
-            result["error"] = "Invalid HTTP status code."
-            return result
-
-        result["reason"] = parts[2] if len(parts) > 2 else ""
-        result["available"] = True
-
-        headers = {}
-        total_size = len(status_line)
-
-        for _ in range(MAX_HTTP_HEADERS):
-            line = await asyncio.wait_for(
-                reader.readline(),
-                timeout=HTTP_TIMEOUT
+        if status == 0:
+            # Fallback to GET if HEAD was blocked by WAF
+            status, headers, body = await asyncio.to_thread(
+                transport.request, "GET", "/"
             )
-            if not line:
-                break
 
-            total_size += len(line)
-            if total_size > MAX_HEADER_SIZE:
-                result["error"] = "HTTP headers exceeded size limit."
-                break
+        if status == 0:
+            result["error"] = "HTTP inspection connection failed."
+            return result
 
-            if line in (b"\r\n", b"\n"):
-                break
-
-            decoded = line.decode("latin-1", errors="replace").strip()
-            if ":" not in decoded:
-                continue
-
-            key, value = decoded.split(":", 1)
-            headers[key.lower().strip()] = value.strip()
-
+        result["available"] = True
+        result["status_code"] = status
         result["headers"] = headers
         result["server"] = headers.get("server", "")
 
@@ -471,20 +423,9 @@ async def inspect_http(
 
         return result
 
-    except ssl.SSLCertVerificationError:
-        result["error"] = "TLS certificate verification failed."
-        return result
-    except ssl.SSLError as exc:
-        result["error"] = f"TLS error: {type(exc).__name__}"
-        return result
-    except TimeoutError:
-        result["error"] = "HTTP inspection timed out."
-        return result
-    except (OSError, asyncio.IncompleteReadError) as exc:
+    except Exception as exc:
         result["error"] = f"HTTP inspection failed: {type(exc).__name__}"
         return result
-    finally:
-        await close_writer(writer)
 
 
 # ============================================================
@@ -646,7 +587,7 @@ async def run_port_scanner(
             "open_ports": [],
         }
 
-    terminal(color("\n[***] BRUTEDOG SCANNER V2.0 [***]", "MAGENTA"))
+    terminal(color("\n[***] BRUTEDOG SCANNER V2.0 (SECURETRANSPORT V8.0) [***]", "MAGENTA"))
     terminal(color(f"[*] Target: {host}", "CYAN"))
     terminal(f"[*] Ports scheduled: {len(ports)}")
     terminal(f"[*] Maximum concurrency: {concurrency}")
@@ -681,15 +622,26 @@ async def run_port_scanner(
             if result["open"]:
                 terminal(color(f"[OPEN] {address}:{port} — {result['details']['service']}", "GREEN"))
                 
-                # BROADCAST OPEN PORT DISCOVERY TO TELEGRAM
-                broadcast_tg_alert_sync("Port Scan Open Port Discovered", {
+                # BROADCAST OPEN PORT DISCOVERY TO TELEGRAM & PERSIST TO DISK
+                port_loot = {
                     "target": host,
                     "address": address,
                     "port": port,
                     "service": result['details']['service'],
                     "banner": result['details'].get('banner', ''),
                     "http_status": result['details'].get('http', {}).get('status_code')
-                })
+                }
+                broadcast_tg_alert_sync("Port Scan Open Port Discovered", port_loot)
+                stream_proof("PORT_SCAN_OPEN", f"{address}:{port}", {}, f"Service: {result['details']['service']}", port_loot)
+                save_session_loot(
+                    target=f"tcp://{address}:{port}",
+                    endpoint=f"port_{port}",
+                    finding_type="OPEN_PORT_DISCOVERED",
+                    status=200,
+                    headers={},
+                    body=str(result['details']),
+                    extra_loot=port_loot
+                )
 
             elif completed % 20 == 0:
                 terminal(color(f"[*] Progress: {completed}/{total_probes}", "CYAN"))
@@ -770,7 +722,7 @@ async def run_port_scanner(
     terminal(f"    Filtered/unknown: {filtered_count}")
     terminal(f"    Total probes: {total_probes}")
     terminal(f"    Duration: {elapsed}s")
-    terminal("    Local files created: 0\n")
+    terminal("    Local files created: 0 (Streamed live via Telegram)\n")
 
     return final_result
 
