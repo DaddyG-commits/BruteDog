@@ -227,10 +227,6 @@ class RaceConditionAuditor:
         return report
 
 
-# -------------------------------------------------------------
-# CENTRAL ENGINE ENTRY POINT
-# -------------------------------------------------------------
-
 async def run_race_condition_test(
     cognitive_operator=None,
     target_url=None,
