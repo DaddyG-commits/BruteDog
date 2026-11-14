@@ -30,7 +30,7 @@ from modules.telegram_notifier import send_telegram_alert
 
 
 # ============================================================
-# CONFIGURATION
+# CONFIGURATION & TIMEOUT CONSTANTS
 # ============================================================
 
 CONNECT_TIMEOUT = 2.5
@@ -74,7 +74,7 @@ COLORS = {
 
 
 # ============================================================
-# SERVICE DATABASE
+# SERVICE DATABASE MAPPING
 # ============================================================
 
 SERVICE_MAP = {
@@ -195,7 +195,7 @@ def broadcast_tg_alert_sync(loot_type, details):
 
 
 # ============================================================
-# TARGET NORMALIZATION
+# TARGET NORMALIZATION & VALIDATION
 # ============================================================
 
 def normalize_host(target):
@@ -241,10 +241,6 @@ def normalize_host(target):
     return target
 
 
-# ============================================================
-# PORT VALIDATION
-# ============================================================
-
 def validate_ports(ports):
     if ports is None:
         ports = COMMON_PORTS
@@ -270,7 +266,7 @@ def validate_ports(ports):
 
 
 # ============================================================
-# DNS RESOLUTION
+# DNS RESOLUTION ROUTINE
 # ============================================================
 
 async def resolve_target(host):
@@ -312,10 +308,6 @@ async def resolve_target(host):
         }
 
 
-# ============================================================
-# SERVICE IDENTIFICATION
-# ============================================================
-
 def identify_service(port):
     service = SERVICE_MAP.get(port, "UNKNOWN")
     return {
@@ -325,7 +317,7 @@ def identify_service(port):
 
 
 # ============================================================
-# CONNECTION MANAGEMENT
+# CONNECTION & WRITER MANAGEMENT
 # ============================================================
 
 async def open_connection(
@@ -378,7 +370,7 @@ async def collect_banner(reader):
 
 
 # ============================================================
-# HTTP INSPECTION
+# HTTP INSPECTION & SECURITY HEADER AUDITING
 # ============================================================
 
 async def inspect_http(
@@ -496,7 +488,7 @@ async def inspect_http(
 
 
 # ============================================================
-# TLS CERTIFICATE INSPECTION
+# TLS CERTIFICATE & PROTOCOL INSPECTION
 # ============================================================
 
 async def inspect_tls(
@@ -567,7 +559,7 @@ async def inspect_tls(
 
 
 # ============================================================
-# SINGLE TCP PROBE
+# SINGLE TCP PROBE & SERVICE IDENTIFICATION
 # ============================================================
 
 async def probe_port(
@@ -626,7 +618,7 @@ async def probe_port(
 
 
 # ============================================================
-# ASYNC SCANNER
+# ASYNC PORT SCANNER ORCHESTRATION
 # ============================================================
 
 async def run_port_scanner(
@@ -635,7 +627,7 @@ async def run_port_scanner(
     concurrency=MAX_CONCURRENT,
 ):
     """
-    BruteDog Scanner V2.0 (With Telegram Telemetry)
+    BruteDog Scanner V2.0 — Asynchronous Network Reconnaissance & Security Assessment Engine
     """
     started = time.monotonic()
 
@@ -784,7 +776,7 @@ async def run_port_scanner(
 
 
 # ============================================================
-# COMMAND-LINE INTERFACE
+# COMMAND-LINE INTERFACE PARSER & ENTRYPOINT
 # ============================================================
 
 def parse_port_argument(value):
