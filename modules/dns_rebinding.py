@@ -119,13 +119,16 @@ class DNSRebindingOrchestrator:
 
         return findings
 
-async def run_dns_rebinding_engine(target_url):
+async def run_dns_rebinding_attack(target_url):
+    """Compatibility wrapper for CognitiveOperator."""
     from modules.transport import SecureTransport
     transport = SecureTransport(target_url)
     orchestrator = DNSRebindingOrchestrator(target_url)
     return await orchestrator.execute_rebinding_attack(transport)
 
-if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
-    asyncio.run(run_dns_rebinding_engine(target))
+async def run_dns_rebinding_engine(target_url):
+    return await run_dns_rebinding_attack(target_url)
 
+if __name__ == "__main__":
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
+    asyncio.run(run_dns_rebinding_engine(target))
