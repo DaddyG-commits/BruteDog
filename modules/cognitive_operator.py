@@ -136,7 +136,7 @@ class CognitiveOperator:
         body_lower = (body or "").lower()
         
         # Defense against generic client-side SPA routing shells (React/Next.js root divs)
-        if "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or len(body.strip()) < 100:
+        if '<div id="root"></div>' in body or '<div id="__next"></div>' in body or len(body.strip()) < 100:
             return False
 
         if isinstance(headers, dict) and headers.get("X-BruteDog-Verification") == "confirmed":
