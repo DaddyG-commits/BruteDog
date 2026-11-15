@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG SCANNER V2.0 — Advanced Network Reconnaissance & Security Assessment Engine (Hardened with WAF Evasion)
+SCANNER.PY v8.5 — Advanced Network Reconnaissance & Security Assessment Engine (WAF Hardened)
 Features:
-- Native asynchronous TCP connections
-- IPv4 / IPv6 DNS resolution
-- Service identification & header override testing on open HTTP ports
-- HTTP response inspection via SecureTransport and behavioral mimicry (Poisson jitter)
-- HTTP security-header assessment
-- TLS certificate inspection & protocol identification
-- Passive service-banner collection
-- Structured error classification & concurrency management
-- Automated immutable disk persistence (loot_output/) and real-time Telegram telemetry
+- Native asynchronous TCP connections with IPv4 / IPv6 dual-stack DNS resolution
+- Service identification & header override testing on open HTTP ports via SecureTransport
+- HTTP response inspection, behavioral mimicry (Poisson jitter), and header injection
+- HTTP security-header assessment (HSTS, CSP, X-Frame-Options, etc.)
+- TLS certificate inspection, version detection, and cipher suite analysis
+- Passive service-banner collection with strict timeouts and error classification
+- Structured error handling, concurrency throttling via semaphores, and rate-limit mitigation
+- Automated immutable disk persistence (loot_output/) and real-time Telegram telemetry dispatch
 """
 
 import asyncio
@@ -20,6 +19,7 @@ import socket
 import ssl
 import time
 import random
+import re
 
 from urllib.parse import urlsplit
 
@@ -28,7 +28,7 @@ from modules.telegram_notifier import send_telegram_alert
 from modules.transport import SecureTransport
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
-from modules.behavioral_mimic import apply_behavioral_jitter
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 
 # ============================================================
@@ -37,16 +37,14 @@ from modules.behavioral_mimic import apply_behavioral_jitter
 
 CONNECT_TIMEOUT = 3.0
 HTTP_TIMEOUT = 3.5
-BANNER_TIMEOUT = 0.5
+BANNER_TIMEOUT = 0.8
 
 MAX_CONCURRENT = 35
-MAX_PORTS = 256
+MAX_PORTS = 512
 
-MAX_BANNER_SIZE = 512
+MAX_BANNER_SIZE = 1024
 MAX_HTTP_HEADERS = 64
 MAX_HEADER_SIZE = 16384
-
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 COMMON_PORTS = [
     20, 21, 22, 23, 25, 26, 53, 67, 68,
@@ -72,6 +70,7 @@ COLORS = {
     "CYAN": "\033[96m",
     "MAGENTA": "\033[95m",
     "RESET": "\033[0m",
+    "BOLD": "\033[1m",
 }
 
 
@@ -92,28 +91,54 @@ SERVICE_MAP = {
     111: "RPCBIND",
     123: "NTP",
     135: "MSRPC",
-    139: "NETBIOS",
+    137: "NETBIOS-NS",
+    138: "NETBIOS-DGM",
+    139: "NETBIOS-SSN",
     143: "IMAP",
+    161: "SNMP",
+    162: "SNMP-TRAP",
     179: "BGP",
+    194: "IRC",
     389: "LDAP",
     443: "HTTPS",
     445: "SMB",
     465: "SMTPS",
+    500: "ISAKMP",
+    502: "MODBUS",
+    514: "SYSLOG",
+    515: "PRINTER",
     587: "SMTP-SUBMISSION",
+    593: "HTTP-RPC-EPMAP",
+    623: "ASF-RMCP",
+    631: "IPP",
     636: "LDAPS",
     873: "RSYNC",
+    902: "VMWARE-AUTH",
+    989: "FTPS-DATA",
     990: "FTPS",
     993: "IMAPS",
     995: "POP3S",
+    1080: "SOCKS",
+    1194: "OPENVPN",
     1433: "MSSQL",
     1521: "ORACLE",
+    1701: "L2TP",
+    1723: "PPTP",
     1883: "MQTT",
     2049: "NFS",
+    2082: "CPANEL",
+    2083: "CPANEL-SECURE",
+    2086: "WHM",
+    2087: "WHM-SECURE",
+    2181: "ZOOKEEPER",
     2375: "DOCKER-API",
     2376: "DOCKER-TLS",
     3000: "HTTP-ALT",
     3306: "MYSQL",
     3389: "RDP",
+    3690: "SVN",
+    4443: "HTTPS-ALT",
+    5000: "UPNP-OR-HTTP",
     5432: "POSTGRESQL",
     5601: "KIBANA",
     5672: "AMQP",
@@ -155,7 +180,7 @@ HTTPS_PORTS = {
 BANNER_PORTS = {
     21, 22, 23, 25, 26,
     110, 143, 465, 587,
-    993, 995,
+    993, 995, 3306, 6379
 }
 
 SECURITY_HEADERS = {
@@ -368,7 +393,7 @@ async def collect_banner(reader):
         )
         if not data:
             return ""
-        return data.decode("utf-8", errors="replace").strip()[:200]
+        return data.decode("utf-8", errors="replace").strip()[:300]
     except (TimeoutError, OSError):
         return ""
 
@@ -576,7 +601,7 @@ async def run_port_scanner(
     concurrency=MAX_CONCURRENT,
 ):
     """
-    BruteDog Scanner V2.5 — Asynchronous Network Reconnaissance & Security Assessment Engine
+    BruteDog Scanner V8.5 — Asynchronous Network Reconnaissance & Security Assessment Engine
     """
     started = time.monotonic()
 
@@ -595,12 +620,12 @@ async def run_port_scanner(
             "open_ports": [],
         }
 
-    terminal(color("\n[***] BRUTEDOG SCANNER V2.5 (WAF-HARDENED SECURETRANSPORT) [***]", "MAGENTA"))
-    terminal(color(f"[*] Target: {host}", "CYAN"))
+    terminal(color(f"\n[***] BRUTEDOG SCANNER V8.5 (WAF-HARDENED SECURETRANSPORT) [{host}] [***]", "MAGENTA"))
+    terminal(color(f"[*] Target Host: {host}", "CYAN"))
     terminal(f"[*] Ports scheduled: {len(ports)}")
     terminal(f"[*] Maximum concurrency: {concurrency}")
 
-    terminal(color("[*] Resolving target...", "CYAN"))
+    terminal(color("[*] Resolving target addresses...", "CYAN"))
     dns = await resolve_target(host)
 
     if not dns["success"]:
@@ -651,8 +676,8 @@ async def run_port_scanner(
                     extra_loot=port_loot
                 )
 
-            elif completed % 20 == 0:
-                terminal(color(f"[*] Progress: {completed}/{total_probes}", "CYAN"))
+            elif completed % 30 == 0:
+                terminal(color(f"[*] Progress: {completed}/{total_probes} probes executed...", "CYAN"))
 
             return result
 
@@ -664,10 +689,10 @@ async def run_port_scanner(
         ]
         results = await asyncio.gather(*tasks)
     except asyncio.CancelledError:
-        terminal(color("[-] Scan cancelled.", "YELLOW"))
+        terminal(color("[-] Scan cancelled by user.", "YELLOW"))
         raise
     except Exception as exc:
-        terminal(color(f"[-] Scanner failure: {type(exc).__name__}", "RED"))
+        terminal(color(f"[-] Scanner execution failure: {type(exc).__name__}", "RED"))
         return {
             "status": "FAILED",
             "target": host,
@@ -709,7 +734,7 @@ async def run_port_scanner(
 
     final_result = {
         "status": "COMPLETED",
-        "scanner": "BruteDog Scanner V2.0",
+        "scanner": "BruteDog Scanner V8.5",
         "target": host,
         "dns": dns,
         "ports_tested": len(ports),
@@ -722,15 +747,14 @@ async def run_port_scanner(
         "duration": elapsed,
     }
 
-    terminal(color("\n[+] NETWORK ASSESSMENT COMPLETED", "GREEN"))
+    terminal(color("\n[+] NETWORK ASSESSMENT COMPLETED SUCCESSFULLY", "GREEN"))
     terminal(f"    Resolved addresses: {len(addresses)}")
     terminal(f"    Ports tested: {len(ports)}")
     terminal(f"    Open ports: {len(open_port_numbers)}")
     terminal(f"    Closed ports: {closed_count}")
     terminal(f"    Filtered/unknown: {filtered_count}")
     terminal(f"    Total probes: {total_probes}")
-    terminal(f"    Duration: {elapsed}s")
-    terminal("    Local files created: 0 (Streamed live via Telegram)\n")
+    terminal(f"    Duration: {elapsed}s\n")
 
     return final_result
 
@@ -752,7 +776,7 @@ def parse_port_argument(value):
 
 async def main():
     parser = argparse.ArgumentParser(
-        description="BruteDog Scanner V2.0 Network Reconnaissance Engine"
+        description="BruteDog Scanner V8.5 Advanced Reconnaissance Engine"
     )
     parser.add_argument("target", help="Single authorized hostname or IP address")
     parser.add_argument("--ports", type=parse_port_argument, default=None, help="Comma-separated TCP ports")
@@ -774,4 +798,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        terminal(color("\n[-] Interrupted by user.", "YELLOW"))
+        terminal(color("\n[-] Operation aborted by user.", "YELLOW"))
