@@ -210,30 +210,33 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
     # COGNITIVE SUPREME COMMANDER EXECUTION HOOK
     # ========================================================
     if cognitive_brain:
-        cognitive_result = cognitive_brain.evaluate_and_execute(
-            endpoint=endpoint,
-            status=status,
-            headers=headers,
-            body=body,
-            transport=transport,
-            target_url=target_url
-        )
-        
-        if cognitive_result.get("success"):
-            reasoning = cognitive_result.get("reasoning")
-            findings.append({
-                "type": "COGNITIVE_AUTONOMOUS_PIVOT_SUCCESS",
-                "evidence": reasoning,
-                "status": status
-            })
-            dispatch_tg_alert("Cognitive Autonomous Pivot Success", {"endpoint": endpoint, "evidence": reasoning})
+        try:
+            cognitive_result = cognitive_brain.evaluate_and_execute(
+                endpoint=endpoint,
+                status=status,
+                headers=headers,
+                body=body,
+                transport=transport,
+                target_url=target_url
+            )
+            
+            if cognitive_result and cognitive_result.get("success"):
+                reasoning = cognitive_result.get("reasoning")
+                findings.append({
+                    "type": "COGNITIVE_AUTONOMOUS_PIVOT_SUCCESS",
+                    "evidence": reasoning,
+                    "status": status
+                })
+                dispatch_tg_alert("Cognitive Autonomous Pivot Success", {"endpoint": endpoint, "evidence": reasoning})
+        except Exception:
+            pass
     # ========================================================
 
     body_lower = body.lower()
     is_spa_shell = (
-        "<div id=\"root\"></div>" in body or 
-        "<div id=\"__next\"></div>" in body or 
-        "<div id=\"app\"></div>" in body or
+        '<div id="root"></div>' in body or 
+        '<div id="__next"></div>' in body or 
+        '<div id="app"></div>' in body or
         (len(body.strip()) < 200 and "token" not in body_lower)
     )
     
@@ -312,14 +315,14 @@ def verify_hijacked_session(transport):
         status, headers, body = transport.request("GET", endpoint)
         
         body_lower = body.lower()
-        is_spa_shell = "<div id=\"root\"></div>" in body or "<div id=\"__next\"></div>" in body or "<div id=\"__nuxt\"></div>" in body or (len(body.strip()) < 350 and "user" not in body_lower)
+        is_spa_shell = '<div id="root"></div>' in body or '<div id="__next"></div>' in body or '<div id="__nuxt"></div>' in body or (len(body.strip()) < 350 and "user" not in body_lower)
         
         if status == 200 and not is_spa_shell and len(body) > 10:
             verified = True
         else:
             alt_status, alt_headers, alt_body = transport.request("POST", endpoint, payload={})
             alt_body_lower = alt_body.lower()
-            is_alt_spa = "<div id=\"root\"></div>" in alt_body or (len(alt_body.strip()) < 350 and "user" not in alt_body_lower)
+            is_alt_spa = '<div id="root"></div>' in alt_body or (len(alt_body.strip()) < 350 and "user" not in alt_body_lower)
             if alt_status == 200 and not is_alt_spa and len(alt_body) > 10:
                 status, headers, body = alt_status, alt_headers, alt_body
                 verified = True
