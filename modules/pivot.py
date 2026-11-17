@@ -2,12 +2,13 @@
 """
 PIVOT.PY v8.5 — Active Cloud Credential Harvest, Session Extraction & Covert Exfiltration Engine (WAF Hardened)
 Features:
-- Live AWS & GCP credential and token retrieval
-- Compromised session file & cookie extraction
+- Live AWS & GCP credential and token retrieval with non-blocking async execution
+- Compromised session file & cookie extraction with fallback synthesis
 - Covert data encoding & exfiltration preparation with WAF evasion & behavioral jitter
-- TLS verification bypass
+- TLS verification bypass and secure certificate auditing
 - Live on-screen terminal streaming & zero-disk memory architecture
 - Real-time asynchronous Telegram notification dispatch for unredacted pivot loot
+- Zero-friction compatibility wrappers for the Autonomous Cognitive Operator
 """
 import asyncio
 import socket
@@ -302,11 +303,6 @@ class AutonomousPivotEngine:
         self,
         compromised_session_path=None,
     ):
-        """
-        Executes active cloud credential harvesting, session extraction, 
-        TLS verification bypass, and covert exfiltration preparation.
-        Streams all results live on screen without writing files to disk.
-        """
         started = time.time()
         log(
             "\n============================================================",
@@ -369,8 +365,12 @@ class AutonomousPivotEngine:
         return results
 
 # ============================================================
-# MAIN ENTRY POINT
+# COMPATIBILITY WRAPPER FOR COGNITIVE OPERATOR & ENGINE
 # ============================================================
+async def run_pivot(target_host, options=None):
+    """Compatibility wrapper matching BruteDog v8.5 execution standards."""
+    return await run_pivot_engine(target_host, options)
+
 async def run_pivot_engine(target_host, options=None):
     try:
         engine = AutonomousPivotEngine(target_host)
