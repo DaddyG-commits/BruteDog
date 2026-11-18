@@ -458,8 +458,3 @@ class CognitiveOperator:
 
         return None
 
-
-# --- AUTOMATED ALIAS PATCH --- 
-async def CognitiveOperator(*args, **kwargs):
-    return await __init__(*args, **kwargs)
-
