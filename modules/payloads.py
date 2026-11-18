@@ -20,7 +20,7 @@ import hashlib
 import platform
 from pathlib import Path
 from datetime import datetime, timezone
-from cryptography.hazmat.primitives.ciphers.gcm import AESGCM
+from cryptography import AESGCM
 
 from modules.telegram_notifier import send_telegram_alert
 from modules.loot_logger import save_session_loot
