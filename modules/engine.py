@@ -62,7 +62,7 @@ from modules.cognitive_operator import CognitiveOperator
 from modules.telegram_notifier import send_telegram_alert
 
 # ============================================================
-# CONFIGURATION
+# CONFIGURATION & BUDGET ENFORCEMENT
 # ============================================================
 REQUEST_TIMEOUT = 8
 MAX_WORKERS = 5
@@ -169,12 +169,15 @@ def get_target():
     scheme = parsed.scheme
     netloc = parsed.hostname
     port = parsed.port
+    path = parsed.path
+    query = f"?{parsed.query}" if parsed.query else ""
+    fragment = f"#{parsed.fragment}" if parsed.fragment else ""
     
     if port:
         if (scheme == "https" and port != 443) or (scheme == "http" and port != 80):
             netloc = f"{netloc}:{port}"
             
-    return f"{scheme}://{netloc}{parsed.path}".rstrip("/")
+    return f"{scheme}://{netloc}{path}{query}{fragment}".rstrip("/")
 
 def resolve_target(host):
     try:
@@ -194,11 +197,17 @@ def detect_database_errors(body):
     return findings
 
 def inspect_cookie_security(headers):
-    cookie = headers.get("set-cookie", "")
-    if not cookie:
+    # Case-insensitive header dictionary lookup
+    cookie_header = None
+    for k, v in headers.items():
+        if k.lower() == "set-cookie":
+            cookie_header = v
+            break
+    if not cookie_header:
         return []
+        
     issues = []
-    lower = cookie.lower()
+    lower = cookie_header.lower()
     if "secure" not in lower:
         issues.append("Secure attribute missing")
     if "httponly" not in lower:
@@ -250,20 +259,26 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         '<div id="root"></div>' in body or 
         '<div id="__next"></div>' in body or 
         '<div id="app"></div>' in body or
+        '<div id="__nuxt"></div>' in body or
+        "login-form" in body_lower or
+        "sign in" in body_lower or
         (len(body.strip()) < 200 and "token" not in body_lower)
     )
     
-    has_valid_auth_indicator = any(k in body_lower for k in ["access_token", "\"role\":\"admin\"", "\"user_id\":", "auth_token", "session_id"])
-    
-    if status in [200, 201, 302] and not is_spa_shell and (has_valid_auth_indicator or "token" in body_lower):
-        extracted_proof = {}
-        try:
-            data = json.loads(body)
-            if isinstance(data, dict):
-                extracted_proof = {k: v for k, v in data.items() if any(sub in k.lower() for sub in ["token", "session", "cookie", "auth", "key"])}
-        except:
-            extracted_proof = {"raw_response_snippet": body[:200]}
+    # Strict JSON validation & differential schema matching to eliminate false positives
+    has_valid_auth_indicator = False
+    extracted_proof = {}
+    try:
+        data = json.loads(body)
+        if isinstance(data, dict):
+            if any(k in data for k in ["access_token", "auth_token", "session_id", "token", "role", "user_id"]):
+                has_valid_auth_indicator = True
+                extracted_proof = {k: v for k, v in data.items() if any(sub in k.lower() for sub in ["token", "session", "cookie", "auth", "key", "role"])}
+    except Exception:
+        has_valid_auth_indicator = any(k in body_lower for k in ["access_token", "\"role\":\"admin\"", "\"user_id\":", "auth_token", "session_id"])
+        extracted_proof = {"raw_response_snippet": body[:200]}
 
+    if status in [200, 201, 302] and not is_spa_shell and has_valid_auth_indicator:
         loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
         extracted_proof["integrity_hash"] = loot_hash
 
