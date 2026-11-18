@@ -103,7 +103,10 @@ def alert_loot(loot_type, details):
         loop = asyncio.get_running_loop()
         loop.create_task(send_telegram_alert(loot_type, details))
     except RuntimeError:
-        asyncio.run(send_telegram_alert(loot_type, details))
+        try:
+            asyncio.run(send_telegram_alert(loot_type, details))
+        except Exception:
+            pass
 
 # ============================================================
 # TARGET VALIDATION
@@ -391,7 +394,10 @@ async def async_main():
         loop = asyncio.get_running_loop()
         loop.create_task(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
     except RuntimeError:
-        asyncio.run(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
+        try:
+            asyncio.run(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
+        except Exception:
+            pass
 
 # ============================================================
 # ENTRY POINT
