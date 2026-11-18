@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+"""
+TELEMETRY_BROADCASTER.PY v8.7 — Centralized Offensive Telemetry & Proof-of-Work Dispatcher (Elite Red Team Adversarial Edition)
+Features:
+- Asynchronous and synchronous telemetry and loot broadcasting to Telegram
+- Clean HTML message templating with structured dictionary field formatting
+- Resilient non-blocking execution across multi-threaded and async module boundaries
+"""
 import os
 import asyncio
 import httpx
@@ -23,7 +31,7 @@ async def broadcast_loot(vector: str, details: Union[Dict[str, Any], str]):
         details_str = f"<code>{str(details)}</code>"
 
     message = (
-        f"🚨 <b>BRUTEDOG V8.0 — COGNITIVE LOOT INTERCEPT</b> 🚨\n"
+        f"🚨 <b>BRUTEDOG V8.7 — COGNITIVE LOOT INTERCEPT</b> 🚨\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 <b>Vector:</b> <code>{vector.upper()}</code>\n\n"
         f"{details_str}\n"
@@ -47,9 +55,16 @@ def broadcast_loot_sync(vector: str, details: Union[Dict[str, Any], str]):
     """Synchronous wrapper for modules running in threading or non-async contexts."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(broadcast_loot(vector, details))
+        if loop.is_running():
+            loop.create_task(broadcast_loot(vector, details))
+        else:
+            asyncio.run(broadcast_loot(vector, details))
     except RuntimeError:
         try:
             asyncio.run(broadcast_loot(vector, details))
         except Exception:
             pass
+
+# Alias bindings for complete backward compatibility across framework modules
+send_telemetry_alert = broadcast_loot
+send_telemetry_alert_sync = broadcast_loot_sync
