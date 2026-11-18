@@ -5,6 +5,7 @@ Features:
 - Zero-noise telemetry: Telegram alerts restricted strictly to verified high-value breach loot and critical exploit pivots.
 - Real-time mid-flight bottleneck adaptation: Cognitive operator instantly evaluates defenses and mutates vector strategy mid-execution.
 - Confidence scoring, dynamic module relevance ranking, request budget enforcement, and finding deduplication.
+- Adversarial Threat Intelligence & TTP Mapping for autonomous attack chain orchestration.
 """
 import asyncio
 import hashlib
@@ -70,7 +71,8 @@ class CognitiveOperator:
                 "jwt_key_confusion"
             ],
             "attack_chains": [],
-            "risk_level": "Evaluating"
+            "risk_level": "Evaluating",
+            "adversarial_profile": "Advanced Persistent Threat Emulation"
         }
         self.max_budget = max(0, int(max_budget))
         self.requests_spent = 0
@@ -159,7 +161,7 @@ class CognitiveOperator:
 
     def _is_verified_loophole(self, status: int, endpoint: str, body: str, headers: dict) -> bool:
         body_lower = (body or "").lower()
-        if '<div id="root"></div>' in body or '<div id="__next"></div>' in body or len(body.strip()) < 100:
+        if '<div id="root"></div>' in body or '<div id="__next"></div>' in body or '<div id="__nuxt"></div>' in body or len(body.strip()) < 100:
             return False
 
         if isinstance(headers, dict) and headers.get("X-BruteDog-Verification") == "confirmed":
