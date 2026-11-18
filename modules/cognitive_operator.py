@@ -4,8 +4,7 @@ BRUTEDOG COGNITIVE OPERATOR v8.8 — Autonomous Reasoning & Tactical Assessment 
 Features:
 - Zero-noise telemetry: Telegram alerts restricted strictly to verified high-value breach loot and critical exploit pivots.
 - Real-time mid-flight bottleneck adaptation: Cognitive operator instantly evaluates defenses and mutates vector strategy mid-execution.
-- Confidence scoring, dynamic module relevance ranking, request budget enforcement, and finding deduplication.
-- Adversarial Threat Intelligence & TTP Mapping for autonomous attack chain orchestration.
+- Advanced Multi-Vector TTP Correlation, Dynamic Attack Chaining & Session Feedback, and Autonomous WAF Evasion.
 """
 import asyncio
 import hashlib
