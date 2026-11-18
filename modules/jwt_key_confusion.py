@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-JWT_KEY_CONFUSION.PY v8.6 — Cryptographic Key Confusion & RS256/HS256 Exploit Engine (Elite Red Team Adversarial Edition)
+JWT_KEY_CONFUSION.PY v8.7 — Cryptographic Key Confusion & RS256/HS256 Exploit Engine (Elite Red Team Adversarial Edition)
 Features:
 - Automatic public key and JWKS harvesting from /.well-known/jwks.json and oauth endpoints with SHA-256 hashing
 - Asymmetric-to-symmetric key confusion forged token generator (HS256 signed using RSA public key bytes)
@@ -162,9 +162,3 @@ async def run_jwt_confusion_engine(target_url):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
     asyncio.run(run_jwt_confusion_engine(target))
-
-
-# --- AUTOMATED ALIAS PATCH --- 
-async def JWTKeyConfusionEngine(*args, **kwargs):
-    return await terminal(*args, **kwargs)
-
