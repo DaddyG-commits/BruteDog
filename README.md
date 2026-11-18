@@ -72,6 +72,7 @@ python3 main.py
 
 If you find BruteDog useful for your security research and red team operations, 
 you can support development via Buy Me A Coffee or direct crypto transfers:
+
  Bitcoin (BTC): ⁠18WGuvU1apn6f2h5uZWF6biS3MFaZ5Pj9d⁠
 
  Ethereum (ETH / ERC20): ⁠0xd134ebcb7060e22f2c6454df28c810dd33a02f5c⁠
