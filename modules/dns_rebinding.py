@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DNS_REBINDING.PY v8.6 — Authoritative DNS Rebinding & Cloud Metadata SSRF Engine (Elite Red Team Adversarial Edition)
+DNS_REBINDING.PY v8.7 — Authoritative DNS Rebinding & Cloud Metadata SSRF Engine (Elite Red Team Adversarial Edition)
 Features:
 - RFC-compliant Authoritative UDP DNS server supporting public/local interface binding and strict QTYPE/QCLASS parsing
 - Full DNS Resource Record (RR) encoder with compression pointer handling and TTL=0 rapid switching
@@ -399,9 +399,4 @@ async def run_dns_rebinding_attack(target_url):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "http://rebind.brutedog.local"
     asyncio.run(run_dns_rebinding_attack(target))
-
-
-# --- AUTOMATED ALIAS PATCH --- 
-async def DNSRebindingOrchestrator(*args, **kwargs):
-    return await terminal(*args, **kwargs)
 
