@@ -13,6 +13,7 @@
 
 ---
 
+
 ## 🛡️ Overview
 
 **BruteDog** is an advanced, high-performance red team adversarial orchestration framework built for elite security operators. Engineered with an autonomous cognitive reasoning core, BruteDog performs deep AST-level JavaScript bundle parsing, state-machine BOLA mapping, polymorphic NoSQL/SQL injection, JWT key confusion, and true HTTP/2 single-packet multi-stream race condition exploitation.
@@ -32,6 +33,7 @@ Operating entirely in-memory with tamper-evident SHA-256 integrity hashing and a
 
 ---
 
+
 ## 🛠️ Framework Architecture
 
 brutedog/
@@ -49,14 +51,17 @@ brutedog/
 │   ├── telemetry.py            # Real-Time Proof-of-Work Terminal Streamer
 │   └── loot_logger.py          # SHA-256 Tamper-Evident Immutable Disk Exfiltration
 
+
+
 ⚙️ Installation & Setup
+
 1. Clone the Repository:
+
  Bash:
 git clone https://github.com/DaddyG-commits/BruteDog.git
-  Bash:
+  
+ Bash:
 cd BruteDog
-
-
 
   Bash:
 pip install -r requirements.txt
@@ -67,6 +72,8 @@ export TELEGRAM_CHAT_ID="your_chat_id_here"
 
   Bash:
 python3 main.py
+
+
 
 ☕ Support & Crypto Donations
 
@@ -80,6 +87,7 @@ you can support development via Buy Me A Coffee or direct crypto transfers:
  Solana (SOL): ⁠E1MiQEYmuTg9DMS4vpr5NtkWqeMQmTHZLptv5L3on1ir⁠
  
  Tron (TRON / TRC20): ⁠TCeddcjw9VzBsMZFbA9mACfuQLzdAkjwA5⁠
+
 
 
 🔒 Operational Security & Disclaimer
