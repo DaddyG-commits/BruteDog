@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-RESPONSE_DIFF.PY v8.7 — Advanced Differential Analysis & False-Positive Elimination Engine (Elite Red Team Adversarial Edition)
+RESPONSE_DIFF.PY v8.8 — Advanced Differential Analysis & False-Positive Elimination Engine (Elite Red Team Adversarial Edition)
 Features:
 - Robust structural tag hierarchy parsing and JSON key extraction
-- Advanced Single Page Application (SPA) shell & soft-404 heuristic detection
+- Advanced Single Page Application (SPA) shell & soft-404 heuristic detection with zero-noise logging
 - Fuzzy Jaccard token vocabulary overlap and structural similarity delta calculation
 - High-concurrency safe baseline caching and comparative fingerprinting with clean error boundaries
 """
@@ -24,13 +24,11 @@ class ResponseFingerprinter:
         self.similarity_threshold = similarity_threshold
         # Store baseline fingerprints keyed by error/status type (e.g., 'soft_404', 'spa_shell_403')
         self.baselines: Dict[str, Dict[str, Any]] = {}
-        logger.info("[+] Initialized ResponseFingerprinter engine with advanced fuzzy delta capability (v8.7).")
 
     def capture_baseline(self, label: str, status_code: int, text_content: str, headers: dict) -> None:
         """Capture a known baseline response (e.g., a deliberate 403 SPA redirect or unauthenticated shell)."""
         fingerprint = self._generate_fingerprint(status_code, text_content, headers)
         self.baselines[label] = fingerprint
-        logger.debug(f"[+] Captured baseline for [{label}] -> Hash: {fingerprint['body_hash'][:8]} (Len: {fingerprint['content_length']})")
 
     def _generate_fingerprint(self, status_code: int, text_content: str, headers: dict) -> Dict[str, Any]:
         """Extract structural features, semantic token density, and layout signatures from body and headers."""
@@ -63,8 +61,8 @@ class ResponseFingerprinter:
 
                 # Extract token vocabulary for fuzzy Jaccard comparison (filtering out short words)
                 text_density_tokens = {word.lower() for word in body_text.split() if len(word) > 3}
-        except Exception as e:
-            logger.debug(f"[-] Error parsing response structure: {e}")
+        except Exception:
+            pass
 
         return {
             "status_code": status_code,
@@ -130,7 +128,7 @@ class ResponseFingerprinter:
 
                     if tag_similarity >= self.similarity_threshold or token_similarity >= self.similarity_threshold:
                         return True, f"Fuzzy similarity match with baseline [{label}] (Tag Similarity: {tag_similarity:.2f}, Token Similarity: {token_similarity:.2f})"
-        except Exception as exc:
-            logger.debug(f"[-] Error in is_false_positive evaluation: {exc}")
+        except Exception:
+            pass
 
         return False, "Response represents unique logical variance"
