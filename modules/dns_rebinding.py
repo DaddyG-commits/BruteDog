@@ -399,3 +399,9 @@ async def run_dns_rebinding_attack(target_url):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "http://rebind.brutedog.local"
     asyncio.run(run_dns_rebinding_attack(target))
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def DNSRebindingOrchestrator(*args, **kwargs):
+    return await terminal(*args, **kwargs)
+

@@ -218,3 +218,9 @@ async def run_sandbox_evader():
 
 if __name__ == "__main__":
     asyncio.run(run_sandbox_evader())
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def evade_sandbox(*args, **kwargs):
+    return await terminal(*args, **kwargs)
+

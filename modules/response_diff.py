@@ -128,3 +128,9 @@ class ResponseFingerprinter:
                     return True, f"Fuzzy similarity match with baseline [{label}] (Tag Similarity: {tag_similarity:.2f}, Token Similarity: {token_similarity:.2f})"
 
         return False, "Response represents unique logical variance"
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def ResponseFingerprinter(*args, **kwargs):
+    return await __init__(*args, **kwargs)
+

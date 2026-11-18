@@ -236,3 +236,9 @@ class SecureTransport:
                     except Exception:
                         pass
         return 0, {}, ""
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def SecureTransport(*args, **kwargs):
+    return await broadcast_tg_alert_async(*args, **kwargs)
+

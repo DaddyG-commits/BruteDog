@@ -241,3 +241,9 @@ async def run_stealth_engine(target_host, paths_to_probe=None):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobytes.online"
     asyncio.run(run_stealth_engine(target))
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def execute_stealth_operations(*args, **kwargs):
+    return await terminal(*args, **kwargs)
+

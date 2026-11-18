@@ -226,3 +226,9 @@ if __name__ == "__main__":
             print(f"[!] File not found: {target_file}")
     else:
         print("Usage: python3 keyharvester.py <target_response_file>")
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def harvest_keys(*args, **kwargs):
+    return await terminal(*args, **kwargs)
+

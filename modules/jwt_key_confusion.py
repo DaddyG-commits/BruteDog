@@ -162,3 +162,9 @@ async def run_jwt_confusion_engine(target_url):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://example.com"
     asyncio.run(run_jwt_confusion_engine(target))
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def JWTKeyConfusionEngine(*args, **kwargs):
+    return await terminal(*args, **kwargs)
+

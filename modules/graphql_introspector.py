@@ -245,3 +245,9 @@ if __name__ == "__main__":
     inspector = GraphQLIntrospector(target)
     inspector.run_introspection("/graphql")
     inspector.run_batching_attack("/graphql")
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def GraphQLIntrospector(*args, **kwargs):
+    return await terminal(*args, **kwargs)
+

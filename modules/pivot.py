@@ -463,3 +463,9 @@ async def run_pivot_engine(target_host, options=None):
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "https://target"
     asyncio.run(run_pivot_engine(target))
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def execute_pivot_routing(*args, **kwargs):
+    return await log(*args, **kwargs)
+

