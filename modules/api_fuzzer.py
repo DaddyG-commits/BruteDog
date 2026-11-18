@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-API_FUZZER.PY v8.6 — Senior Red-Team Asynchronous API & IDOR Fuzzer (Elite Red Team Adversarial Edition)
+API_FUZZER.PY v8.7 — Senior Red-Team Asynchronous API & IDOR Fuzzer (Elite Red Team Adversarial Edition)
 Features:
 - 100% Async integration with CognitiveOperator transport and memory
 - Multi-method request support with IDOR/BOLA payload mutation & automated SHA-256 integrity fingerprinting
@@ -44,7 +44,7 @@ def broadcast_tg_alert_sync(loot_type, details):
             pass
 
 class APIFuzzer:
-    def __init__(self, cognitive_operator, base_url: str):
+    def __init__(self, cognitive_operator=None, base_url: str = ""):
         self.brain = cognitive_operator
         self.base_url = base_url.rstrip("/")
         self.fuzzed_endpoints = set()
@@ -57,7 +57,7 @@ class APIFuzzer:
             {"id": {"$gt": 0}}, {"limit": -1}
         ]
 
-    async def discover_endpoints(self, transport_client) -> list:
+    async def discover_endpoints(self, transport_client=None) -> list:
         """Dynamically scrapes or discovers endpoints from common documentation routes and APIs."""
         discovered = [
             "/api/v1/users", "/api/v1/user/profile", "/api/v1/wallet",
@@ -68,7 +68,7 @@ class APIFuzzer:
         ]
         
         # Pull from brain's memory if available
-        if hasattr(self.brain, "evaluated_endpoints"):
+        if self.brain and hasattr(self.brain, "evaluated_endpoints"):
             for ep in self.brain.evaluated_endpoints:
                 clean_ep = ep.split(":")[0]
                 if clean_ep not in discovered:
@@ -76,7 +76,7 @@ class APIFuzzer:
                     
         return discovered
 
-    async def fuzz_endpoint(self, endpoint: str, transport_client):
+    async def fuzz_endpoint(self, endpoint: str, transport_client=None):
         """Executes intelligent multi-method fuzzing, method tampering, and IDOR probing on a target API route."""
         if endpoint in self.fuzzed_endpoints:
             return
@@ -87,7 +87,7 @@ class APIFuzzer:
 
         # Gather persisted session tokens from CognitiveOperator brain
         auth_headers = {}
-        if hasattr(self.brain, "session_tokens") and self.brain.session_tokens:
+        if self.brain and hasattr(self.brain, "session_tokens") and self.brain.session_tokens:
             for tk_endpoint, token_val in self.brain.session_tokens.items():
                 if isinstance(token_val, str) and len(token_val) < 250:
                     auth_headers["Authorization"] = f"Bearer {token_val}"
@@ -180,8 +180,8 @@ class APIFuzzer:
             )
 
             # Feed back directly into CognitiveOperator memory
-            if hasattr(self.brain, "memory_context"):
-                self.brain.memory_context.append(loot_entry)
+            if self.brain and hasattr(self.brain, "attack_memory") and isinstance(self.brain.attack_memory, dict):
+                self.brain.attack_memory.setdefault("confirmed_findings", []).append(loot_entry)
 
     async def run(self, transport_client=None):
         """Main execution entrypoint called by engine.py or CognitiveOperator."""
@@ -191,6 +191,15 @@ class APIFuzzer:
         tasks = [self.fuzz_endpoint(ep, transport_client) for ep in endpoints]
         await asyncio.gather(*tasks)
         sys.stdout.write(f"\033[92m[+] API Fuzzer sweep complete across {len(endpoints)} routes.\033[0m\n")
+
+# ============================================================
+# COMPATIBILITY WRAPPER (Satisfies engine.py / main.py imports)
+# ============================================================
+async def run_api_fuzzer(target_url: str):
+    """Standalone wrapper function to ensure seamless invocation from engine.py."""
+    fuzzer = APIFuzzer(cognitive_operator=None, base_url=target_url)
+    await fuzzer.run()
+    return True
 
 if __name__ == "__main__":
     pass
