@@ -70,8 +70,12 @@ python3 main.py
 
 ☕ Support & Crypto Donations
 If you find BruteDog useful for your security research and red team operations, you can support the development via Buy Me A Coffee or crypto transfers:
- Bitcoin (BTC): ⁠bc1q9v5c6z37hw3m28pnvx9h6q2x6s3s0z5s7k9z4v⁠
- USDT (TRC20 / ERC20): ⁠0x3F6d8B192A478c8E75C465e91b582b83aE6D3F92⁠
+ 
+Bitcoin (BTC): ⁠bc1q9v5c6z37hw3m28pnvx9h6q2x6s3s0z5s7k9z4v⁠
+ 
+USDT (TRC20 / ERC20): ⁠0x3F6d8B192A478c8E75C465e91b582b83aE6D3F92⁠
+
+
 🔒 Operational Security & Disclaimer
  Authorization Required: This software is designed strictly for authorized security assessments, red team operations, and bug bounty challenges under explicit written consent.
  Zero Disk Footprint: High-concurrency logs and evidence hashes are managed in-memory or stored securely within tamper-evident local proof structures (⁠loot_output/⁠).
