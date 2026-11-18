@@ -53,7 +53,7 @@ from modules.graphql_introspector import GraphQLIntrospector
 from modules.websocket_hijacker import audit_websocket
 from modules.dns_rebinding import DNSRebindingOrchestrator
 from modules.jwt_key_confusion import JWTKeyConfusionEngine
-from modules.c2_deployer import run_c2_deployer
+from modules.payloads import run_c2_deployer
 
 # Autonomous Cognitive Brain & Referral probes
 from modules.test_referral import audit_referral_logic
