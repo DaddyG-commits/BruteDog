@@ -1,85 +1,117 @@
 #!/usr/bin/env python3
 """
-RESPONSE_DIFF.PY v8.8 — Advanced Differential Analysis & False-Positive Elimination Engine (Elite Red Team Adversarial Edition)
-Features:
-- Robust structural tag hierarchy parsing and JSON key extraction
-- Advanced Single Page Application (SPA) shell & soft-404 heuristic detection with zero-noise logging
-- Fuzzy Jaccard token vocabulary overlap and structural similarity delta calculation
-- High-concurrency safe baseline caching and comparative fingerprinting with clean error boundaries
+RESPONSE_DIFF.PY v8.8 — Differential Analysis & False-Positive Filter Engine
 """
 import hashlib
 import json
 import logging
+import threading
+from typing import Any, Dict, Tuple
+
 from bs4 import BeautifulSoup
-from typing import Dict, Any, Tuple
 
 logger = logging.getLogger("BruteDog.ResponseDiff")
 
+CHALLENGE_MARKERS = (
+    "just a moment...",
+    "checking your browser before accessing",
+    "attention required! | cloudflare",
+    "cf-browser-verification",
+    "ddos-guard",
+    "__cf_chl_opt",
+    "enable cookies to continue",
+    "access denied | cloudflare",
+)
+
+SPA_SHELL_MARKERS = (
+    "loading...",
+    "please wait",
+    "javascript is required",
+    "enable javascript",
+    "you need to enable javascript to run this app",
+)
+
+
 class ResponseFingerprinter:
-    """
-    Performs structural, cryptographic, and fuzzy-delta differential analysis on HTTP responses 
-    to filter out false positives (soft 404s, generic SPA login shells, and custom catch-alls).
-    """
+    """Compares responses against baselines and filters challenge/SPA/soft-404 noise."""
+
     def __init__(self, similarity_threshold: float = 0.85):
-        self.similarity_threshold = similarity_threshold
-        # Store baseline fingerprints keyed by error/status type (e.g., 'soft_404', 'spa_shell_403')
+        self.similarity_threshold = float(similarity_threshold)
         self.baselines: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _normalize_headers(headers: Any) -> Dict[str, str]:
+        if not isinstance(headers, dict):
+            return {}
+        return {str(k).lower(): str(v) for k, v in headers.items()}
 
     def capture_baseline(self, label: str, status_code: int, text_content: str, headers: dict) -> None:
-        """Capture a known baseline response (e.g., a deliberate 403 SPA redirect or unauthenticated shell)."""
+        """Stores a baseline response fingerprint under a given label."""
         fingerprint = self._generate_fingerprint(status_code, text_content, headers)
-        self.baselines[label] = fingerprint
+        with self._lock:
+            self.baselines[str(label)] = fingerprint
 
     def _generate_fingerprint(self, status_code: int, text_content: str, headers: dict) -> Dict[str, Any]:
-        """Extract structural features, semantic token density, and layout signatures from body and headers."""
-        content_length = len(text_content) if text_content else 0
-        
-        # Hash full body content safely
-        body_hash = hashlib.sha256((text_content or "").encode('utf-8', errors='ignore')).hexdigest()
+        body_text = text_content if isinstance(text_content, str) else str(text_content or "")
+        norm_headers = self._normalize_headers(headers)
+        content_type = norm_headers.get("content-type", "").lower()
+
+        content_length = len(body_text)
+        body_hash = hashlib.sha256(body_text.encode("utf-8", errors="ignore")).hexdigest()
 
         structure_keys = []
         is_spa_shell = False
+        is_challenge_page = False
         text_density_tokens = set()
 
+        lower_raw = body_text.lower()
+        if "cf-mitigated" in norm_headers or any(marker in lower_raw for marker in CHALLENGE_MARKERS):
+            is_challenge_page = True
+
         try:
-            content_type = headers.get("content-type", "").lower() if headers else ""
-            if "application/json" in content_type:
-                data = json.loads(text_content or "{}")
+            if "application/json" in content_type or body_text.lstrip().startswith(("{", "[")):
+                data = json.loads(body_text or "{}")
                 structure_keys = self._extract_json_keys(data)
             else:
-                soup = BeautifulSoup(text_content or "", 'html.parser')
-                # Collect tag hierarchy signature (up to 150 elements for deep SPA layouts)
+                soup = BeautifulSoup(body_text, "html.parser")
                 structure_keys = [tag.name for tag in soup.find_all(True)[:150]]
-                
-                # Heuristic: Detect generic Single Page Application (SPA) empty wrappers / root nodes
-                root_divs = soup.find_all(id=lambda x: x and x in ['root', 'app', '__next', '__nuxt', 'viewport'])
-                body_text = soup.get_text(strip=True)
-                
-                lower_text = body_text.lower()
-                if (root_divs and len(body_text) < 450) or any(term in lower_text for term in ["loading...", "please wait", "javascript is required", "enable javascript"]):
+
+                root_nodes = soup.find_all(
+                    id=lambda x: x and str(x) in ("root", "app", "__next", "__nuxt", "viewport")
+                )
+                visible_text = soup.get_text(" ", strip=True)
+                lower_visible = visible_text.lower()
+
+                if (root_nodes and len(visible_text) < 450) or any(
+                    term in lower_visible for term in SPA_SHELL_MARKERS
+                ):
                     is_spa_shell = True
 
-                # Extract token vocabulary for fuzzy Jaccard comparison (filtering out short words)
-                text_density_tokens = {word.lower() for word in body_text.split() if len(word) > 3}
+                text_density_tokens = {
+                    word.strip(".,:;!?()[]{}\"'").lower()
+                    for word in visible_text.split()
+                    if len(word.strip(".,:;!?()[]{}\"'")) > 3
+                }
         except Exception:
             pass
 
         return {
-            "status_code": status_code,
+            "status_code": int(status_code or 0),
             "content_length": content_length,
             "body_hash": body_hash,
             "structure_keys": structure_keys,
             "is_spa_shell": is_spa_shell,
-            "text_density_tokens": text_density_tokens
+            "is_challenge_page": is_challenge_page,
+            "text_density_tokens": text_density_tokens,
         }
 
     def _extract_json_keys(self, data: Any, prefix: str = "") -> list:
-        """Recursively extract JSON keys to fingerprint payload structure."""
         keys = []
         try:
             if isinstance(data, dict):
                 for k, v in data.items():
-                    full_key = f"{prefix}.{k}" if prefix else k
+                    full_key = f"{prefix}.{k}" if prefix else str(k)
                     keys.append(full_key)
                     if isinstance(v, (dict, list)):
                         keys.extend(self._extract_json_keys(v, full_key))
@@ -89,8 +121,8 @@ class ResponseFingerprinter:
             pass
         return keys
 
-    def _calculate_jaccard_similarity(self, set1: set, set2: set) -> float:
-        """Calculate token vocabulary overlap to catch near-identical SPA error pages."""
+    @staticmethod
+    def _calculate_jaccard_similarity(set1: set, set2: set) -> float:
         if not set1 or not set2:
             return 0.0
         intersection = len(set1.intersection(set2))
@@ -99,36 +131,51 @@ class ResponseFingerprinter:
 
     def is_false_positive(self, status_code: int, text_content: str, headers: dict) -> Tuple[bool, str]:
         """
-        Compare an incoming response against stored baselines and known SPA soft-error fingerprints.
-        Returns (is_fp: bool, reason: str).
+        Evaluates whether a response is a challenge page, SPA shell, soft/empty response,
+        or matches an established baseline fingerprint. Returns (is_fp, reason).
         """
         try:
-            current_fp = self._generate_fingerprint(status_code, text_content, headers)
+            code = int(status_code or 0)
+            if code == 0:
+                return True, "Zero/transport error response"
 
-            # Rule 1: Catch generic client-side SPA shells served with HTTP 200/403/404
+            current_fp = self._generate_fingerprint(code, text_content, headers)
+
+            if current_fp["is_challenge_page"]:
+                return True, f"Detected WAF/bot challenge response (Status: {code})"
+
             if current_fp["is_spa_shell"]:
-                return True, f"Detected generic SPA shell wrapper or placeholder (Status: {status_code})"
+                return True, f"Detected generic SPA shell or placeholder (Status: {code})"
 
-            # Rule 2: Compare against captured baselines with fuzzy structural & token delta
-            for label, baseline in self.baselines.items():
+            if code in (404, 410) or (code == 200 and current_fp["content_length"] == 0):
+                return True, f"Non-actionable or empty response (Status: {code})"
+
+            with self._lock:
+                baselines_snapshot = list(self.baselines.items())
+
+            for label, baseline in baselines_snapshot:
                 if current_fp["status_code"] == baseline["status_code"]:
                     if current_fp["body_hash"] == baseline["body_hash"]:
-                        return True, f"Exact match with baseline fingerprint [{label}]"
-                    
-                    # Calculate structural tag match ratio
-                    common_tags = len(set(current_fp["structure_keys"]).intersection(set(baseline["structure_keys"])))
+                        return True, f"Exact match with baseline [{label}]"
+
+                    common_tags = len(
+                        set(current_fp["structure_keys"]).intersection(set(baseline["structure_keys"]))
+                    )
                     max_tags = max(len(current_fp["structure_keys"]), len(baseline["structure_keys"]), 1)
                     tag_similarity = common_tags / max_tags
 
-                    # Calculate text token Jaccard similarity
                     token_similarity = self._calculate_jaccard_similarity(
-                        current_fp["text_density_tokens"], 
-                        baseline["text_density_tokens"]
+                        current_fp["text_density_tokens"],
+                        baseline["text_density_tokens"],
                     )
 
                     if tag_similarity >= self.similarity_threshold or token_similarity >= self.similarity_threshold:
-                        return True, f"Fuzzy similarity match with baseline [{label}] (Tag Similarity: {tag_similarity:.2f}, Token Similarity: {token_similarity:.2f})"
-        except Exception:
-            pass
+                        return (
+                            True,
+                            f"Similarity match with baseline [{label}] "
+                            f"(tag={tag_similarity:.2f}, token={token_similarity:.2f})",
+                        )
+        except Exception as exc:
+            logger.debug(f"False-positive check fallback: {exc}")
 
         return False, "Response represents unique logical variance"
