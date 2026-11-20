@@ -222,5 +222,5 @@ if __name__ == "__main__":
 
 # --- AUTOMATED ALIAS PATCH --- 
 async def evade_sandbox(*args, **kwargs):
-    return await terminal(*args, **kwargs)
+    return await run_sandbox_evader(*args, **kwargs)
 
