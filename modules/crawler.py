@@ -57,6 +57,8 @@ STATIC_EXTENSIONS = (
     ".map",
 )
 
+_background_tasks: set[asyncio.Task] = set()
+
 
 class ApplicationState:
     UNAUTHENTICATED = 0
@@ -105,6 +107,26 @@ class StateMachineMapper:
             self.state_graph[state].add(ep)
         return self.state_graph
 
+    def _looks_like_html_shell_or_challenge(self, body: str, headers: dict) -> bool:
+        text = body or ""
+        lower = text.lower()
+        ctype = str((headers or {}).get("content-type", "")).lower()
+        if "application/json" in ctype or "application/problem+json" in ctype:
+            return False
+        return any(
+            marker in lower
+            for marker in (
+                "<!doctype html",
+                "<html",
+                '<div id="root">',
+                '<div id="__next">',
+                '<div id="__nuxt">',
+                "<title>security check</title>",
+                "cf-browser-verification",
+                "attention required!",
+            )
+        )
+
     def evaluate_state_skipping(self, transport):
         sys.stdout.write("\033[95m[***] EVALUATING ENDPOINT ACCESS & DIFFERENTIAL BASELINES [***]\033[0m\n")
         sys.stdout.flush()
@@ -114,7 +136,6 @@ class StateMachineMapper:
             self.state_graph[ApplicationState.PRIVILEGED_ADMIN]
         )
 
-        # Capture a non-existent path baseline once if available
         if "soft_404" not in self.fingerprinter.baselines:
             b_status, b_headers, b_body = transport.request(
                 "GET", "/__nonexistent_probe_baseline_check__", extra_headers=get_randomized_hints()
@@ -122,10 +143,11 @@ class StateMachineMapper:
             if b_status:
                 self.fingerprinter.capture_baseline("soft_404", b_status, b_body or "", b_headers or {})
 
+        soft_404_status = (self.fingerprinter.baselines.get("soft_404") or {}).get("status")
+        target_label = getattr(transport, "target_url", None) or getattr(transport, "base_path", None) or "target"
+
         for ep in sorted(restricted_endpoints):
-            apply_behavioral_jitter()
-            random_headers = get_randomized_hints()
-            status, headers, body = transport.request("GET", ep, extra_headers=random_headers)
+            status, headers, body = transport.request("GET", ep, extra_headers=get_randomized_hints())
 
             if not isinstance(body, str):
                 body = str(body or "")
@@ -135,8 +157,17 @@ class StateMachineMapper:
             looks_like_auth_gate = any(
                 term in lower_body for term in ("sign in", "log in", "login", "password", "auth-form")
             )
+            is_html_shell = self._looks_like_html_shell_or_challenge(body, headers or {})
+            differs_from_404 = soft_404_status is None or status != soft_404_status
 
-            if status in (200, 201) and not is_fp and not looks_like_auth_gate and len(body.strip()) > 0:
+            if (
+                status in (200, 201)
+                and differs_from_404
+                and not is_fp
+                and not is_html_shell
+                and not looks_like_auth_gate
+                and len(body.strip()) > 0
+            ):
                 sys.stdout.write(
                     f"\033[91m[!] Differential response anomaly on {ep} [HTTP {status}]\033[0m\n"
                 )
@@ -159,7 +190,7 @@ class StateMachineMapper:
                 )
 
                 save_session_loot(
-                    target=getattr(transport, "base_path", "target"),
+                    target=target_label,
                     endpoint=ep,
                     finding_type="ENDPOINT_ACCESS_ANOMALY",
                     status=status,
@@ -187,18 +218,22 @@ async def broadcast_tg_alert_async(loot_type, details):
     try:
         check_str = f"{loot_type} {str(details)}".lower()
         if any(kw in check_str for kw in HIGH_VALUE_KEYWORDS):
-            await send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details)
+            await asyncio.wait_for(
+                send_telegram_alert(f"[CRITICAL BREACH] {loot_type}", details),
+                timeout=8,
+            )
     except Exception:
         pass
 
 
 def broadcast_tg_alert_sync(loot_type, details):
-    """Schedules notifications non-blockingly when invoked from synchronous code."""
+    """Non-blockingly fires Telegram alerts from sync or async contexts."""
     try:
         loop = asyncio.get_running_loop()
         if not loop.is_closed():
             task = loop.create_task(broadcast_tg_alert_async(loot_type, details))
-            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         try:
             asyncio.run(broadcast_tg_alert_async(loot_type, details))
@@ -311,7 +346,6 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels, allow_m
         if not action_url or not action_url.startswith("/"):
             continue
         if method == "GET":
-            apply_behavioral_jitter()
             _, _, body = transport.request("GET", action_url, extra_headers=get_randomized_hints())
             detected_codes = inspect_json_for_leaked_codes(body)
             if detected_codes:
@@ -322,6 +356,7 @@ def intelligent_auth_probe(transport, discovered_endpoints, form_intels, allow_m
 
 def crawl_target(transport, allow_mutations: bool = False):
     log("\n[***] INITIALIZING STATEFUL RECON & DOM CRAWLER (v8.8) [***]", "\033[95m")
+    apply_behavioral_jitter()
     discovered_endpoints = set()
     discovered_scripts = set()
     all_forms_intel = []
@@ -359,9 +394,7 @@ def crawl_target(transport, allow_mutations: bool = False):
     endpoint_in_js = re.compile(r'["\'](/v?\d?/[a-zA-Z0-9_/_-]+)["\']', re.I)
 
     for path in seed_paths:
-        apply_behavioral_jitter()
-        random_headers = get_randomized_hints()
-        status, headers, html = transport.request("GET", path, extra_headers=random_headers)
+        status, headers, html = transport.request("GET", path, extra_headers=get_randomized_hints())
         if not status or not isinstance(html, str):
             continue
 
@@ -392,11 +425,10 @@ def crawl_target(transport, allow_mutations: bool = False):
         for script in script_pattern.findall(html):
             if script.startswith("/"):
                 discovered_scripts.add(script)
-            elif not script.startswith("http"):
-                discovered_scripts.add(urljoin(path, script))
+            elif not script.startswith(("http://", "https://")):
+                discovered_scripts.add(urljoin(path if path.startswith("/") else "/", script))
 
     for script_path in sorted(discovered_scripts)[:15]:
-        apply_behavioral_jitter()
         s_status, _, s_content = transport.request("GET", script_path, extra_headers=get_randomized_hints())
         if s_status == 200 and isinstance(s_content, str):
             for match in endpoint_in_js.findall(s_content):
@@ -424,6 +456,7 @@ def crawl_target(transport, allow_mutations: bool = False):
         transport, filtered_endpoints, all_forms_intel, allow_mutations=allow_mutations
     )
 
+    target_label = getattr(transport, "target_url", None) or getattr(transport, "base_path", None) or "target"
     crawl_loot = {
         "endpoints_count": len(filtered_endpoints),
         "bola_count": len(bola_vulns),
@@ -432,7 +465,7 @@ def crawl_target(transport, allow_mutations: bool = False):
         "leaked_secrets": leaked_secrets,
     }
     save_session_loot(
-        target=getattr(transport, "base_path", "target"),
+        target=target_label,
         endpoint="crawler_recon",
         finding_type="CRAWLER_STATE_MAPPING_SUCCESS",
         status=200,
