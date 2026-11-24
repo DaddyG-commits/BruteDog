@@ -26,6 +26,8 @@ CHALLENGE_PATTERNS = [
     r'<meta\s+name=["\']robots["\']\s+content=["\']noindex,\s*nofollow["\']',
 ]
 _CHALLENGE_RE = re.compile("|".join(CHALLENGE_PATTERNS), re.IGNORECASE)
+_SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_background_tasks: set[asyncio.Task] = set()
 
 
 def should_persist_loot(finding_type: str, status: int, body: str, extra_loot: dict = None) -> tuple[bool, str]:
@@ -50,19 +52,32 @@ def should_persist_loot(finding_type: str, status: int, body: str, extra_loot: d
     return True, ""
 
 
+async def _send_alert_with_timeout(loot_type: str, details: dict) -> None:
+    try:
+        await asyncio.wait_for(send_telegram_alert(loot_type, details), timeout=8)
+    except Exception:
+        pass
+
+
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire alerts from synchronous logger functions."""
+    """Non-blockingly fires alerts from synchronous logger functions."""
     try:
         loop = asyncio.get_running_loop()
-        if loop.is_running():
-            loop.create_task(send_telegram_alert(loot_type, details))
-        else:
-            asyncio.run(send_telegram_alert(loot_type, details))
+        if not loop.is_closed():
+            task = loop.create_task(_send_alert_with_timeout(loot_type, details))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(_send_alert_with_timeout(loot_type, details))
         except Exception:
             pass
+
+
+def _sanitize_segment(raw: str, fallback: str) -> str:
+    cleaned = str(raw or "").replace("https://", "").replace("http://", "").replace("..", "")
+    cleaned = _SAFE_NAME_RE.sub("_", cleaned).strip("._")
+    return (cleaned[:80] or fallback)
 
 
 def save_session_loot(
@@ -83,20 +98,22 @@ def save_session_loot(
         return None
 
     os.makedirs(LOOT_DIR, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_target = (
-        str(target)
-        .replace("https://", "")
-        .replace("http://", "")
-        .replace("/", "_")
-        .replace(":", "_")
-    )
-    safe_endpoint = str(endpoint or "root").replace("/", "_") or "root"
+    now = datetime.now()
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    micro_tag = f"{now.microsecond:06d}"
 
-    base_filename = f"{LOOT_DIR}/{safe_target}_{safe_endpoint}_{timestamp}"
+    safe_target = _sanitize_segment(target, "target")
+    safe_endpoint = _sanitize_segment(endpoint, "root")
+    safe_finding = _sanitize_segment(finding_type, "finding")
 
     body_content = body if isinstance(body, str) else str(body or "")
     loot_hash = hashlib.sha256(body_content.encode("utf-8", errors="ignore")).hexdigest()
+    short_hash = loot_hash[:8]
+
+    base_filename = os.path.join(
+        LOOT_DIR,
+        f"{safe_target}_{safe_endpoint}_{safe_finding}_{timestamp}_{micro_tag}_{short_hash}",
+    )
 
     html_filename = f"{base_filename}_session_loot.html"
     with open(html_filename, "w", encoding="utf-8") as f:
