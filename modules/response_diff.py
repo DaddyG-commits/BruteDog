@@ -12,6 +12,8 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger("BruteDog.ResponseDiff")
 
+MAX_HTML_PARSE_CHARS = 262144
+
 CHALLENGE_MARKERS = (
     "just a moment...",
     "checking your browser before accessing",
@@ -21,6 +23,7 @@ CHALLENGE_MARKERS = (
     "__cf_chl_opt",
     "enable cookies to continue",
     "access denied | cloudflare",
+    "<title>security check</title>",
 )
 
 SPA_SHELL_MARKERS = (
@@ -56,6 +59,7 @@ class ResponseFingerprinter:
         body_text = text_content if isinstance(text_content, str) else str(text_content or "")
         norm_headers = self._normalize_headers(headers)
         content_type = norm_headers.get("content-type", "").lower()
+        server_hdr = norm_headers.get("server", "").lower()
 
         content_length = len(body_text)
         body_hash = hashlib.sha256(body_text.encode("utf-8", errors="ignore")).hexdigest()
@@ -65,16 +69,21 @@ class ResponseFingerprinter:
         is_challenge_page = False
         text_density_tokens = set()
 
-        lower_raw = body_text.lower()
-        if "cf-mitigated" in norm_headers or any(marker in lower_raw for marker in CHALLENGE_MARKERS):
+        lower_raw = body_text[:MAX_HTML_PARSE_CHARS].lower()
+        if (
+            "cf-mitigated" in norm_headers
+            or ("cloudflare" in server_hdr and any(k in lower_raw for k in ("challenge", "cf_chl", "attention required")))
+            or any(marker in lower_raw for marker in CHALLENGE_MARKERS)
+        ):
             is_challenge_page = True
 
         try:
             if "application/json" in content_type or body_text.lstrip().startswith(("{", "[")):
-                data = json.loads(body_text or "{}")
+                data = json.loads(body_text[:MAX_HTML_PARSE_CHARS] or "{}")
                 structure_keys = self._extract_json_keys(data)
             else:
-                soup = BeautifulSoup(body_text, "html.parser")
+                bounded_html = body_text[:MAX_HTML_PARSE_CHARS]
+                soup = BeautifulSoup(bounded_html, "html.parser")
                 structure_keys = [tag.name for tag in soup.find_all(True)[:150]]
 
                 root_nodes = soup.find_all(
