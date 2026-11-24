@@ -1,50 +1,31 @@
 #!/usr/bin/env python3
 """
-SCANNER.PY v8.5 — Advanced Network Reconnaissance & Security Assessment Engine (WAF Hardened)
-Features:
-- Native asynchronous TCP connections with IPv4 / IPv6 dual-stack DNS resolution
-- Service identification & header override testing on open HTTP ports via SecureTransport
-- HTTP response inspection, behavioral mimicry (Poisson jitter), and header injection
-- HTTP security-header assessment (HSTS, CSP, X-Frame-Options, etc.)
-- TLS certificate inspection, version detection, and cipher suite analysis
-- Passive service-banner collection with strict timeouts and error classification
-- Structured error handling, concurrency throttling via semaphores, and rate-limit mitigation
-- Automated immutable disk persistence (loot_output/) and real-time Telegram telemetry dispatch
+SCANNER.PY v8.5 — Asynchronous Network Reconnaissance & Security Assessment Engine
 """
-
 import asyncio
 import argparse
 import ipaddress
 import socket
 import ssl
 import time
-import random
-import re
-
 from urllib.parse import urlsplit
 
-# Import centralized Telegram broadcaster, secure transport, loot persistence, and behavioral mimicry
 from modules.telegram_notifier import send_telegram_alert
 from modules.transport import SecureTransport
 from modules.loot_logger import save_session_loot
 from modules.telemetry import stream_proof
-from modules.behavioral_mimic import apply_behavioral_jitter, get_randomized_hints
+from modules.behavioral_mimic import apply_behavioral_jitter
 
-
-# ============================================================
-# CONFIGURATION & TIMEOUT CONSTANTS
-# ============================================================
-
-CONNECT_TIMEOUT = 3.0
-HTTP_TIMEOUT = 3.5
-BANNER_TIMEOUT = 0.8
+CONNECT_TIMEOUT = 2.5
+HTTP_TIMEOUT = 3.0
+BANNER_TIMEOUT = 0.6
 
 MAX_CONCURRENT = 35
 MAX_PORTS = 512
-
 MAX_BANNER_SIZE = 1024
-MAX_HTTP_HEADERS = 64
-MAX_HEADER_SIZE = 16384
+
+_SCAN_CACHE: dict[tuple, dict] = {}
+_background_tasks: set[asyncio.Task] = set()
 
 COMMON_PORTS = [
     20, 21, 22, 23, 25, 26, 53, 67, 68,
@@ -60,7 +41,7 @@ COMMON_PORTS = [
     5985, 5986, 6379, 6443, 7001, 8000,
     8008, 8080, 8081, 8088, 8443, 8888,
     9000, 9090, 9200, 9300, 9418, 10000,
-    11211, 27017
+    11211, 27017,
 ]
 
 COLORS = {
@@ -73,115 +54,30 @@ COLORS = {
     "BOLD": "\033[1m",
 }
 
-
-# ============================================================
-# SERVICE DATABASE MAPPING
-# ============================================================
-
 SERVICE_MAP = {
-    20: "FTP-DATA",
-    21: "FTP",
-    22: "SSH",
-    23: "TELNET",
-    25: "SMTP",
-    26: "SMTP-ALT",
-    53: "DNS",
-    80: "HTTP",
-    110: "POP3",
-    111: "RPCBIND",
-    123: "NTP",
-    135: "MSRPC",
-    137: "NETBIOS-NS",
-    138: "NETBIOS-DGM",
-    139: "NETBIOS-SSN",
-    143: "IMAP",
-    161: "SNMP",
-    162: "SNMP-TRAP",
-    179: "BGP",
-    194: "IRC",
-    389: "LDAP",
-    443: "HTTPS",
-    445: "SMB",
-    465: "SMTPS",
-    500: "ISAKMP",
-    502: "MODBUS",
-    514: "SYSLOG",
-    515: "PRINTER",
-    587: "SMTP-SUBMISSION",
-    593: "HTTP-RPC-EPMAP",
-    623: "ASF-RMCP",
-    631: "IPP",
-    636: "LDAPS",
-    873: "RSYNC",
-    902: "VMWARE-AUTH",
-    989: "FTPS-DATA",
-    990: "FTPS",
-    993: "IMAPS",
-    995: "POP3S",
-    1080: "SOCKS",
-    1194: "OPENVPN",
-    1433: "MSSQL",
-    1521: "ORACLE",
-    1701: "L2TP",
-    1723: "PPTP",
-    1883: "MQTT",
-    2049: "NFS",
-    2082: "CPANEL",
-    2083: "CPANEL-SECURE",
-    2086: "WHM",
-    2087: "WHM-SECURE",
-    2181: "ZOOKEEPER",
-    2375: "DOCKER-API",
-    2376: "DOCKER-TLS",
-    3000: "HTTP-ALT",
-    3306: "MYSQL",
-    3389: "RDP",
-    3690: "SVN",
-    4443: "HTTPS-ALT",
-    5000: "UPNP-OR-HTTP",
-    5432: "POSTGRESQL",
-    5601: "KIBANA",
-    5672: "AMQP",
-    5900: "VNC",
-    5985: "WINRM",
-    5986: "WINRM-TLS",
-    6379: "REDIS",
-    6443: "KUBERNETES-API",
-    7001: "WEBLOGIC",
-    8000: "HTTP-ALT",
-    8008: "HTTP-ALT",
-    8080: "HTTP-ALT",
-    8081: "HTTP-ALT",
-    8088: "HTTP-ALT",
-    8443: "HTTPS-ALT",
-    8888: "HTTP-ALT",
-    9000: "HTTP-ALT",
-    9090: "HTTP-ALT",
-    9200: "ELASTICSEARCH",
-    9300: "ELASTICSEARCH-TRANSPORT",
-    9418: "GIT",
-    10000: "WEBMIN",
-    11211: "MEMCACHED",
-    27017: "MONGODB",
+    20: "FTP-DATA", 21: "FTP", 22: "SSH", 23: "TELNET", 25: "SMTP", 26: "SMTP-ALT",
+    53: "DNS", 80: "HTTP", 110: "POP3", 111: "RPCBIND", 123: "NTP", 135: "MSRPC",
+    137: "NETBIOS-NS", 138: "NETBIOS-DGM", 139: "NETBIOS-SSN", 143: "IMAP", 161: "SNMP",
+    162: "SNMP-TRAP", 179: "BGP", 194: "IRC", 389: "LDAP", 443: "HTTPS", 445: "SMB",
+    465: "SMTPS", 500: "ISAKMP", 502: "MODBUS", 514: "SYSLOG", 515: "PRINTER",
+    587: "SMTP-SUBMISSION", 593: "HTTP-RPC-EPMAP", 623: "ASF-RMCP", 631: "IPP",
+    636: "LDAPS", 873: "RSYNC", 902: "VMWARE-AUTH", 989: "FTPS-DATA", 990: "FTPS",
+    993: "IMAPS", 995: "POP3S", 1080: "SOCKS", 1194: "OPENVPN", 1433: "MSSQL",
+    1521: "ORACLE", 1701: "L2TP", 1723: "PPTP", 1883: "MQTT", 2049: "NFS",
+    2082: "CPANEL", 2083: "CPANEL-SECURE", 2086: "WHM", 2087: "WHM-SECURE",
+    2181: "ZOOKEEPER", 2375: "DOCKER-API", 2376: "DOCKER-TLS", 3000: "HTTP-ALT",
+    3306: "MYSQL", 3389: "RDP", 3690: "SVN", 4443: "HTTPS-ALT", 5000: "UPNP-OR-HTTP",
+    5432: "POSTGRESQL", 5601: "KIBANA", 5672: "AMQP", 5900: "VNC", 5985: "WINRM",
+    5986: "WINRM-TLS", 6379: "REDIS", 6443: "KUBERNETES-API", 7001: "WEBLOGIC",
+    8000: "HTTP-ALT", 8008: "HTTP-ALT", 8080: "HTTP-ALT", 8081: "HTTP-ALT",
+    8088: "HTTP-ALT", 8443: "HTTPS-ALT", 8888: "HTTP-ALT", 9000: "HTTP-ALT",
+    9090: "HTTP-ALT", 9200: "ELASTICSEARCH", 9300: "ELASTICSEARCH-TRANSPORT",
+    9418: "GIT", 10000: "WEBMIN", 11211: "MEMCACHED", 27017: "MONGODB",
 }
 
-
-HTTP_PORTS = {
-    80, 81, 82, 3000, 5000,
-    8000, 8008, 8080, 8081,
-    8088, 8888, 9000, 9090,
-}
-
-HTTPS_PORTS = {
-    443, 4443, 8443, 2376,
-    5986,
-}
-
-BANNER_PORTS = {
-    21, 22, 23, 25, 26,
-    110, 143, 465, 587,
-    993, 995, 3306, 6379
-}
+HTTP_PORTS = {80, 81, 82, 3000, 5000, 8000, 8008, 8080, 8081, 8088, 8888, 9000, 9090}
+HTTPS_PORTS = {443, 4443, 8443, 2376, 5986}
+BANNER_PORTS = {21, 22, 23, 25, 26, 110, 143, 465, 587, 993, 995, 3306, 6379}
 
 SECURITY_HEADERS = {
     "strict-transport-security": "HSTS missing",
@@ -193,42 +89,38 @@ SECURITY_HEADERS = {
 }
 
 
-# ============================================================
-# TERMINAL OUTPUT & TELEGRAM DISPATCHER
-# ============================================================
-
 def terminal(message):
     print(message, flush=True)
 
 
 def color(message, name):
-    return (
-        f"{COLORS.get(name, '')}"
-        f"{message}"
-        f"{COLORS['RESET']}"
-    )
+    return f"{COLORS.get(name, '')}{message}{COLORS['RESET']}"
+
+
+async def _send_tg_safe(loot_type, details):
+    try:
+        await asyncio.wait_for(send_telegram_alert(loot_type, details), timeout=8)
+    except Exception:
+        pass
 
 
 def broadcast_tg_alert_sync(loot_type, details):
-    """Helper to non-blockingly fire Telegram alerts from synchronous scanner functions."""
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(send_telegram_alert(loot_type, details))
+        if not loop.is_closed():
+            task = loop.create_task(_send_tg_safe(loot_type, details))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         try:
-            asyncio.run(send_telegram_alert(loot_type, details))
+            asyncio.run(_send_tg_safe(loot_type, details))
         except Exception:
             pass
 
 
-# ============================================================
-# TARGET NORMALIZATION & VALIDATION
-# ============================================================
-
 def normalize_host(target):
     if not isinstance(target, str):
         raise ValueError("Target must be a string.")
-
     target = target.strip()
     if not target:
         raise ValueError("Empty target.")
@@ -259,19 +151,14 @@ def normalize_host(target):
     except UnicodeError:
         raise ValueError("Invalid internationalized hostname.")
 
-    if len(target) > 253:
-        raise ValueError("Hostname is too long.")
-
-    if not target:
+    if not target or len(target) > 253:
         raise ValueError("Invalid hostname.")
-
     return target
 
 
 def validate_ports(ports):
     if ports is None:
         ports = COMMON_PORTS
-
     validated = set()
     try:
         for port in ports:
@@ -288,13 +175,8 @@ def validate_ports(ports):
         raise ValueError("No ports supplied.")
     if len(validated) > MAX_PORTS:
         raise ValueError(f"Maximum supported ports: {MAX_PORTS}")
-
     return sorted(validated)
 
-
-# ============================================================
-# DNS RESOLUTION ROUTINE
-# ============================================================
 
 async def resolve_target(host):
     started = time.monotonic()
@@ -305,25 +187,21 @@ async def resolve_target(host):
             family=socket.AF_UNSPEC,
             type=socket.SOCK_STREAM,
         )
-
         addresses = []
         seen = set()
-
-        for family, socktype, proto, canonname, sockaddr in results:
+        for family, _, _, _, sockaddr in results:
             address = sockaddr[0]
             if address in seen:
                 continue
             seen.add(address)
             addresses.append({
                 "address": address,
-                "family": ("IPv6" if family == socket.AF_INET6 else "IPv4"),
+                "family": "IPv6" if family == socket.AF_INET6 else "IPv4",
             })
-
-        elapsed = round(time.monotonic() - started, 4)
         return {
             "success": bool(addresses),
             "addresses": addresses,
-            "duration": elapsed,
+            "duration": round(time.monotonic() - started, 4),
             "error": None,
         }
     except socket.gaierror as exc:
@@ -339,36 +217,25 @@ def identify_service(port):
     service = SERVICE_MAP.get(port, "UNKNOWN")
     return {
         "expected_service": service,
-        "confidence": ("PORT_BASED" if service != "UNKNOWN" else "UNIDENTIFIED"),
+        "confidence": "PORT_BASED" if service != "UNKNOWN" else "UNIDENTIFIED",
     }
 
 
-# ============================================================
-# CONNECTION & WRITER MANAGEMENT
-# ============================================================
-
-async def open_connection(
-    address,
-    port,
-    timeout=CONNECT_TIMEOUT,
-    use_tls=False,
-    hostname=None,
-):
+async def open_connection(address, port, timeout=CONNECT_TIMEOUT, use_tls=False, hostname=None):
     context = None
     if use_tls:
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
 
-    connection = asyncio.open_connection(
+    coro = asyncio.open_connection(
         address,
         port,
         ssl=context,
         server_hostname=hostname if use_tls else None,
         ssl_handshake_timeout=timeout if use_tls else None,
     )
-
-    return await asyncio.wait_for(connection, timeout=timeout)
+    return await asyncio.wait_for(coro, timeout=timeout)
 
 
 async def close_writer(writer):
@@ -381,16 +248,9 @@ async def close_writer(writer):
         pass
 
 
-# ============================================================
-# BANNER COLLECTION
-# ============================================================
-
 async def collect_banner(reader):
     try:
-        data = await asyncio.wait_for(
-            reader.read(MAX_BANNER_SIZE),
-            timeout=BANNER_TIMEOUT
-        )
+        data = await asyncio.wait_for(reader.read(MAX_BANNER_SIZE), timeout=BANNER_TIMEOUT)
         if not data:
             return ""
         return data.decode("utf-8", errors="replace").strip()[:300]
@@ -398,16 +258,7 @@ async def collect_banner(reader):
         return ""
 
 
-# ============================================================
-# HTTP INSPECTION & SECURITY HEADER AUDITING (VIA SECURETRANSPORT)
-# ============================================================
-
-async def inspect_http(
-    address,
-    hostname,
-    port,
-    use_tls=False,
-):
+async def inspect_http(address, hostname, port, use_tls=False):
     result = {
         "available": False,
         "status_code": None,
@@ -419,55 +270,37 @@ async def inspect_http(
         "missing_security_headers": [],
         "error": None,
     }
-
     scheme = "https" if use_tls or port in HTTPS_PORTS else "http"
     target_url = f"{scheme}://{hostname}:{port}"
 
     try:
-        apply_behavioral_jitter()
         transport = SecureTransport(target_url)
-        
-        # Try HEAD request first, fallback to GET or Method Tampering if blocked by WAF 403
-        status, headers, body = await asyncio.to_thread(
-            transport.request, "HEAD", "/"
-        )
-
-        if status in [403, 405, 0]:
-            status, headers, body = await asyncio.to_thread(
-                transport.request, "GET", "/"
-            )
-
-        if status == 0:
+        status, headers, _ = await asyncio.to_thread(transport.request, "HEAD", "/")
+        if status in (403, 405, 0):
+            status, headers, _ = await asyncio.to_thread(transport.request, "GET", "/")
+        if not status:
             result["error"] = "HTTP inspection connection failed."
             return result
 
+        norm_headers = {str(k).lower(): v for k, v in (headers or {}).items()}
         result["available"] = True
         result["status_code"] = status
-        result["headers"] = headers
-        result["server"] = headers.get("server", "")
+        result["headers"] = norm_headers
+        result["server"] = norm_headers.get("server", "")
 
-        for header in SECURITY_HEADERS:
-            present = header in headers
+        for header, label in SECURITY_HEADERS.items():
+            present = header in norm_headers
             result["security_headers"][header] = present
             if not present:
-                result["missing_security_headers"].append(SECURITY_HEADERS[header])
+                result["missing_security_headers"].append(label)
 
         return result
-
     except Exception as exc:
         result["error"] = f"HTTP inspection failed: {type(exc).__name__}"
         return result
 
 
-# ============================================================
-# TLS CERTIFICATE & PROTOCOL INSPECTION
-# ============================================================
-
-async def inspect_tls(
-    address,
-    hostname,
-    port,
-):
+async def inspect_tls(address, hostname, port):
     writer = None
     result = {
         "available": False,
@@ -477,9 +310,7 @@ async def inspect_tls(
         "certificate": {},
         "error": None,
     }
-
     try:
-        apply_behavioral_jitter()
         reader, writer = await open_connection(
             address,
             port,
@@ -487,13 +318,12 @@ async def inspect_tls(
             use_tls=True,
             hostname=hostname,
         )
-
         ssl_object = writer.get_extra_info("ssl_object")
         if ssl_object is None:
             result["error"] = "TLS session unavailable."
             return result
 
-        certificate = ssl_object.getpeercert()
+        certificate = ssl_object.getpeercert() or {}
         result["available"] = True
         result["verified"] = True
         result["protocol"] = ssl_object.version() or ""
@@ -513,7 +343,6 @@ async def inspect_tls(
             "not_after": certificate.get("notAfter", ""),
             "subject_alt_names": certificate.get("subjectAltName", ()),
         }
-
         return result
     except ssl.SSLCertVerificationError:
         result["error"] = "Certificate verification failed."
@@ -531,15 +360,7 @@ async def inspect_tls(
         await close_writer(writer)
 
 
-# ============================================================
-# SINGLE TCP PROBE & SERVICE IDENTIFICATION
-# ============================================================
-
-async def probe_port(
-    hostname,
-    address,
-    port,
-):
+async def probe_port(hostname, address, port):
     result = {
         "address": address,
         "port": port,
@@ -558,14 +379,12 @@ async def probe_port(
 
     writer = None
     try:
-        apply_behavioral_jitter()
         reader, writer = await open_connection(address, port, timeout=CONNECT_TIMEOUT)
         result["state"] = "OPEN"
         result["open"] = True
 
         if port in BANNER_PORTS:
             result["details"]["banner"] = await collect_banner(reader)
-
     except ConnectionRefusedError:
         result["state"] = "CLOSED"
     except TimeoutError:
@@ -591,18 +410,13 @@ async def probe_port(
     return result
 
 
-# ============================================================
-# ASYNC PORT SCANNER ORCHESTRATION
-# ============================================================
-
 async def run_port_scanner(
     target_host,
     ports=None,
     concurrency=MAX_CONCURRENT,
+    force_rescan=False,
 ):
-    """
-    BruteDog Scanner V8.5 — Asynchronous Network Reconnaissance & Security Assessment Engine
-    """
+    """Asynchronous Network Reconnaissance & Security Assessment Engine."""
     started = time.monotonic()
 
     try:
@@ -620,6 +434,14 @@ async def run_port_scanner(
             "open_ports": [],
         }
 
+    cache_key = (host, tuple(ports), concurrency)
+    if not force_rescan and cache_key in _SCAN_CACHE:
+        cached = dict(_SCAN_CACHE[cache_key])
+        cached["cached"] = True
+        terminal(color(f"[*] Using cached port scan results for {host} ({cached['open_count']} open ports).", "CYAN"))
+        return cached
+
+    apply_behavioral_jitter()
     terminal(color(f"\n[***] BRUTEDOG SCANNER V8.5 (WAF-HARDENED SECURETRANSPORT) [{host}] [***]", "MAGENTA"))
     terminal(color(f"[*] Target Host: {host}", "CYAN"))
     terminal(f"[*] Ports scheduled: {len(ports)}")
@@ -642,44 +464,53 @@ async def run_port_scanner(
         terminal(f"    [{item['family']}] {item['address']}")
 
     semaphore = asyncio.Semaphore(concurrency)
-    results = []
     completed = 0
     total_probes = len(addresses) * len(ports)
 
     async def scan_one(address, port):
         nonlocal completed
         async with semaphore:
-            result = await probe_port(host, address, port)
+            probe = await probe_port(host, address, port)
             completed += 1
 
-            if result["open"]:
-                terminal(color(f"[OPEN] {address}:{port} — {result['details']['service']}", "GREEN"))
-                
-                # BROADCAST OPEN PORT DISCOVERY TO TELEGRAM & PERSIST TO DISK
-                port_loot = {
-                    "target": host,
-                    "address": address,
-                    "port": port,
-                    "service": result['details']['service'],
-                    "banner": result['details'].get('banner', ''),
-                    "http_status": result['details'].get('http', {}).get('status_code')
-                }
-                broadcast_tg_alert_sync("Port Scan Open Port Discovered", port_loot)
-                stream_proof("PORT_SCAN_OPEN", f"{address}:{port}", {}, f"Service: {result['details']['service']}", port_loot)
-                save_session_loot(
-                    target=f"tcp://{address}:{port}",
-                    endpoint=f"port_{port}",
-                    finding_type="OPEN_PORT_DISCOVERED",
-                    status=200,
-                    headers={},
-                    body=str(result['details']),
-                    extra_loot=port_loot
-                )
+            if probe["open"]:
+                banner = probe["details"].get("banner", "")
+                http_status = probe["details"].get("http", {}).get("status_code")
+                tls_proto = probe["details"].get("tls", {}).get("protocol")
+                terminal(color(f"[OPEN] {address}:{port} — {probe['details']['service']}", "GREEN"))
 
+                has_evidence = bool(banner or http_status or tls_proto)
+                if has_evidence:
+                    port_loot = {
+                        "target": host,
+                        "address": address,
+                        "port": port,
+                        "service": probe["details"]["service"],
+                        "banner": banner,
+                        "http_status": http_status,
+                        "tls_protocol": tls_proto,
+                    }
+                    broadcast_tg_alert_sync("Port Scan Open Port Discovered", port_loot)
+                    stream_proof(
+                        "PORT_SCAN_OPEN",
+                        f"{address}:{port}",
+                        {},
+                        f"Service: {probe['details']['service']}",
+                        port_loot,
+                    )
+                    save_session_loot(
+                        target=f"tcp://{address}:{port}",
+                        endpoint=f"port_{port}",
+                        finding_type="OPEN_PORT_DISCOVERED",
+                        status=http_status or 200,
+                        headers={},
+                        body=str(probe["details"]),
+                        extra_loot=port_loot,
+                    )
             elif completed % 30 == 0:
                 terminal(color(f"[*] Progress: {completed}/{total_probes} probes executed...", "CYAN"))
 
-            return result
+            return probe
 
     try:
         tasks = [
@@ -716,7 +547,6 @@ async def run_port_scanner(
 
     closed_count = sum(1 for state in port_states.values() if state == "CLOSED")
     filtered_count = sum(1 for state in port_states.values() if state == "FILTERED_OR_UNKNOWN")
-
     elapsed = round(time.monotonic() - started, 3)
 
     statistics = {
@@ -745,7 +575,10 @@ async def run_port_scanner(
         "port_states": port_states,
         "statistics": statistics,
         "duration": elapsed,
+        "cached": False,
     }
+
+    _SCAN_CACHE[cache_key] = dict(final_result)
 
     terminal(color("\n[+] NETWORK ASSESSMENT COMPLETED SUCCESSFULLY", "GREEN"))
     terminal(f"    Resolved addresses: {len(addresses)}")
@@ -759,35 +592,26 @@ async def run_port_scanner(
     return final_result
 
 
-# ============================================================
-# COMMAND-LINE INTERFACE PARSER & ENTRYPOINT
-# ============================================================
-
 def parse_port_argument(value):
     try:
-        return [
-            int(item.strip())
-            for item in value.split(",")
-            if item.strip()
-        ]
+        return [int(item.strip()) for item in value.split(",") if item.strip()]
     except ValueError:
         raise argparse.ArgumentTypeError("Ports must be comma-separated integers.")
 
 
 async def main():
-    parser = argparse.ArgumentParser(
-        description="BruteDog Scanner V8.5 Advanced Reconnaissance Engine"
-    )
+    parser = argparse.ArgumentParser(description="BruteDog Scanner V8.5 Advanced Reconnaissance Engine")
     parser.add_argument("target", help="Single authorized hostname or IP address")
     parser.add_argument("--ports", type=parse_port_argument, default=None, help="Comma-separated TCP ports")
     parser.add_argument("--concurrency", type=int, default=MAX_CONCURRENT, help="Maximum concurrent connections")
+    parser.add_argument("--force-rescan", action="store_true", help="Bypass scan cache")
 
     args = parser.parse_args()
-
     result = await run_port_scanner(
         args.target,
         ports=args.ports,
         concurrency=args.concurrency,
+        force_rescan=args.force_rescan,
     )
 
     if result["status"] != "COMPLETED":
